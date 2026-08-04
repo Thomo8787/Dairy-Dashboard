@@ -51,6 +51,21 @@ class DairyRecord(Base):
     batch = relationship("ImportBatch", back_populates="records")
 
 
+class GraphToken(Base):
+    """Stored Microsoft delegated tokens for the signed-in user (e.g. mark@alhfarm.co.uk)."""
+
+    __tablename__ = "graph_tokens"
+
+    id = Column(Integer, primary_key=True)
+    account_key = Column(String(64), unique=True, nullable=False, default="default")
+    user_email = Column(String(255))
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text)
+    expires_at = Column(DateTime(timezone=True))
+    scopes = Column(Text)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
 def _normalize_database_url(url: str) -> str:
     """Render uses postgres://; SQLAlchemy 2.x expects postgresql://. Ensure SSL on Render."""
     if url.startswith("postgres://"):

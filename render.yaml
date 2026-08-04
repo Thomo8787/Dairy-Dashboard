@@ -28,13 +28,11 @@ services:
         value: ""
       - key: AZURE_TENANT_ID
         value: ""
-      - key: OUTLOOK_MAILBOX
+      - key: AZURE_REDIRECT_URI
         value: ""
       - key: OUTLOOK_SENDER_FILTER
         value: ""
       - key: OUTLOOK_SUBJECT_FILTER
-        value: ""
-      - key: ONEDRIVE_USER
         value: ""
       - key: ONEDRIVE_FOLDER_PATH
         value: ""

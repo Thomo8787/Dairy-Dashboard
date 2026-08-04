@@ -50,6 +50,35 @@
       background: #0f766e;
     }
 
+    .btn.ghost {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+
+    .btn.linkish {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      background: #ecfdf5;
+      color: var(--success);
+      border: 1px solid #a7f3d0;
+    }
+
+    .status-pill.off {
+      background: #fef2f2;
+      color: var(--error);
+      border-color: #fecaca;
+    }
+
     h1 {
       margin: 0;
       font-size: 1.75rem;
@@ -162,14 +191,26 @@
     <header>
       <div>
         <h1>Dairy Dashboard</h1>
-        <p class="subtitle">Outlook + OneDrive imports, Excel parsing, PostgreSQL reporting</p>
+        <p class="subtitle">Outlook + OneDrive imports for ALH Farm</p>
+        {% if connected %}
+          <div class="status-pill">Connected as {{ connected.user_email }}</div>
+        {% else %}
+          <div class="status-pill off">Microsoft 365 not connected</div>
+        {% endif %}
       </div>
       <div class="actions">
+        {% if not connected %}
+          <a class="btn" href="{{ url_for('auth_login') }}">Connect Microsoft 365</a>
+        {% else %}
+          <form method="post" action="{{ url_for('auth_logout') }}">
+            <button class="btn linkish" type="submit">Disconnect</button>
+          </form>
+        {% endif %}
         <form method="post" action="{{ url_for('sync_from_outlook') }}">
-          <button class="btn" type="submit">Sync from Outlook</button>
+          <button class="btn" type="submit" {% if not connected %}disabled{% endif %}>Sync from Outlook</button>
         </form>
         <form method="post" action="{{ url_for('sync_from_onedrive') }}">
-          <button class="btn secondary" type="submit">Sync from OneDrive</button>
+          <button class="btn secondary" type="submit" {% if not connected %}disabled{% endif %}>Sync from OneDrive</button>
         </form>
       </div>
     </header>

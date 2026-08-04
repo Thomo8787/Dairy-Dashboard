@@ -1,25 +1,22 @@
-"""Import Outlook email attachments via Microsoft Graph."""
+"""Import Outlook email attachments via Microsoft Graph (delegated /me)."""
 
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 from services.graph_client import EXCEL_EXTENSIONS, GRAPH_BASE, graph_get, graph_get_bytes
 
 
 class GraphEmailService:
     def __init__(self, download_dir: str | Path | None = None):
-        self.mailbox = os.environ.get("OUTLOOK_MAILBOX", "")
         self.sender_filter = os.environ.get("OUTLOOK_SENDER_FILTER", "").lower()
         self.subject_filter = os.environ.get("OUTLOOK_SUBJECT_FILTER", "").lower()
         self.download_dir = Path(download_dir or "data")
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
     def _list_messages(self, top: int = 25) -> list[dict]:
-        mailbox = quote(self.mailbox or "me")
         url = (
-            f"{GRAPH_BASE}/users/{mailbox}/mailFolders/Inbox/messages"
+            f"{GRAPH_BASE}/me/mailFolders/Inbox/messages"
             f"?$top={top}&$orderby=receivedDateTime desc"
             f"&$select=id,subject,receivedDateTime,from,hasAttachments"
         )
@@ -47,8 +44,7 @@ class GraphEmailService:
         return True
 
     def _list_attachments(self, message_id: str) -> list[dict]:
-        mailbox = quote(self.mailbox or "me")
-        url = f"{GRAPH_BASE}/users/{mailbox}/messages/{message_id}/attachments"
+        url = f"{GRAPH_BASE}/me/messages/{message_id}/attachments"
         return graph_get(url).get("value", [])
 
     def _download_attachment(self, message_id: str, attachment: dict) -> Path | None:
@@ -57,9 +53,8 @@ class GraphEmailService:
         if extension not in EXCEL_EXTENSIONS:
             return None
 
-        mailbox = quote(self.mailbox or "me")
         attachment_id = attachment["id"]
-        url = f"{GRAPH_BASE}/users/{mailbox}/messages/{message_id}/attachments/{attachment_id}/$value"
+        url = f"{GRAPH_BASE}/me/messages/{message_id}/attachments/{attachment_id}/$value"
         content = graph_get_bytes(url)
 
         safe_name = Path(name).name
@@ -69,18 +64,6 @@ class GraphEmailService:
         return destination
 
     def fetch_excel_attachments(self, top: int = 25) -> list[dict]:
-        """
-        Download Excel attachments from recent inbox messages.
-
-        Returns a list of dicts:
-        {
-            "file_path": Path,
-            "filename": str,
-            "email_subject": str,
-            "email_received_at": datetime,
-            "message_id": str,
-        }
-        """
         downloads: list[dict] = []
         for message in self._list_messages(top=top):
             if not self._message_matches_filters(message):

@@ -87,65 +87,56 @@ Use the **Internal** database URL (not External) so traffic stays on Render’s 
 
 ## Part 3 — Microsoft Graph / Azure AD (you do this)
 
-The dashboard reads Excel attachments from Outlook using **application permissions** (no user sign-in). Set this up in the Azure portal.
+The dashboard uses **delegated permissions**: you sign in as `mark@alhfarm.co.uk` once. That reads **your** mailbox and OneDrive without admin consent for application permissions.
 
-### 3.1 Register an app
+### 3.1 App registration settings
 
-1. Go to [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → **New registration**.
-2. Name: e.g. `Dairy Dashboard`.
-3. Supported account types: **Accounts in this organizational directory only**.
-4. Redirect URI: leave blank (not used for this flow).
-5. Click **Register** and note:
-   - **Application (client) ID** → `AZURE_CLIENT_ID`
-   - **Directory (tenant) ID** → `AZURE_TENANT_ID`
+1. Azure Portal → **App registrations** → your Farm Dashboard app.
+2. **Authentication** → **Add a platform** → **Web**.
+3. Redirect URI (must match Render):
+   ```
+   https://YOUR-SERVICE.onrender.com/auth/callback
+   ```
+4. Save.
+5. **Certificates & secrets** → create a client secret and copy the **Value** (not the Secret ID).
+6. **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**:
+   - `User.Read`
+   - `Mail.Read`
+   - `Files.Read`
+   - `offline_access`
+7. Click **Add permissions**.
 
-### 3.2 Create a client secret
+You do **not** need admin consent for these delegated permissions to access your own mailbox/OneDrive (unless your tenant blocks user consent — then ask IT).
 
-1. Open the app → **Certificates & secrets** → **New client secret**.
-2. Copy the **Value** immediately → `AZURE_CLIENT_SECRET`.
+Remove any **Application** permissions (`Mail.Read` / `Files.Read.All` as Application) if you cannot get admin consent; they are not used in this flow.
 
-Secrets expire; set a calendar reminder to rotate before expiry.
+### 3.2 Render environment variables
 
-### 3.3 Add API permissions
+| Key | Value |
+|---|---|
+| `AZURE_CLIENT_ID` | Application (client) ID |
+| `AZURE_CLIENT_SECRET` | Secret **Value** |
+| `AZURE_TENANT_ID` | Directory (tenant) ID |
+| `AZURE_REDIRECT_URI` | `https://YOUR-SERVICE.onrender.com/auth/callback` |
+| `OUTLOOK_SENDER_FILTER` | *(optional)* e.g. supplier email |
+| `OUTLOOK_SUBJECT_FILTER` | *(optional)* subject must contain this |
+| `ONEDRIVE_FOLDER_PATH` | *(optional)* e.g. `Dairy Reports` |
 
-1. **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**.
-2. Add these **Application** permissions:
-   - `Mail.Read` — required to download Outlook attachments
-   - `Files.Read.All` — required to read Excel files from OneDrive
-3. Click **Grant admin consent for [your tenant]** (requires Global Admin or Privileged Role Administrator).
+### 3.3 Connect and sync
 
-Without admin consent, sync will fail with an authentication or permission error.
+1. Open the live dashboard.
+2. Click **Connect Microsoft 365** and sign in as `mark@alhfarm.co.uk`.
+3. Accept the permissions prompt.
+4. Use **Sync from Outlook** and/or **Sync from OneDrive**.
 
-### 3.3b OneDrive folder settings
+### 3.4 If your org blocks user consent
 
-1. Decide which Microsoft 365 user's OneDrive holds the Excel files.
-2. Set on Render / `.env`:
-   - `ONEDRIVE_USER` — that user's email, e.g. `reports@yourcompany.com`
-   - `ONEDRIVE_FOLDER_PATH` — folder path under their OneDrive, e.g. `Dairy Reports`  
-     Leave blank to read Excel files in the OneDrive root.
-3. Put the Excel files in that folder (`.xlsx` / `.xls` / `.xlsm`).
-4. On the dashboard, click **Sync from OneDrive**.
+Ask an admin to either:
+- Allow user consent for this app, **or**
+- Grant admin consent for the delegated permissions above, **or**
+- Grant admin consent for Application `Mail.Read` + `Files.Read.All` (old app-only path).
 
-### 3.4 Set the mailbox
-
-Set `OUTLOOK_MAILBOX` to the user or shared mailbox email address, for example:
-
-```
-OUTLOOK_MAILBOX=reports@yourcompany.com
-```
-
-For application access to a **shared mailbox**, ensure the app has permission to read that mailbox (often via `Mail.Read` application permission on the tenant).
-
-### 3.5 Add values to Render
-
-1. Render dashboard → **dairy-dashboard** web service → **Environment**.
-2. Set:
-   - `AZURE_CLIENT_ID`
-   - `AZURE_CLIENT_SECRET`
-   - `AZURE_TENANT_ID`
-   - `OUTLOOK_MAILBOX`
-3. Optionally set `OUTLOOK_SENDER_FILTER` and `OUTLOOK_SUBJECT_FILTER`.
-4. Save — Render redeploys automatically.
+Without one of those, Microsoft will block the sign-in consent screen.
 
 ---
 

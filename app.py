@@ -2,10 +2,11 @@
 
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for
 
 from services.database import (
     get_dashboard_summary,
@@ -15,7 +16,15 @@ from services.database import (
     save_dataframe,
 )
 from services.excel_parser import parse_excel_file
-from services.graph_client import require_azure_config
+from services.graph_client import (
+    build_auth_url,
+    clear_saved_token,
+    exchange_code_for_token,
+    get_connected_account,
+    get_redirect_uri,
+    require_azure_config,
+    save_token_result,
+)
 from services.graph_email import GraphEmailService
 from services.graph_onedrive import GraphOneDriveService
 
@@ -69,12 +78,70 @@ def ensure_database():
 def dashboard():
     summary = get_dashboard_summary()
     records = get_recent_records(limit=100)
+    connected = None
+    try:
+        connected = get_connected_account()
+    except Exception:
+        logger.exception("Could not load Microsoft connection status")
+
     return render_template(
         "dashboard.html",
         summary=summary,
         records=records,
-        onedrive_configured=bool(os.environ.get("ONEDRIVE_USER")),
+        connected=connected,
+        redirect_uri=get_redirect_uri(),
     )
+
+
+@app.route("/auth/login")
+def auth_login():
+    missing = require_azure_config()
+    if missing:
+        flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
+        return redirect(url_for("dashboard"))
+
+    state = secrets.token_urlsafe(24)
+    session["oauth_state"] = state
+    return redirect(build_auth_url(state))
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    error = request.args.get("error")
+    if error:
+        flash(f"Microsoft sign-in error: {error} — {request.args.get('error_description', '')}", "error")
+        return redirect(url_for("dashboard"))
+
+    state = request.args.get("state")
+    if not state or state != session.get("oauth_state"):
+        flash("Microsoft sign-in failed: invalid state. Try Connect Microsoft 365 again.", "error")
+        return redirect(url_for("dashboard"))
+
+    code = request.args.get("code")
+    if not code:
+        flash("Microsoft sign-in failed: no authorization code returned.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        result = exchange_code_for_token(code)
+        user_email = save_token_result(result)
+        session.pop("oauth_state", None)
+        flash(f"Connected as {user_email}. You can sync Outlook and OneDrive.", "success")
+    except Exception as exc:
+        logger.exception("OAuth callback failed")
+        flash(f"Microsoft sign-in failed: {exc}", "error")
+
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    try:
+        clear_saved_token()
+        flash("Disconnected Microsoft 365.", "info")
+    except Exception as exc:
+        flash(f"Disconnect failed: {exc}", "error")
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/sync", methods=["POST"])
@@ -82,6 +149,10 @@ def sync_from_outlook():
     missing = require_azure_config()
     if missing:
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
+        return redirect(url_for("dashboard"))
+
+    if not get_connected_account():
+        flash("Connect Microsoft 365 first, then sync Outlook.", "error")
         return redirect(url_for("dashboard"))
 
     try:
@@ -106,8 +177,8 @@ def sync_from_onedrive():
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("dashboard"))
 
-    if not os.environ.get("ONEDRIVE_USER"):
-        flash("ONEDRIVE_USER is not set. Add it in Render Environment settings.", "error")
+    if not get_connected_account():
+        flash("Connect Microsoft 365 first, then sync OneDrive.", "error")
         return redirect(url_for("dashboard"))
 
     try:
