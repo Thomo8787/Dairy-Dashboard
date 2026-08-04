@@ -112,7 +112,8 @@ Optional hardening: create an Exchange Application Access Policy so the app can 
 | `AZURE_TENANT_ID` | Directory (tenant) ID |
 | `OUTLOOK_MAILBOX` | `parlours@alhfarm.com` (or whichever inbox receives the emails) |
 | `ONEDRIVE_USER` | `parlours@alhfarm.com` |
-| `ONEDRIVE_FOLDER_PATH` | Folder under Parlours OneDrive, e.g. `Dairy Reports` (blank = root) |
+| `ONEDRIVE_SHARE_URL` | Paste the OneDrive/SharePoint **folder** sharing link (preferred) |
+| `ONEDRIVE_FOLDER_PATH` | Only if not using share URL — e.g. `Dairy Reports` |
 | `OUTLOOK_SENDER_FILTER` | *(optional)* only emails from this sender |
 | `OUTLOOK_SUBJECT_FILTER` | *(optional)* subject must contain this |
 

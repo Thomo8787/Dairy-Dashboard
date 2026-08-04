@@ -39,6 +39,8 @@ services:
         value: ""
       - key: ONEDRIVE_USER
         value: parlours@alhfarm.com
+      - key: ONEDRIVE_SHARE_URL
+        value: ""
       - key: ONEDRIVE_FOLDER_PATH
         value: ""
 
