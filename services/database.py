@@ -52,13 +52,15 @@ class DairyRecord(Base):
 
 
 def _normalize_database_url(url: str) -> str:
-    """Render uses postgres://; SQLAlchemy 2.x expects postgresql://. Ensure SSL."""
+    """Render uses postgres://; SQLAlchemy 2.x expects postgresql://. Ensure SSL on Render."""
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
 
     parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    is_local = host in {"localhost", "127.0.0.1"} or host.endswith(".local")
     query = parse_qs(parsed.query)
-    if "sslmode" not in query:
+    if not is_local and "sslmode" not in query:
         query["sslmode"] = ["require"]
     return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
