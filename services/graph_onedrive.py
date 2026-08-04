@@ -21,10 +21,13 @@ class GraphOneDriveService:
         self.user = os.environ.get("ONEDRIVE_USER", "").strip()
         self.folder_path = os.environ.get("ONEDRIVE_FOLDER_PATH", "").strip().strip("/")
         self.share_url = os.environ.get("ONEDRIVE_SHARE_URL", "").strip()
+        # Optional comma-separated filename fragments, e.g. "dairy,yield,weekly"
+        raw_filter = os.environ.get("ONEDRIVE_FILENAME_FILTER", "").strip().lower()
+        self.filename_filters = [part.strip() for part in raw_filter.split(",") if part.strip()]
+        self.max_files = int(os.environ.get("ONEDRIVE_MAX_FILES", "100"))
         self.download_dir = Path(download_dir or "data")
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
-        # Resolved when using a sharing link.
         self._drive_id: str | None = None
         self._folder_item_id: str | None = None
         self._folder_name: str | None = None
@@ -56,7 +59,7 @@ class GraphOneDriveService:
         self._folder_item_id = item_id
         self._folder_name = item.get("name") or "shared-folder"
 
-    def _children_url(self) -> str:
+    def _root_children_url(self) -> str:
         if self.share_url:
             self._resolve_share_folder()
             return f"{GRAPH_BASE}/drives/{self._drive_id}/items/{self._folder_item_id}/children"
@@ -71,28 +74,70 @@ class GraphOneDriveService:
             return f"{GRAPH_BASE}/{root}/root:/{encoded_path}:/children"
         return f"{GRAPH_BASE}/{root}/root/children"
 
-    def _list_excel_items(self) -> list[dict]:
-        url = (
-            f"{self._children_url()}"
+    def _item_children_url(self, drive_id: str, item_id: str) -> str:
+        return f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children"
+
+    def _matches_filename_filter(self, name: str) -> bool:
+        if not self.filename_filters:
+            return True
+        lowered = name.lower()
+        return any(fragment in lowered for fragment in self.filename_filters)
+
+    def _list_folder_page(self, url: str) -> list[dict]:
+        """Fetch all pages of children for a folder URL."""
+        items: list[dict] = []
+        next_url = (
+            f"{url}"
             f"?$select=id,name,file,folder,lastModifiedDateTime,size,parentReference"
-            f"&$orderby=lastModifiedDateTime desc"
-            f"&$top=50"
+            f"&$top=100"
         )
-        items = graph_get(url).get("value", [])
-        excel_files = []
-        for item in items:
-            if item.get("folder"):
-                continue
-            name = item.get("name", "")
-            if Path(name).suffix.lower() not in EXCEL_EXTENSIONS:
-                continue
-            excel_files.append(item)
+        # First request may already include query params from caller.
+        if "?" in url:
+            next_url = (
+                f"{url}"
+                f"&$select=id,name,file,folder,lastModifiedDateTime,size,parentReference"
+                f"&$top=100"
+            )
+
+        while next_url:
+            payload = graph_get(next_url)
+            items.extend(payload.get("value", []))
+            next_url = payload.get("@odata.nextLink")
+        return items
+
+    def _walk_excel_files(self) -> list[dict]:
+        """Recursively collect Excel files under the configured root folder."""
+        excel_files: list[dict] = []
+        queue = [self._root_children_url()]
+
+        while queue and len(excel_files) < self.max_files:
+            children_url = queue.pop(0)
+            for item in self._list_folder_page(children_url):
+                name = item.get("name", "")
+                if item.get("folder"):
+                    parent = item.get("parentReference") or {}
+                    drive_id = parent.get("driveId") or self._drive_id
+                    item_id = item.get("id")
+                    if drive_id and item_id:
+                        queue.append(self._item_children_url(drive_id, item_id))
+                    continue
+
+                if Path(name).suffix.lower() not in EXCEL_EXTENSIONS:
+                    continue
+                if not self._matches_filename_filter(name):
+                    continue
+
+                excel_files.append(item)
+                if len(excel_files) >= self.max_files:
+                    break
+
         return excel_files
 
     def _download_item(self, item: dict) -> Path:
-        if self.share_url:
-            self._resolve_share_folder()
-            drive_id = (item.get("parentReference") or {}).get("driveId") or self._drive_id
+        parent = item.get("parentReference") or {}
+        drive_id = parent.get("driveId") or self._drive_id
+
+        if drive_id:
             content_url = f"{GRAPH_BASE}/drives/{drive_id}/items/{item['id']}/content"
         elif auth_mode() == "delegated" and not self.user:
             content_url = f"{GRAPH_BASE}/me/drive/items/{item['id']}/content"
@@ -120,7 +165,7 @@ class GraphOneDriveService:
                 else f"OneDrive({owner}):/root"
             )
 
-        for item in self._list_excel_items():
+        for item in self._walk_excel_files():
             file_path = self._download_item(item)
 
             modified_raw = item.get("lastModifiedDateTime")

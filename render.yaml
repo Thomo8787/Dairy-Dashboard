@@ -43,6 +43,10 @@ services:
         value: ""
       - key: ONEDRIVE_FOLDER_PATH
         value: ""
+      - key: ONEDRIVE_FILENAME_FILTER
+        value: ""
+      - key: ONEDRIVE_MAX_FILES
+        value: "100"
 
 databases:
   - name: dairy-dashboard-db
