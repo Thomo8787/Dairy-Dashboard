@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dairy Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --success: #059669;
+      --error: #dc2626;
+      --border: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 3rem;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.75rem;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    .btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    .btn:hover { opacity: 0.92; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .card-label {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .card-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+
+    .section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .section h2 {
+      margin: 0 0 1rem;
+      font-size: 1.1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .flash {
+      padding: 0.85rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .flash.success {
+      background: #ecfdf5;
+      color: var(--success);
+      border: 1px solid #a7f3d0;
+    }
+
+    .flash.error {
+      background: #fef2f2;
+      color: var(--error);
+      border: 1px solid #fecaca;
+    }
+
+    .flash.info {
+      background: #eff6ff;
+      color: var(--accent);
+      border: 1px solid #bfdbfe;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Dairy Dashboard</h1>
+        <p class="subtitle">Outlook imports, Excel parsing, and PostgreSQL reporting</p>
+      </div>
+      <form method="post" action="{{ url_for('sync_from_outlook') }}">
+        <button class="btn" type="submit">Sync from Outlook</button>
+      </form>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <section class="cards">
+      <div class="card">
+        <div class="card-label">Total records</div>
+        <div class="card-value">{{ summary.total_records }}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Import batches</div>
+        <div class="card-value">{{ summary.total_batches }}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Latest import</div>
+        <div class="card-value" style="font-size: 1rem;">
+          {% if summary.latest_import %}
+            {{ summary.latest_import.strftime('%Y-%m-%d %H:%M UTC') }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Category totals</h2>
+      {% if summary.category_totals %}
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Total value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for category, total in summary.category_totals %}
+              <tr>
+                <td>{{ category or 'Uncategorized' }}</td>
+                <td>{{ '%.2f'|format(total or 0) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No data yet. Run a sync to import Excel attachments from Outlook.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Recent imports</h2>
+      {% if summary.recent_batches %}
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Email subject</th>
+              <th>Rows</th>
+              <th>Imported</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for batch in summary.recent_batches %}
+              <tr>
+                <td>{{ batch.filename }}</td>
+                <td>{{ batch.email_subject or '—' }}</td>
+                <td>{{ batch.row_count }}</td>
+                <td>{{ batch.imported_at.strftime('%Y-%m-%d %H:%M UTC') if batch.imported_at else '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No imports yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <h2>Recent records</h2>
+      {% if records %}
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Metric</th>
+              <th>Value</th>
+              <th>Unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in records %}
+              <tr>
+                <td>{{ record.record_date.strftime('%Y-%m-%d') if record.record_date else '—' }}</td>
+                <td>{{ record.category or '—' }}</td>
+                <td>{{ record.metric_name or '—' }}</td>
+                <td>{{ record.metric_value if record.metric_value is not none else '—' }}</td>
+                <td>{{ record.unit or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No records to display.</p>
+      {% endif %}
+    </section>
+  </div>
+</body>
+</html>
