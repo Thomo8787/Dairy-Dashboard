@@ -3,6 +3,9 @@
 venv/
 env/
 
+# Accidental nested folder
+/Dairy Dashboard/
+
 # Environment & secrets
 .env
 

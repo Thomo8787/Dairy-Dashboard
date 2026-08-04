@@ -1,7 +1,8 @@
 """Dairy dashboard web application."""
 
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, url_for
@@ -18,15 +19,30 @@ from services.graph_email import GraphEmailService
 
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 
-@app.before_request
-def ensure_database():
-    if not getattr(app, "_db_initialized", False):
+def _ensure_database():
+    """Create tables once when DATABASE_URL is available."""
+    if getattr(app, "_db_initialized", False):
+        return
+    if not os.environ.get("DATABASE_URL"):
+        return
+    try:
         init_db()
         app._db_initialized = True
+        logger.info("Database tables ready")
+    except Exception:
+        logger.exception("Database init failed; will retry on next request")
+
+
+@app.before_request
+def ensure_database():
+    _ensure_database()
 
 
 @app.route("/")
@@ -70,6 +86,7 @@ def sync_from_outlook():
 
         flash(f"Imported {imported} Excel file(s) from Outlook.", "success")
     except Exception as exc:
+        logger.exception("Outlook sync failed")
         flash(f"Sync failed: {exc}", "error")
 
     return redirect(url_for("dashboard"))
@@ -78,10 +95,19 @@ def sync_from_outlook():
 @app.route("/health")
 def health():
     try:
+        _ensure_database()
         health_check()
-        return {"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"}, 200
+        return {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }, 200
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}, 503
+
+
+# Warm the DB connection when the worker process starts (gunicorn).
+with app.app_context():
+    _ensure_database()
 
 
 if __name__ == "__main__":

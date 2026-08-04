@@ -3,6 +3,7 @@
 import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import (
     Column,
@@ -19,6 +20,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
+
+_engine = None
+_SessionLocal = None
 
 
 class ImportBatch(Base):
@@ -48,17 +52,33 @@ class DairyRecord(Base):
 
 
 def _normalize_database_url(url: str) -> str:
-    """Render uses postgres://; SQLAlchemy 2.x expects postgresql://."""
+    """Render uses postgres://; SQLAlchemy 2.x expects postgresql://. Ensure SSL."""
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql://", 1)
-    return url
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    if "sslmode" not in query:
+        query["sslmode"] = ["require"]
+    return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
 
 def get_engine():
+    global _engine, _SessionLocal
+    if _engine is not None:
+        return _engine
+
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL environment variable is not set")
-    return create_engine(_normalize_database_url(database_url), pool_pre_ping=True)
+
+    _engine = create_engine(
+        _normalize_database_url(database_url),
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+    _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    return _engine
 
 
 def init_db():
@@ -69,9 +89,8 @@ def init_db():
 
 @contextmanager
 def get_session() -> Session:
-    engine = get_engine()
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    session = SessionLocal()
+    get_engine()
+    session = _SessionLocal()
     try:
         yield session
         session.commit()
@@ -93,11 +112,12 @@ def save_dataframe(batch_meta: dict, records: list[dict]) -> int:
         )
         session.add(batch)
         session.flush()
+        batch_id = batch.id
 
         for row in records:
             session.add(
                 DairyRecord(
-                    batch_id=batch.id,
+                    batch_id=batch_id,
                     record_date=row.get("record_date"),
                     category=row.get("category"),
                     metric_name=row.get("metric_name"),
@@ -107,7 +127,7 @@ def save_dataframe(batch_meta: dict, records: list[dict]) -> int:
                 )
             )
 
-        return batch.id
+        return batch_id
 
 
 def get_dashboard_summary() -> dict:
@@ -131,6 +151,8 @@ def get_dashboard_summary() -> dict:
             .all()
         )
 
+        session.expunge_all()
+
         return {
             "total_records": total_records,
             "total_batches": total_batches,
@@ -142,12 +164,14 @@ def get_dashboard_summary() -> dict:
 
 def get_recent_records(limit: int = 100) -> list[DairyRecord]:
     with get_session() as session:
-        return (
+        records = (
             session.query(DairyRecord)
             .order_by(DairyRecord.record_date.desc().nullslast(), DairyRecord.id.desc())
             .limit(limit)
             .all()
         )
+        session.expunge_all()
+        return records
 
 
 def health_check() -> bool:

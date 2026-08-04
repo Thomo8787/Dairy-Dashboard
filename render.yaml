@@ -1,10 +1,14 @@
+# Render Blueprint — used by New → Blueprint, or auto-detected from this repo.
+# Repo: https://github.com/Thomo8787/Dairy-Dashboard
+
 services:
   - type: web
     name: dairy-dashboard
     runtime: python
     plan: free
+    branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
@@ -17,18 +21,19 @@ services:
         fromDatabase:
           name: dairy-dashboard-db
           property: connectionString
+      # Fill these in Render → Environment after first deploy (Azure / Outlook).
       - key: AZURE_CLIENT_ID
-        sync: false
+        value: ""
       - key: AZURE_CLIENT_SECRET
-        sync: false
+        value: ""
       - key: AZURE_TENANT_ID
-        sync: false
+        value: ""
       - key: OUTLOOK_MAILBOX
-        sync: false
+        value: ""
       - key: OUTLOOK_SENDER_FILTER
-        sync: false
+        value: ""
       - key: OUTLOOK_SUBJECT_FILTER
-        sync: false
+        value: ""
 
 databases:
   - name: dairy-dashboard-db

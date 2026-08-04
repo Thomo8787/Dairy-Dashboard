@@ -179,7 +179,7 @@ Open [http://localhost:5000](http://localhost:5000).
 ## Render free tier notes
 
 - **Web services** spin down after ~15 minutes of no traffic; the first request after idle may take 30–60 seconds.
-- **PostgreSQL free** databases expire after 90 days unless upgraded.
+- **PostgreSQL free** databases expire after 30 days unless upgraded.
 - Ephemeral disk on the web service is fine — Excel files are downloaded temporarily during sync, then parsed into Postgres.
 
 ---
