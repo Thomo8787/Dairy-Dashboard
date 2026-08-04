@@ -17,6 +17,7 @@ from services.database import (
 )
 from services.excel_parser import parse_excel_file
 from services.graph_client import (
+    auth_mode,
     build_auth_url,
     clear_saved_token,
     exchange_code_for_token,
@@ -89,6 +90,7 @@ def dashboard():
         summary=summary,
         records=records,
         connected=connected,
+        auth_mode=auth_mode(),
         redirect_uri=get_redirect_uri(),
     )
 
@@ -151,7 +153,7 @@ def sync_from_outlook():
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("dashboard"))
 
-    if not get_connected_account():
+    if auth_mode() == "delegated" and not get_connected_account():
         flash("Connect Microsoft 365 first, then sync Outlook.", "error")
         return redirect(url_for("dashboard"))
 
@@ -177,7 +179,7 @@ def sync_from_onedrive():
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("dashboard"))
 
-    if not get_connected_account():
+    if auth_mode() == "delegated" and not get_connected_account():
         flash("Connect Microsoft 365 first, then sync OneDrive.", "error")
         return redirect(url_for("dashboard"))
 

@@ -1,25 +1,36 @@
-"""Import Excel files from OneDrive via Microsoft Graph (delegated /me)."""
+"""Import Excel files from OneDrive via Microsoft Graph."""
 
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from services.graph_client import EXCEL_EXTENSIONS, GRAPH_BASE, graph_get, graph_get_bytes
+from services.graph_client import EXCEL_EXTENSIONS, GRAPH_BASE, auth_mode, graph_get, graph_get_bytes
 
 
 class GraphOneDriveService:
     def __init__(self, download_dir: str | Path | None = None):
-        # Folder under the signed-in user's OneDrive. Blank = drive root.
+        self.user = os.environ.get("ONEDRIVE_USER", "").strip()
         self.folder_path = os.environ.get("ONEDRIVE_FOLDER_PATH", "").strip().strip("/")
         self.download_dir = Path(download_dir or "data")
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
+        if auth_mode() == "application" and not self.user:
+            raise RuntimeError(
+                "ONEDRIVE_USER is not set. Expected parlours@alhfarm.com (OneDrive owner)."
+            )
+
+    def _drive_root(self) -> str:
+        if auth_mode() == "delegated" and not self.user:
+            return "me/drive"
+        return f"users/{quote(self.user)}/drive"
+
     def _children_url(self) -> str:
+        root = self._drive_root()
         if self.folder_path:
             encoded_path = quote(self.folder_path)
-            return f"{GRAPH_BASE}/me/drive/root:/{encoded_path}:/children"
-        return f"{GRAPH_BASE}/me/drive/root/children"
+            return f"{GRAPH_BASE}/{root}/root:/{encoded_path}:/children"
+        return f"{GRAPH_BASE}/{root}/root/children"
 
     def _list_excel_items(self) -> list[dict]:
         url = (
@@ -40,8 +51,9 @@ class GraphOneDriveService:
         return excel_files
 
     def _download_item(self, item: dict) -> Path:
+        root = self._drive_root()
         item_id = item["id"]
-        content = graph_get_bytes(f"{GRAPH_BASE}/me/drive/items/{item_id}/content")
+        content = graph_get_bytes(f"{GRAPH_BASE}/{root}/items/{item_id}/content")
 
         safe_name = Path(item.get("name", "onedrive.xlsx")).name
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -51,7 +63,10 @@ class GraphOneDriveService:
 
     def fetch_excel_files(self) -> list[dict]:
         downloads: list[dict] = []
-        folder_label = f"OneDrive:/{self.folder_path}" if self.folder_path else "OneDrive:/root"
+        owner = self.user or "me"
+        folder_label = (
+            f"OneDrive({owner}):/{self.folder_path}" if self.folder_path else f"OneDrive({owner}):/root"
+        )
 
         for item in self._list_excel_items():
             file_path = self._download_item(item)

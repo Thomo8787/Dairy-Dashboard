@@ -1,4 +1,9 @@
-"""Shared Microsoft Graph helpers — delegated (signed-in user) auth."""
+"""Shared Microsoft Graph helpers.
+
+Supports two modes (GRAPH_AUTH_MODE):
+- application (default): client credentials — needs admin consent for Mail.Read + Files.Read.All
+- delegated: user signs in once — for testing without admin consent
+"""
 
 import os
 from datetime import datetime, timedelta, timezone
@@ -10,14 +15,19 @@ from services.database import get_session
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 EXCEL_EXTENSIONS = {".xlsx", ".xls", ".xlsm"}
+APP_SCOPE = ["https://graph.microsoft.com/.default"]
 
-# Delegated scopes — normally do NOT need admin consent for your own mailbox/OneDrive.
 DELEGATED_SCOPES = [
     "User.Read",
     "Mail.Read",
     "Files.Read",
     "offline_access",
 ]
+
+
+def auth_mode() -> str:
+    mode = os.environ.get("GRAPH_AUTH_MODE", "application").strip().lower()
+    return mode if mode in {"application", "delegated"} else "application"
 
 
 def require_azure_config() -> list[str]:
@@ -65,7 +75,6 @@ def exchange_code_for_token(code: str) -> dict:
 
 
 def save_token_result(result: dict, account_hint: str | None = None) -> str:
-    """Persist tokens and return the signed-in user's email/UPN."""
     from services.database import GraphToken
 
     claims = result.get("id_token_claims") or {}
@@ -105,6 +114,14 @@ def clear_saved_token() -> None:
 
 
 def get_connected_account() -> dict | None:
+    if auth_mode() == "application":
+        return {
+            "user_email": os.environ.get("ONEDRIVE_USER") or os.environ.get("OUTLOOK_MAILBOX") or "app-only",
+            "mode": "application",
+            "expires_at": None,
+            "has_refresh_token": False,
+        }
+
     from services.database import GraphToken
 
     with get_session() as session:
@@ -113,20 +130,28 @@ def get_connected_account() -> dict | None:
             return None
         return {
             "user_email": row.user_email,
+            "mode": "delegated",
             "expires_at": row.expires_at,
             "has_refresh_token": bool(row.refresh_token),
         }
 
 
-def get_access_token() -> str:
-    """Return a valid delegated access token, refreshing if needed."""
+def _get_application_token() -> str:
+    result = _msal_app().acquire_token_for_client(scopes=APP_SCOPE)
+    if "access_token" not in result:
+        error = result.get("error_description") or result.get("error") or "Unknown auth error"
+        raise RuntimeError(f"Microsoft Graph app authentication failed: {error}")
+    return result["access_token"]
+
+
+def _get_delegated_token() -> str:
     from services.database import GraphToken
 
     with get_session() as session:
         row = session.query(GraphToken).filter_by(account_key="default").one_or_none()
         if not row or not row.access_token:
             raise RuntimeError(
-                "Microsoft 365 is not connected. Click Connect Microsoft 365 and sign in as mark@alhfarm.co.uk."
+                "Microsoft 365 is not connected. Click Connect Microsoft 365, or set GRAPH_AUTH_MODE=application after admin consent."
             )
 
         now = datetime.now(timezone.utc)
@@ -138,17 +163,12 @@ def get_access_token() -> str:
             return row.access_token
 
         if not row.refresh_token:
-            raise RuntimeError(
-                "Microsoft session expired. Click Connect Microsoft 365 and sign in again."
-            )
+            raise RuntimeError("Microsoft session expired. Click Connect Microsoft 365 again.")
 
-        result = _msal_app().acquire_token_by_refresh_token(
-            row.refresh_token,
-            scopes=DELEGATED_SCOPES,
-        )
+        result = _msal_app().acquire_token_by_refresh_token(row.refresh_token, scopes=DELEGATED_SCOPES)
         if "access_token" not in result:
             error = result.get("error_description") or result.get("error") or "Refresh failed"
-            raise RuntimeError(f"Microsoft token refresh failed: {error}. Reconnect Microsoft 365.")
+            raise RuntimeError(f"Microsoft token refresh failed: {error}")
 
         expires_in = int(result.get("expires_in") or 3600)
         row.access_token = result["access_token"]
@@ -156,6 +176,12 @@ def get_access_token() -> str:
             row.refresh_token = result["refresh_token"]
         row.expires_at = now + timedelta(seconds=max(expires_in - 60, 60))
         return row.access_token
+
+
+def get_access_token() -> str:
+    if auth_mode() == "application":
+        return _get_application_token()
+    return _get_delegated_token()
 
 
 def graph_headers() -> dict:

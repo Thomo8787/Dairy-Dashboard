@@ -85,58 +85,44 @@ Use the **Internal** database URL (not External) so traffic stays on Render’s 
 
 ---
 
-## Part 3 — Microsoft Graph / Azure AD (you do this)
+## Part 3 — Microsoft Graph / Azure AD (admin consent path)
 
-The dashboard uses **delegated permissions**: you sign in as `mark@alhfarm.co.uk` once. That reads **your** mailbox and OneDrive without admin consent for application permissions.
+With `GRAPH_AUTH_MODE=application`, an admin grants **Application** permissions once. The app then reads the Parlours mailbox/OneDrive with no interactive sign-in.
 
-### 3.1 App registration settings
+### 3.1 Permissions the admin must grant
 
-1. Azure Portal → **App registrations** → your Farm Dashboard app.
-2. **Authentication** → **Add a platform** → **Web**.
-3. Redirect URI (must match Render):
-   ```
-   https://YOUR-SERVICE.onrender.com/auth/callback
-   ```
-4. Save.
-5. **Certificates & secrets** → create a client secret and copy the **Value** (not the Secret ID).
-6. **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**:
-   - `User.Read`
-   - `Mail.Read`
-   - `Files.Read`
-   - `offline_access`
-7. Click **Add permissions**.
+In the Farm Dashboard app registration → **API permissions** → **Microsoft Graph** → **Application permissions**:
 
-You do **not** need admin consent for these delegated permissions to access your own mailbox/OneDrive (unless your tenant blocks user consent — then ask IT).
+| Permission | Purpose |
+|---|---|
+| `Mail.Read` | Read Outlook inbox + download Excel attachments |
+| `Files.Read.All` | Read OneDrive files for `parlours@alhfarm.com` |
 
-Remove any **Application** permissions (`Mail.Read` / `Files.Read.All` as Application) if you cannot get admin consent; they are not used in this flow.
+Then click **Grant admin consent for [tenant]**. Status must show green checks.
+
+Optional hardening: create an Exchange Application Access Policy so the app can only access `parlours@alhfarm.com`.
 
 ### 3.2 Render environment variables
 
 | Key | Value |
 |---|---|
+| `GRAPH_AUTH_MODE` | `application` |
 | `AZURE_CLIENT_ID` | Application (client) ID |
-| `AZURE_CLIENT_SECRET` | Secret **Value** |
+| `AZURE_CLIENT_SECRET` | Secret **Value** (not Secret ID) |
 | `AZURE_TENANT_ID` | Directory (tenant) ID |
-| `AZURE_REDIRECT_URI` | `https://YOUR-SERVICE.onrender.com/auth/callback` |
-| `OUTLOOK_SENDER_FILTER` | *(optional)* e.g. supplier email |
+| `OUTLOOK_MAILBOX` | `parlours@alhfarm.com` (or whichever inbox receives the emails) |
+| `ONEDRIVE_USER` | `parlours@alhfarm.com` |
+| `ONEDRIVE_FOLDER_PATH` | Folder under Parlours OneDrive, e.g. `Dairy Reports` (blank = root) |
+| `OUTLOOK_SENDER_FILTER` | *(optional)* only emails from this sender |
 | `OUTLOOK_SUBJECT_FILTER` | *(optional)* subject must contain this |
-| `ONEDRIVE_FOLDER_PATH` | *(optional)* e.g. `Dairy Reports` |
 
-### 3.3 Connect and sync
+### 3.3 Sync
 
-1. Open the live dashboard.
-2. Click **Connect Microsoft 365** and sign in as `mark@alhfarm.co.uk`.
-3. Accept the permissions prompt.
-4. Use **Sync from Outlook** and/or **Sync from OneDrive**.
+After admin consent and env vars are set, open the dashboard and use **Sync from Outlook** / **Sync from OneDrive** — no Connect button needed in application mode.
 
-### 3.4 If your org blocks user consent
+### 3.4 Fallback without admin (delegated)
 
-Ask an admin to either:
-- Allow user consent for this app, **or**
-- Grant admin consent for the delegated permissions above, **or**
-- Grant admin consent for Application `Mail.Read` + `Files.Read.All` (old app-only path).
-
-Without one of those, Microsoft will block the sign-in consent screen.
+Set `GRAPH_AUTH_MODE=delegated`, add redirect URI, use **Connect Microsoft 365**. That only accesses the signed-in user's own mailbox/OneDrive.
 
 ---
 

@@ -192,25 +192,29 @@
       <div>
         <h1>Dairy Dashboard</h1>
         <p class="subtitle">Outlook + OneDrive imports for ALH Farm</p>
-        {% if connected %}
+        {% if auth_mode == 'application' %}
+          <div class="status-pill">App access · OneDrive: {{ connected.user_email if connected else 'set ONEDRIVE_USER' }}</div>
+        {% elif connected %}
           <div class="status-pill">Connected as {{ connected.user_email }}</div>
         {% else %}
           <div class="status-pill off">Microsoft 365 not connected</div>
         {% endif %}
       </div>
       <div class="actions">
-        {% if not connected %}
-          <a class="btn" href="{{ url_for('auth_login') }}">Connect Microsoft 365</a>
-        {% else %}
-          <form method="post" action="{{ url_for('auth_logout') }}">
-            <button class="btn linkish" type="submit">Disconnect</button>
-          </form>
+        {% if auth_mode == 'delegated' %}
+          {% if not connected %}
+            <a class="btn" href="{{ url_for('auth_login') }}">Connect Microsoft 365</a>
+          {% else %}
+            <form method="post" action="{{ url_for('auth_logout') }}">
+              <button class="btn linkish" type="submit">Disconnect</button>
+            </form>
+          {% endif %}
         {% endif %}
         <form method="post" action="{{ url_for('sync_from_outlook') }}">
-          <button class="btn" type="submit" {% if not connected %}disabled{% endif %}>Sync from Outlook</button>
+          <button class="btn" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>Sync from Outlook</button>
         </form>
         <form method="post" action="{{ url_for('sync_from_onedrive') }}">
-          <button class="btn secondary" type="submit" {% if not connected %}disabled{% endif %}>Sync from OneDrive</button>
+          <button class="btn secondary" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>Sync from OneDrive</button>
         </form>
       </div>
     </header>

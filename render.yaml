@@ -21,7 +21,8 @@ services:
         fromDatabase:
           name: dairy-dashboard-db
           property: connectionString
-      # Fill these in Render → Environment after first deploy (Azure / Outlook).
+      - key: GRAPH_AUTH_MODE
+        value: application
       - key: AZURE_CLIENT_ID
         value: ""
       - key: AZURE_CLIENT_SECRET
@@ -30,10 +31,14 @@ services:
         value: ""
       - key: AZURE_REDIRECT_URI
         value: ""
+      - key: OUTLOOK_MAILBOX
+        value: parlours@alhfarm.com
       - key: OUTLOOK_SENDER_FILTER
         value: ""
       - key: OUTLOOK_SUBJECT_FILTER
         value: ""
+      - key: ONEDRIVE_USER
+        value: parlours@alhfarm.com
       - key: ONEDRIVE_FOLDER_PATH
         value: ""
 
