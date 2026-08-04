@@ -109,12 +109,22 @@ Secrets expire; set a calendar reminder to rotate before expiry.
 ### 3.3 Add API permissions
 
 1. **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**.
-2. Add:
-   - `Mail.Read` (read mail in all mailboxes), **or**
-   - `Mail.ReadBasic.All` plus `Mail.Read` if you need full attachment access — **`Mail.Read` is required** to download attachments.
+2. Add these **Application** permissions:
+   - `Mail.Read` — required to download Outlook attachments
+   - `Files.Read.All` — required to read Excel files from OneDrive
 3. Click **Grant admin consent for [your tenant]** (requires Global Admin or Privileged Role Administrator).
 
 Without admin consent, sync will fail with an authentication or permission error.
+
+### 3.3b OneDrive folder settings
+
+1. Decide which Microsoft 365 user's OneDrive holds the Excel files.
+2. Set on Render / `.env`:
+   - `ONEDRIVE_USER` — that user's email, e.g. `reports@yourcompany.com`
+   - `ONEDRIVE_FOLDER_PATH` — folder path under their OneDrive, e.g. `Dairy Reports`  
+     Leave blank to read Excel files in the OneDrive root.
+3. Put the Excel files in that folder (`.xlsx` / `.xls` / `.xlsm`).
+4. On the dashboard, click **Sync from OneDrive**.
 
 ### 3.4 Set the mailbox
 

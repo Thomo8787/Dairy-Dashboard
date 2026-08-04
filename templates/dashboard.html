@@ -40,6 +40,16 @@
       flex-wrap: wrap;
     }
 
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .btn.secondary {
+      background: #0f766e;
+    }
+
     h1 {
       margin: 0;
       font-size: 1.75rem;
@@ -152,11 +162,16 @@
     <header>
       <div>
         <h1>Dairy Dashboard</h1>
-        <p class="subtitle">Outlook imports, Excel parsing, and PostgreSQL reporting</p>
+        <p class="subtitle">Outlook + OneDrive imports, Excel parsing, PostgreSQL reporting</p>
       </div>
-      <form method="post" action="{{ url_for('sync_from_outlook') }}">
-        <button class="btn" type="submit">Sync from Outlook</button>
-      </form>
+      <div class="actions">
+        <form method="post" action="{{ url_for('sync_from_outlook') }}">
+          <button class="btn" type="submit">Sync from Outlook</button>
+        </form>
+        <form method="post" action="{{ url_for('sync_from_onedrive') }}">
+          <button class="btn secondary" type="submit">Sync from OneDrive</button>
+        </form>
+      </div>
     </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}

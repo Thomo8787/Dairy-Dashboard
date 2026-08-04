@@ -34,6 +34,10 @@ services:
         value: ""
       - key: OUTLOOK_SUBJECT_FILTER
         value: ""
+      - key: ONEDRIVE_USER
+        value: ""
+      - key: ONEDRIVE_FOLDER_PATH
+        value: ""
 
 databases:
   - name: dairy-dashboard-db

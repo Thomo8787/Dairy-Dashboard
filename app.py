@@ -15,7 +15,9 @@ from services.database import (
     save_dataframe,
 )
 from services.excel_parser import parse_excel_file
+from services.graph_client import require_azure_config
 from services.graph_email import GraphEmailService
+from services.graph_onedrive import GraphOneDriveService
 
 load_dotenv()
 
@@ -40,6 +42,24 @@ def _ensure_database():
         logger.exception("Database init failed; will retry on next request")
 
 
+def _import_items(items: list[dict]) -> int:
+    imported = 0
+    for item in items:
+        records = parse_excel_file(item["file_path"])
+        if not records:
+            continue
+        save_dataframe(
+            {
+                "filename": item["filename"],
+                "email_subject": item["email_subject"],
+                "email_received_at": item["email_received_at"],
+            },
+            records,
+        )
+        imported += 1
+    return imported
+
+
 @app.before_request
 def ensure_database():
     _ensure_database()
@@ -49,45 +69,58 @@ def ensure_database():
 def dashboard():
     summary = get_dashboard_summary()
     records = get_recent_records(limit=100)
-    return render_template("dashboard.html", summary=summary, records=records)
+    return render_template(
+        "dashboard.html",
+        summary=summary,
+        records=records,
+        onedrive_configured=bool(os.environ.get("ONEDRIVE_USER")),
+    )
 
 
 @app.route("/sync", methods=["POST"])
 def sync_from_outlook():
-    required = ["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"]
-    missing = [key for key in required if not os.environ.get(key)]
+    missing = require_azure_config()
     if missing:
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("dashboard"))
 
     try:
-        email_service = GraphEmailService()
-        attachments = email_service.fetch_excel_attachments()
-
+        attachments = GraphEmailService().fetch_excel_attachments()
         if not attachments:
             flash("No matching Excel attachments found in Outlook.", "info")
             return redirect(url_for("dashboard"))
 
-        imported = 0
-        for item in attachments:
-            records = parse_excel_file(item["file_path"])
-            if not records:
-                continue
-
-            save_dataframe(
-                {
-                    "filename": item["filename"],
-                    "email_subject": item["email_subject"],
-                    "email_received_at": item["email_received_at"],
-                },
-                records,
-            )
-            imported += 1
-
+        imported = _import_items(attachments)
         flash(f"Imported {imported} Excel file(s) from Outlook.", "success")
     except Exception as exc:
         logger.exception("Outlook sync failed")
-        flash(f"Sync failed: {exc}", "error")
+        flash(f"Outlook sync failed: {exc}", "error")
+
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/sync-onedrive", methods=["POST"])
+def sync_from_onedrive():
+    missing = require_azure_config()
+    if missing:
+        flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
+        return redirect(url_for("dashboard"))
+
+    if not os.environ.get("ONEDRIVE_USER"):
+        flash("ONEDRIVE_USER is not set. Add it in Render Environment settings.", "error")
+        return redirect(url_for("dashboard"))
+
+    try:
+        files = GraphOneDriveService().fetch_excel_files()
+        if not files:
+            flash("No Excel files found in the configured OneDrive folder.", "info")
+            return redirect(url_for("dashboard"))
+
+        imported = _import_items(files)
+        flash(f"Imported {imported} Excel file(s) from OneDrive.", "success")
+    except Exception as exc:
+        logger.exception("OneDrive sync failed")
+        flash(f"OneDrive sync failed: {exc}", "error")
 
     return redirect(url_for("dashboard"))
 
