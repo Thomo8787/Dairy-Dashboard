@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Home · {{ app_name }}{% endblock %}
+{% block page_title %}Home{% endblock %}
+
+{% block content %}
+  <section class="cards">
+    <div class="stat">
+      <div class="stat-label">Total records</div>
+      <div class="stat-value">{{ summary.total_records }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Import batches</div>
+      <div class="stat-value">{{ summary.total_batches }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Latest import</div>
+      <div class="stat-value" style="font-size:1rem;">
+        {% if summary.latest_import %}
+          {{ summary.latest_import.strftime('%Y-%m-%d %H:%M') }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Welcome</h2>
+    <p class="lead">
+      Overview for Thomasson Farms. Use <strong>Office</strong> to sync Outlook and OneDrive,
+      and <strong>Stock Inventory</strong> for stock views (coming next).
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Recent imports</h2>
+    {% if summary.recent_batches %}
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Source</th>
+            <th>Rows</th>
+            <th>Imported</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for batch in summary.recent_batches %}
+            <tr>
+              <td>{{ batch.filename }}</td>
+              <td>{{ batch.email_subject or '—' }}</td>
+              <td>{{ batch.row_count }}</td>
+              <td>{{ batch.imported_at.strftime('%Y-%m-%d %H:%M') if batch.imported_at else '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No imports yet. Sync from the Office page when you are ready.</p>
+    {% endif %}
+  </section>
+{% endblock %}

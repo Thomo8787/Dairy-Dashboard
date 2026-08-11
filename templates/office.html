@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Office · {{ app_name }}{% endblock %}
+{% block page_title %}Office{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Microsoft 365 connections</h2>
+    <p class="lead">
+      Sync Excel files from Mark's Outlook inbox and Parlours OneDrive into the local dashboard database.
+    </p>
+
+    {% if auth_mode == 'application' %}
+      <div class="status-pill">App access ready · Mailbox {{ connected.user_email if connected else 'configured' }}</div>
+    {% elif connected %}
+      <div class="status-pill">Connected as {{ connected.user_email }}</div>
+    {% else %}
+      <div class="status-pill off">Microsoft 365 not connected</div>
+    {% endif %}
+
+    <div class="actions" style="margin-top: 1rem;">
+      {% if auth_mode == 'delegated' %}
+        {% if not connected %}
+          <a class="btn" href="{{ url_for('auth_login') }}">Connect Microsoft 365</a>
+        {% else %}
+          <form method="post" action="{{ url_for('auth_logout') }}">
+            <button class="btn ghost" type="submit">Disconnect</button>
+          </form>
+        {% endif %}
+      {% endif %}
+
+      <form method="post" action="{{ url_for('sync_from_outlook') }}">
+        <button class="btn" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
+          Sync from Outlook
+        </button>
+      </form>
+
+      <form method="post" action="{{ url_for('sync_from_onedrive') }}">
+        <button class="btn secondary" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
+          Sync from OneDrive
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Office tools</h2>
+    <p class="lead">More office submenus (mail rules, filing, reports) can be added here later.</p>
+    <p class="empty">No additional office modules yet.</p>
+  </section>
+{% endblock %}

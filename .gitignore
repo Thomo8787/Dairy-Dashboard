@@ -16,6 +16,10 @@ __pycache__/
 dist/
 build/
 
+# Local launcher build
+ThomassonFarmsDashboard.exe
+*.spec
+
 # Downloaded attachments (keep folder, ignore contents)
 data/*
 !data/.gitkeep

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <p class="brand-mark">Thomasson Farms</p>
+        <p class="brand-sub">Dashboard</p>
+      </div>
+
+      <nav class="side-nav" aria-label="Main">
+        {% for item in nav_items %}
+          <div class="nav-group">
+            <a
+              class="nav-link {% if active_nav == item.id or active_parent_nav == item.id %}is-active{% endif %}"
+              href="{{ url_for(item.endpoint) }}"
+            >
+              {{ item.label }}
+            </a>
+            {% if item.children %}
+              <div class="nav-sub {% if active_nav == item.id or active_parent_nav == item.id %}is-open{% endif %}">
+                {% for child in item.children %}
+                  <a
+                    class="nav-sub-link {% if active_nav == child.id %}is-active{% endif %}"
+                    href="{{ url_for(child.endpoint) }}"
+                  >
+                    {{ child.label }}
+                  </a>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </nav>
+
+      <div class="sidebar-foot">
+        <p>Local offline mode</p>
+      </div>
+    </aside>
+
+    <div class="main-wrap">
+      <header class="topbar">
+        <button class="menu-toggle" type="button" id="menuToggle" aria-label="Toggle menu">Menu</button>
+        <h1 class="page-title">{% block page_title %}{{ app_name }}{% endblock %}</h1>
+      </header>
+
+      <main class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const toggle = document.getElementById("menuToggle");
+    const sidebar = document.getElementById("sidebar");
+    if (toggle && sidebar) {
+      toggle.addEventListener("click", () => sidebar.classList.toggle("is-open"));
+    }
+  </script>
+</body>
+</html>

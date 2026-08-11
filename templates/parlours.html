@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Parlours · {{ app_name }}{% endblock %}
+{% block page_title %}Parlours{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Parlour overview</h2>
+    <p class="lead">
+      Parlour reporting across Thomasson Farms. Milking Efficiency will be fed from Outlook
+      imports (ALH &amp; BNK first). Other farms are ready in the structure for later.
+    </p>
+    <div class="actions">
+      <a class="btn" href="{{ url_for('milking_efficiency') }}">Open Milking Efficiency</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Farms</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Farm</th>
+          <th>Dairy data</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for farm in farms %}
+          <tr>
+            <td><strong>{{ farm.code }}</strong></td>
+            <td>{{ farm.name }}</td>
+            <td>
+              {% if farm.dairy_data_group == 'alh_bnk' %}
+                Shared DairyComp (ALH + BNK)
+              {% else %}
+                Standalone
+              {% endif %}
+            </td>
+            <td>
+              {% if farm.active_for_imports %}
+                <span class="status-pill">Active for imports</span>
+              {% else %}
+                <span class="status-pill off">Coming later</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Milking Efficiency · {{ app_name }}{% endblock %}
+{% block page_title %}Milking Efficiency{% endblock %}
+
+{% block content %}
+  <div class="me-layout">
+    <aside class="me-filters panel">
+      <div class="me-filter-block">
+        <h3>Farm</h3>
+        <div class="me-chip-row">
+          {% for farm in farms %}
+            <a
+              class="me-chip {% if selected_farm == farm.code %}is-active{% endif %}"
+              href="{{ url_for('milking_efficiency', farm=farm.code, shift=selected_shift) }}"
+            >{{ farm.code }}</a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="me-filter-block">
+        <h3>Shift</h3>
+        <div class="me-chip-row">
+          {% for shift in shift_options %}
+            <a
+              class="me-chip {% if selected_shift == shift.id %}is-active{% endif %}"
+              href="{{ url_for('milking_efficiency', farm=selected_farm, shift=shift.id) }}"
+            >{{ shift.label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="me-filter-block">
+        <h3>Import from Email</h3>
+        <p class="me-help">
+          Scans Mark’s inbox for <strong>Milk Flow</strong> and
+          <strong>Rotary Entry ID</strong> CSVs from <strong>@dataflow2.com</strong>
+          and stores them as <strong>ALH</strong>. Lag phase links cow ID + date/shift
+          when identification is within 5 minutes of milking start.
+        </p>
+        <form method="post" action="{{ url_for('sync_milk_flow') }}">
+          <input type="hidden" name="farm" value="{{ selected_farm }}">
+          <input type="hidden" name="shift" value="{{ selected_shift }}">
+          <label class="me-label" for="import_range">Range</label>
+          <select id="import_range" class="me-select" disabled>
+            <option>Since last import</option>
+          </select>
+          <button class="btn me-import-btn" type="submit">Import from email</button>
+        </form>
+      </div>
+
+      <div class="me-filter-block me-upload">
+        <h3>Upload shift report</h3>
+        <p class="me-help">Manual CSV upload coming next.</p>
+        <button class="btn ghost" type="button" disabled>Upload shift report</button>
+      </div>
+    </aside>
+
+    <section class="me-main panel">
+      <div class="me-main-head">
+        <h2>{{ summary.farm_code }} — {{ summary.shift_label }}</h2>
+        <p>
+          up to {{ summary.day_count }} most recent milking days
+          {% if summary.latest_import_at %}
+            · last import {{ summary.latest_import_at.strftime('%Y-%m-%d %H:%M') }}
+          {% endif %}
+        </p>
+      </div>
+
+      {% if summary.has_data %}
+        <div class="me-table-wrap">
+          <table class="me-summary-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                {% for day in summary.date_headers %}
+                  <th>{{ day.label }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in summary.table_rows %}
+                <tr>
+                  <th scope="row">{{ row.label }}</th>
+                  {% for cell in row.cells %}
+                    <td class="{% if cell.highlight %}is-hot{% endif %}">{{ cell.text }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty">
+          No milking data for {{ selected_farm }} / {{ selected_shift }} yet.
+          {% if selected_farm == 'ALH' %}
+            Use <strong>Import from email</strong> to pull Milk Flow and Rotary Entry ID reports.
+          {% else %}
+            Only ALH is populated from email today; {{ selected_farm }} will be added later.
+          {% endif %}
+        </p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}
