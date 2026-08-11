@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
@@ -13,6 +15,9 @@ import requests
 from services.graph_client import GRAPH_BASE, auth_mode, graph_get, graph_get_bytes, graph_headers
 
 logger = logging.getLogger(__name__)
+
+# Keep concurrency modest on Render free (512MB / shared CPU).
+_DOWNLOAD_WORKERS = 6
 
 
 class DataFlowCsvEmailService:
@@ -81,7 +86,7 @@ class DataFlowCsvEmailService:
         skip_message_ids: set[str] | None = None,
     ) -> list[dict]:
         """
-        Prefer newest-first inbox paging filtered by receivedDateTime.
+        Prefer newest-first inbox paging filtered by receivedDateTime + subject.
 
         Graph $search ranks by relevance and often misses the newest reports when
         many historical Milk Flow / Rotary Entry emails exist.
@@ -116,6 +121,104 @@ class DataFlowCsvEmailService:
     ) -> list[dict]:
         root = self._mailbox_root()
         since_iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        subject = (self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS or "").strip()
+
+        # Prefer subject-scoped advanced query so we don't page through every
+        # attachment email in the mailbox (that made 7-day imports crawl).
+        if subject:
+            scoped = self._list_messages_with_subject_filter(
+                root=root,
+                top=top,
+                since_iso=since_iso,
+                subject=subject,
+                since=since,
+                skip_message_ids=skip_message_ids,
+            )
+            if scoped is not None:
+                return scoped
+
+        return self._list_messages_attachment_scan(
+            root=root,
+            top=top,
+            since_iso=since_iso,
+            since=since,
+            skip_message_ids=skip_message_ids,
+        )
+
+    def _list_messages_with_subject_filter(
+        self,
+        *,
+        root: str,
+        top: int,
+        since_iso: str,
+        subject: str,
+        since: datetime,
+        skip_message_ids: set[str],
+    ) -> list[dict] | None:
+        # contains() requires ConsistencyLevel: eventual + $count=true.
+        # $orderby is often rejected with contains — sort client-side instead.
+        safe_subject = subject.replace("'", "''")
+        query = urlencode(
+            {
+                "$filter": (
+                    f"receivedDateTime ge {since_iso} and hasAttachments eq true "
+                    f"and contains(subject,'{safe_subject}')"
+                ),
+                "$top": str(min(50, max(top, 1))),
+                "$select": "id,subject,receivedDateTime,from,hasAttachments",
+                "$count": "true",
+            }
+        )
+        url: str | None = f"{GRAPH_BASE}/{root}/messages?{query}"
+        headers = {**graph_headers(), "ConsistencyLevel": "eventual"}
+        matches: list[dict] = []
+        pages = 0
+
+        try:
+            while url and len(matches) < top and pages < 20:
+                pages += 1
+                response = requests.get(url, headers=headers, timeout=60)
+                if response.status_code >= 400:
+                    logger.warning(
+                        "Subject-filtered Graph list failed (%s); using attachment scan. Body: %s",
+                        response.status_code,
+                        (response.text or "")[:300],
+                    )
+                    return None
+                payload = response.json()
+                for message in payload.get("value", []):
+                    if self._message_matches(
+                        message, since=since, skip_message_ids=skip_message_ids
+                    ):
+                        matches.append(message)
+                        if len(matches) >= top:
+                            break
+                url = payload.get("@odata.nextLink")
+        except requests.RequestException as exc:
+            logger.warning("Subject-filtered Graph list error; using attachment scan: %s", exc)
+            return None
+
+        matches.sort(
+            key=lambda m: m.get("receivedDateTime") or "",
+            reverse=True,
+        )
+        logger.info(
+            "Graph subject filter %r returned %s message(s) in %s page(s)",
+            subject,
+            len(matches),
+            pages,
+        )
+        return matches[:top]
+
+    def _list_messages_attachment_scan(
+        self,
+        *,
+        root: str,
+        top: int,
+        since_iso: str,
+        since: datetime,
+        skip_message_ids: set[str],
+    ) -> list[dict]:
         query = urlencode(
             {
                 "$filter": f"receivedDateTime ge {since_iso} and hasAttachments eq true",
@@ -142,6 +245,12 @@ class DataFlowCsvEmailService:
                         break
             url = payload.get("@odata.nextLink")
 
+        logger.info(
+            "Graph attachment scan for %r returned %s message(s) in %s page(s)",
+            self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
+            len(matches),
+            pages,
+        )
         return matches
 
     def _list_messages_by_search(
@@ -177,6 +286,23 @@ class DataFlowCsvEmailService:
         url = f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments"
         return graph_get(url).get("value", [])
 
+    def _attachment_bytes(self, message_id: str, attachment: dict) -> bytes | None:
+        """Prefer inline contentBytes; fall back to /$value download."""
+        raw = attachment.get("contentBytes")
+        if raw:
+            try:
+                return base64.b64decode(raw)
+            except Exception:
+                logger.warning(
+                    "Could not decode contentBytes for %s; downloading /$value",
+                    attachment.get("name"),
+                )
+
+        root = self._mailbox_root()
+        return graph_get_bytes(
+            f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments/{attachment['id']}/$value"
+        )
+
     def _download_csv(self, message_id: str, attachment: dict) -> Path | None:
         name = attachment.get("name", "")
         if not name.lower().endswith(".csv"):
@@ -184,10 +310,9 @@ class DataFlowCsvEmailService:
         if self.FILENAME_CONTAINS not in name.lower():
             return None
 
-        root = self._mailbox_root()
-        content = graph_get_bytes(
-            f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments/{attachment['id']}/$value"
-        )
+        content = self._attachment_bytes(message_id, attachment)
+        if content is None:
+            return None
         # Reject OLE/Excel binaries that were mislabeled as .csv
         if content.startswith(b"\xd0\xcf\x11\xe0"):
             logger.warning("Skipping non-CSV binary attachment: %s", name)
@@ -198,6 +323,30 @@ class DataFlowCsvEmailService:
         destination.write_bytes(content)
         return destination
 
+    def _downloads_for_message(self, message: dict) -> list[dict]:
+        received_at = _parse_received(message.get("receivedDateTime"))
+        sender = (
+            message.get("from", {})
+            .get("emailAddress", {})
+            .get("address")
+        )
+        found: list[dict] = []
+        for attachment in self._list_attachments(message["id"]):
+            path = self._download_csv(message["id"], attachment)
+            if not path:
+                continue
+            found.append(
+                {
+                    "file_path": path,
+                    "filename": path.name,
+                    "email_subject": message.get("subject"),
+                    "email_from": sender,
+                    "email_received_at": received_at,
+                    "message_id": message["id"],
+                }
+            )
+        return found
+
     def fetch_csvs(
         self,
         top: int = 100,
@@ -205,31 +354,54 @@ class DataFlowCsvEmailService:
         since: datetime | None = None,
         skip_message_ids: set[str] | None = None,
     ) -> list[dict]:
-        downloads: list[dict] = []
-        for message in self._search_messages(
+        started = datetime.now(timezone.utc)
+        messages = self._search_messages(
             top=top, since=since, skip_message_ids=skip_message_ids
-        ):
-            received_at = _parse_received(message.get("receivedDateTime"))
-            sender = (
-                message.get("from", {})
-                .get("emailAddress", {})
-                .get("address")
-            )
+        )
+        if not messages:
+            return []
 
-            for attachment in self._list_attachments(message["id"]):
-                path = self._download_csv(message["id"], attachment)
-                if not path:
-                    continue
-                downloads.append(
-                    {
-                        "file_path": path,
-                        "filename": path.name,
-                        "email_subject": message.get("subject"),
-                        "email_from": sender,
-                        "email_received_at": received_at,
-                        "message_id": message["id"],
-                    }
-                )
+        downloads: list[dict] = []
+        workers = min(_DOWNLOAD_WORKERS, len(messages))
+        logger.info(
+            "Downloading %s %r attachment(s) with %s worker(s)",
+            len(messages),
+            self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
+            workers,
+        )
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(self._downloads_for_message, message): message
+                for message in messages
+            }
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                try:
+                    downloads.extend(future.result())
+                except Exception as exc:
+                    message = futures[future]
+                    logger.warning(
+                        "Failed downloading attachments for %s: %s",
+                        message.get("subject"),
+                        exc,
+                    )
+                if done == 1 or done % 10 == 0 or done == len(messages):
+                    logger.info(
+                        "Attachment download progress %s/%s for %r",
+                        done,
+                        len(messages),
+                        self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
+                    )
+
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        logger.info(
+            "Fetched %s CSV(s) for %r in %.1fs",
+            len(downloads),
+            self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
+            elapsed,
+        )
         return downloads
 
 

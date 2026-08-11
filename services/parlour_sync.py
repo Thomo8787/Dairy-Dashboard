@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -41,9 +42,14 @@ _manual_job_state: dict[str, Any] = {
 
 
 def recommended_email_top(days_back: int) -> int:
-    """Cap Graph page size so a 7–30 day overwrite doesn't download forever."""
+    """
+    Cap Graph page size per report type.
+
+    Roughly 2 shifts/day × farms — enough for a week without paging the
+    whole mailbox. Parallel subject-filtered fetch makes this affordable.
+    """
     days = max(1, int(days_back))
-    return min(120, max(40, days * 12))
+    return min(100, max(24, days * 10))
 
 
 def get_manual_sync_status() -> dict[str, Any]:
@@ -226,6 +232,7 @@ def sync_parlour_emails(
         since = _since_for_days_back(int(days_back or 2))
 
     # Fetch first, then delete — avoids wiping the window if Graph fails mid-run.
+    # Milk Flow + Rotary Entry run in parallel (separate Graph queries).
     milk_service = MilkFlowEmailService()
     entry_service = RotaryEntryEmailService()
     logger.info(
@@ -234,16 +241,27 @@ def sync_parlour_emails(
         since,
         overwrite,
     )
-    milk_downloads = milk_service.fetch_milk_flow_csvs(
-        top=top, since=since, skip_message_ids=skip_ids
-    )
-    entry_downloads = entry_service.fetch_rotary_entry_csvs(
-        top=top, since=since, skip_message_ids=skip_ids
-    )
+    fetch_started = datetime.now(timezone.utc)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        milk_future = pool.submit(
+            milk_service.fetch_milk_flow_csvs,
+            top,
+            since=since,
+            skip_message_ids=skip_ids,
+        )
+        entry_future = pool.submit(
+            entry_service.fetch_rotary_entry_csvs,
+            top,
+            since=since,
+            skip_message_ids=skip_ids,
+        )
+        milk_downloads = milk_future.result()
+        entry_downloads = entry_future.result()
     logger.info(
-        "Fetched milk=%s rotary=%s email attachment(s)",
+        "Fetched milk=%s rotary=%s email attachment(s) in %.1fs",
         len(milk_downloads),
         len(entry_downloads),
+        (datetime.now(timezone.utc) - fetch_started).total_seconds(),
     )
 
     if not milk_downloads and not entry_downloads:

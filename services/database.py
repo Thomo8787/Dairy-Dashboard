@@ -356,15 +356,19 @@ def save_milk_flow_records(
 
         inserted = 0
         seen_keys: set[tuple] = set()
-        pending: list[MilkFlowRecord] = []
+        pending_orm: list[MilkFlowRecord] = []
+        pending_maps: list[dict] = []
 
         def _flush_pending() -> None:
-            nonlocal pending, inserted
-            if not pending:
-                return
-            session.bulk_save_objects(pending)
-            inserted += len(pending)
-            pending = []
+            nonlocal pending_orm, pending_maps, inserted
+            if pending_maps:
+                session.bulk_insert_mappings(MilkFlowRecord, pending_maps)
+                inserted += len(pending_maps)
+                pending_maps = []
+            if pending_orm:
+                session.bulk_save_objects(pending_orm)
+                inserted += len(pending_orm)
+                pending_orm = []
 
         for row in records:
             key = (
@@ -394,36 +398,63 @@ def save_milk_flow_records(
                 )
                 if exists:
                     continue
-
-            pending.append(
-                MilkFlowRecord(
-                    batch_id=batch.id,
-                    farm_code=row["farm_code"],
-                    cow_number=row["cow_number"],
-                    avg_milk_flow_l_per_min=row.get("avg_milk_flow_l_per_min"),
-                    milking_date=row["milking_date"],
-                    shift=row.get("shift"),
-                    dim=row.get("dim"),
-                    shift_yield_l=row.get("shift_yield_l"),
-                    peak_milk_flow_l_per_min=row.get("peak_milk_flow_l_per_min"),
-                    peak_milk_flow_time=row.get("peak_milk_flow_time"),
-                    flow_rate_15s_ml_per_min=row.get("flow_rate_15s_ml_per_min"),
-                    flow_rate_30s_ml_per_min=row.get("flow_rate_30s_ml_per_min"),
-                    flow_rate_60s_ml_per_min=row.get("flow_rate_60s_ml_per_min"),
-                    flow_rate_120s_ml_per_min=row.get("flow_rate_120s_ml_per_min"),
-                    percentage_yield_at_2_min=row.get("percentage_yield_at_2_min"),
-                    milk_yield_at_2_min_l=row.get("milk_yield_at_2_min_l"),
-                    group_number=row.get("group_number"),
-                    flow_rate_at_removal_ml_per_min=row.get("flow_rate_at_removal_ml_per_min"),
-                    unit_on_time=row.get("unit_on_time"),
-                    cow_milking_start_time=row.get("cow_milking_start_time"),
-                    final_detaching=row.get("final_detaching"),
-                    milking_point=row.get("milking_point"),
+                pending_orm.append(
+                    MilkFlowRecord(
+                        batch_id=batch.id,
+                        farm_code=row["farm_code"],
+                        cow_number=row["cow_number"],
+                        avg_milk_flow_l_per_min=row.get("avg_milk_flow_l_per_min"),
+                        milking_date=row["milking_date"],
+                        shift=row.get("shift"),
+                        dim=row.get("dim"),
+                        shift_yield_l=row.get("shift_yield_l"),
+                        peak_milk_flow_l_per_min=row.get("peak_milk_flow_l_per_min"),
+                        peak_milk_flow_time=row.get("peak_milk_flow_time"),
+                        flow_rate_15s_ml_per_min=row.get("flow_rate_15s_ml_per_min"),
+                        flow_rate_30s_ml_per_min=row.get("flow_rate_30s_ml_per_min"),
+                        flow_rate_60s_ml_per_min=row.get("flow_rate_60s_ml_per_min"),
+                        flow_rate_120s_ml_per_min=row.get("flow_rate_120s_ml_per_min"),
+                        percentage_yield_at_2_min=row.get("percentage_yield_at_2_min"),
+                        milk_yield_at_2_min_l=row.get("milk_yield_at_2_min_l"),
+                        group_number=row.get("group_number"),
+                        flow_rate_at_removal_ml_per_min=row.get("flow_rate_at_removal_ml_per_min"),
+                        unit_on_time=row.get("unit_on_time"),
+                        cow_milking_start_time=row.get("cow_milking_start_time"),
+                        final_detaching=row.get("final_detaching"),
+                        milking_point=row.get("milking_point"),
+                    )
                 )
-            )
-            # Chunked flush keeps memory down on large overwrite imports.
-            if not skip_duplicates and len(pending) >= 500:
-                _flush_pending()
+            else:
+                pending_maps.append(
+                    {
+                        "batch_id": batch.id,
+                        "farm_code": row["farm_code"],
+                        "cow_number": row["cow_number"],
+                        "avg_milk_flow_l_per_min": row.get("avg_milk_flow_l_per_min"),
+                        "milking_date": row["milking_date"],
+                        "shift": row.get("shift"),
+                        "dim": row.get("dim"),
+                        "shift_yield_l": row.get("shift_yield_l"),
+                        "peak_milk_flow_l_per_min": row.get("peak_milk_flow_l_per_min"),
+                        "peak_milk_flow_time": row.get("peak_milk_flow_time"),
+                        "flow_rate_15s_ml_per_min": row.get("flow_rate_15s_ml_per_min"),
+                        "flow_rate_30s_ml_per_min": row.get("flow_rate_30s_ml_per_min"),
+                        "flow_rate_60s_ml_per_min": row.get("flow_rate_60s_ml_per_min"),
+                        "flow_rate_120s_ml_per_min": row.get("flow_rate_120s_ml_per_min"),
+                        "percentage_yield_at_2_min": row.get("percentage_yield_at_2_min"),
+                        "milk_yield_at_2_min_l": row.get("milk_yield_at_2_min_l"),
+                        "group_number": row.get("group_number"),
+                        "flow_rate_at_removal_ml_per_min": row.get(
+                            "flow_rate_at_removal_ml_per_min"
+                        ),
+                        "unit_on_time": row.get("unit_on_time"),
+                        "cow_milking_start_time": row.get("cow_milking_start_time"),
+                        "final_detaching": row.get("final_detaching"),
+                        "milking_point": row.get("milking_point"),
+                    }
+                )
+                if len(pending_maps) >= 1000:
+                    _flush_pending()
 
         _flush_pending()
         batch.row_count = inserted
@@ -504,15 +535,19 @@ def save_rotary_entry_id_records(
 
         inserted = 0
         seen_keys: set[tuple] = set()
-        pending: list[RotaryEntryIdRecord] = []
+        pending_orm: list[RotaryEntryIdRecord] = []
+        pending_maps: list[dict] = []
 
         def _flush_pending() -> None:
-            nonlocal pending, inserted
-            if not pending:
-                return
-            session.bulk_save_objects(pending)
-            inserted += len(pending)
-            pending = []
+            nonlocal pending_orm, pending_maps, inserted
+            if pending_maps:
+                session.bulk_insert_mappings(RotaryEntryIdRecord, pending_maps)
+                inserted += len(pending_maps)
+                pending_maps = []
+            if pending_orm:
+                session.bulk_save_objects(pending_orm)
+                inserted += len(pending_orm)
+                pending_orm = []
 
         for row in records:
             key = (
@@ -538,19 +573,29 @@ def save_rotary_entry_id_records(
                 )
                 if exists:
                     continue
-
-            pending.append(
-                RotaryEntryIdRecord(
-                    batch_id=batch.id,
-                    farm_code=row["farm_code"],
-                    cow_number=row["cow_number"],
-                    milking_date=row["milking_date"],
-                    shift=row.get("shift"),
-                    identification_time=row["identification_time"],
+                pending_orm.append(
+                    RotaryEntryIdRecord(
+                        batch_id=batch.id,
+                        farm_code=row["farm_code"],
+                        cow_number=row["cow_number"],
+                        milking_date=row["milking_date"],
+                        shift=row.get("shift"),
+                        identification_time=row["identification_time"],
+                    )
                 )
-            )
-            if not skip_duplicates and len(pending) >= 500:
-                _flush_pending()
+            else:
+                pending_maps.append(
+                    {
+                        "batch_id": batch.id,
+                        "farm_code": row["farm_code"],
+                        "cow_number": row["cow_number"],
+                        "milking_date": row["milking_date"],
+                        "shift": row.get("shift"),
+                        "identification_time": row["identification_time"],
+                    }
+                )
+                if len(pending_maps) >= 1000:
+                    _flush_pending()
 
         _flush_pending()
         batch.row_count = inserted
