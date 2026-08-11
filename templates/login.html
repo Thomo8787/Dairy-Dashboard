@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in · {{ app_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card">
+      <p class="login-brand">Thomasson Farms</p>
+      <h1 class="login-title">Dashboard sign in</h1>
+      <p class="login-lead">Enter your email and password to continue.</p>
+
+      {% if seed_error %}
+        <div class="flash error">{{ seed_error }}</div>
+      {% endif %}
+      {% if error %}
+        <div class="flash error">{{ error }}</div>
+      {% endif %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form method="post" class="login-form" autocomplete="on">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label class="field-label" for="email">Email</label>
+        <input
+          class="field-input"
+          id="email"
+          name="email"
+          type="email"
+          required
+          autofocus
+          autocomplete="username"
+        >
+        <label class="field-label" for="password">Password</label>
+        <input
+          class="field-input"
+          id="password"
+          name="password"
+          type="password"
+          required
+          autocomplete="current-password"
+        >
+        <button class="btn login-submit" type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

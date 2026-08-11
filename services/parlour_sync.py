@@ -171,7 +171,16 @@ def sync_parlour_emails(
             continue
         if scoped_farm and farm != scoped_farm:
             continue
-        records = parse_milk_flow_csv(item["file_path"], farm_code=farm)
+        try:
+            records = parse_milk_flow_csv(item["file_path"], farm_code=farm)
+        except Exception as exc:
+            skipped_files += 1
+            logger.warning(
+                "Skipping unreadable Milk Flow file %s: %s",
+                item.get("filename"),
+                exc,
+            )
+            continue
         if start_date and end_date:
             records = _filter_records_to_window(records, start_date, end_date)
         if not records:
@@ -196,7 +205,16 @@ def sync_parlour_emails(
             continue
         if scoped_farm and farm != scoped_farm:
             continue
-        records = parse_rotary_entry_id_csv(item["file_path"], farm_code=farm)
+        try:
+            records = parse_rotary_entry_id_csv(item["file_path"], farm_code=farm)
+        except Exception as exc:
+            skipped_files += 1
+            logger.warning(
+                "Skipping unreadable Rotary Entry file %s: %s",
+                item.get("filename"),
+                exc,
+            )
+            continue
         if start_date and end_date:
             records = _filter_records_to_window(records, start_date, end_date)
         if not records:

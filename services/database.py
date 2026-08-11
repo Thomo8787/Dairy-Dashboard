@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -67,6 +68,26 @@ class GraphToken(Base):
     expires_at = Column(DateTime(timezone=True))
     scopes = Column(Text)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class User(Base):
+    """Dashboard login account with page and sync-action permissions."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    perm_home = Column(Boolean, nullable=False, default=True)
+    perm_office = Column(Boolean, nullable=False, default=False)
+    perm_parlours = Column(Boolean, nullable=False, default=False)
+    perm_stock = Column(Boolean, nullable=False, default=False)
+    perm_sync_outlook = Column(Boolean, nullable=False, default=False)
+    perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
+    perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class ParlourImportBatch(Base):
@@ -204,6 +225,14 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     return engine
+
+
+def ensure_auth_ready():
+    """Create tables and seed the bootstrap admin when the user table is empty."""
+    init_db()
+    from services.auth import seed_admin_user
+
+    return seed_admin_user()
 
 
 @contextmanager

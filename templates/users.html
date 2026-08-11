@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Users · {{ app_name }}{% endblock %}
+{% block page_title %}Users{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <h2>Create user</h2>
+    <p class="lead">Add a login, set a password, and choose which pages and sync actions they can use. Admins get everything.</p>
+
+    <form method="post" action="{{ url_for('users_create') }}" class="user-form">
+      <div class="user-form-grid">
+        <div>
+          <label class="field-label" for="new_email">Email</label>
+          <input class="field-input" id="new_email" name="email" type="email" required autocomplete="off">
+        </div>
+        <div>
+          <label class="field-label" for="new_password">Password</label>
+          <input class="field-input" id="new_password" name="password" type="password" minlength="8" required autocomplete="new-password">
+        </div>
+      </div>
+
+      <label class="check-row">
+        <input type="checkbox" name="is_admin" value="1">
+        Admin (full access + manage users)
+      </label>
+
+      <fieldset class="perm-fieldset">
+        <legend>Pages</legend>
+        <div class="perm-grid">
+          {% for key in permission_keys if 'sync' not in key %}
+            <label class="check-row">
+              <input type="checkbox" name="{{ key }}" value="1" {% if key == 'perm_home' %}checked{% endif %}>
+              {{ permission_labels[key] }}
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="perm-fieldset">
+        <legend>Actions</legend>
+        <div class="perm-grid">
+          {% for key in permission_keys if 'sync' in key %}
+            <label class="check-row">
+              <input type="checkbox" name="{{ key }}" value="1">
+              {{ permission_labels[key] }}
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <button class="btn" type="submit">Create user</button>
+    </form>
+  </section>
+
+  <section class="panel" style="margin-top: 1.25rem;">
+    <h2>Existing users</h2>
+    {% if not users %}
+      <p class="empty">No users yet.</p>
+    {% else %}
+      <div class="user-list">
+        {% for user in users %}
+          <article class="user-card" data-user-card>
+            <div class="user-card-head">
+              <div>
+                <p class="user-email">{{ user.email }}</p>
+                <p class="user-meta">
+                  {% if user.is_admin %}Admin{% else %}User{% endif %}
+                  · {% if user.is_active %}Active{% else %}Inactive{% endif %}
+                </p>
+              </div>
+              <div class="user-card-actions">
+                <button class="btn ghost" type="button" data-edit-toggle>Edit</button>
+                {% if current_user and user.id != current_user.id %}
+                  <form
+                    method="post"
+                    action="{{ url_for('users_delete', user_id=user.id) }}"
+                    onsubmit="return confirm('Delete {{ user.email }}? This cannot be undone.');"
+                  >
+                    <button class="btn danger" type="submit">Delete</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
+
+            <form
+              method="post"
+              action="{{ url_for('users_update', user_id=user.id) }}"
+              class="user-edit-panel"
+              data-edit-panel
+              hidden
+            >
+              <div class="user-form-grid">
+                <div>
+                  <label class="field-label" for="email_{{ user.id }}">Email</label>
+                  <input
+                    class="field-input"
+                    id="email_{{ user.id }}"
+                    name="email"
+                    type="email"
+                    value="{{ user.email }}"
+                    required
+                    autocomplete="off"
+                  >
+                </div>
+                <div>
+                  <label class="field-label" for="password_{{ user.id }}">New password</label>
+                  <input
+                    class="field-input"
+                    id="password_{{ user.id }}"
+                    name="password"
+                    type="password"
+                    minlength="8"
+                    autocomplete="new-password"
+                    placeholder="Leave blank to keep current"
+                  >
+                </div>
+              </div>
+
+              <div class="user-form-grid">
+                <label class="check-row">
+                  <input type="checkbox" name="is_admin" value="1" {% if user.is_admin %}checked{% endif %}>
+                  Admin
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %}>
+                  Active
+                </label>
+              </div>
+
+              <fieldset class="perm-fieldset">
+                <legend>Pages</legend>
+                <div class="perm-grid">
+                  {% for key in permission_keys if 'sync' not in key %}
+                    <label class="check-row">
+                      <input
+                        type="checkbox"
+                        name="{{ key }}"
+                        value="1"
+                        {% if user|attr(key) or user.is_admin %}checked{% endif %}
+                      >
+                      {{ permission_labels[key] }}
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+
+              <fieldset class="perm-fieldset">
+                <legend>Actions</legend>
+                <div class="perm-grid">
+                  {% for key in permission_keys if 'sync' in key %}
+                    <label class="check-row">
+                      <input
+                        type="checkbox"
+                        name="{{ key }}"
+                        value="1"
+                        {% if user|attr(key) or user.is_admin %}checked{% endif %}
+                      >
+                      {{ permission_labels[key] }}
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+
+              <div class="user-edit-actions">
+                <button class="btn" type="submit">Save changes</button>
+                <button class="btn ghost" type="button" data-edit-cancel>Cancel</button>
+              </div>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    document.querySelectorAll("[data-user-card]").forEach((card) => {
+      const toggle = card.querySelector("[data-edit-toggle]");
+      const panel = card.querySelector("[data-edit-panel]");
+      const cancel = card.querySelector("[data-edit-cancel]");
+      if (!toggle || !panel) return;
+
+      const setOpen = (open) => {
+        panel.hidden = !open;
+        toggle.textContent = open ? "Close" : "Edit";
+      };
+
+      toggle.addEventListener("click", () => setOpen(panel.hidden));
+      if (cancel) cancel.addEventListener("click", () => setOpen(false));
+    });
+  </script>
+{% endblock %}

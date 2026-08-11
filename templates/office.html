@@ -29,35 +29,39 @@
         {% endif %}
       {% endif %}
 
-      <form
-        class="js-sync-form"
-        method="post"
-        action="{{ url_for('sync_from_outlook') }}"
-        data-sync-message="Synchronising Outlook…"
-      >
-        <button class="btn" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
-          <span class="btn-label">Sync from Outlook</span>
-          <span class="btn-busy" aria-hidden="true">
-            <span class="sync-spinner"></span>
-            Synchronising…
-          </span>
-        </button>
-      </form>
+      {% if can_sync_outlook %}
+        <form
+          class="js-sync-form"
+          method="post"
+          action="{{ url_for('sync_from_outlook') }}"
+          data-sync-message="Synchronising Outlook…"
+        >
+          <button class="btn" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
+            <span class="btn-label">Sync from Outlook</span>
+            <span class="btn-busy" aria-hidden="true">
+              <span class="sync-spinner"></span>
+              Synchronising…
+            </span>
+          </button>
+        </form>
+      {% endif %}
 
-      <form
-        class="js-sync-form"
-        method="post"
-        action="{{ url_for('sync_from_onedrive') }}"
-        data-sync-message="Synchronising OneDrive…"
-      >
-        <button class="btn secondary" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
-          <span class="btn-label">Sync from OneDrive</span>
-          <span class="btn-busy" aria-hidden="true">
-            <span class="sync-spinner"></span>
-            Synchronising…
-          </span>
-        </button>
-      </form>
+      {% if can_sync_onedrive %}
+        <form
+          class="js-sync-form"
+          method="post"
+          action="{{ url_for('sync_from_onedrive') }}"
+          data-sync-message="Synchronising OneDrive…"
+        >
+          <button class="btn secondary" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
+            <span class="btn-label">Sync from OneDrive</span>
+            <span class="btn-busy" aria-hidden="true">
+              <span class="sync-spinner"></span>
+              Synchronising…
+            </span>
+          </button>
+        </form>
+      {% endif %}
     </div>
   </section>
 

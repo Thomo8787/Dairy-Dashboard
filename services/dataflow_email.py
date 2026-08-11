@@ -188,6 +188,10 @@ class DataFlowCsvEmailService:
         content = graph_get_bytes(
             f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments/{attachment['id']}/$value"
         )
+        # Reject OLE/Excel binaries that were mislabeled as .csv
+        if content.startswith(b"\xd0\xcf\x11\xe0"):
+            logger.warning("Skipping non-CSV binary attachment: %s", name)
+            return None
         safe_name = Path(name).name
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         destination = self.download_dir / f"{timestamp}_{safe_name}"

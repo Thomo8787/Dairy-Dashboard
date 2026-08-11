@@ -8,11 +8,30 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
+from services.auth import (
+    PERMISSION_KEYS,
+    PERMISSION_LABELS,
+    PUBLIC_ENDPOINTS,
+    admin_required,
+    authenticate,
+    create_user,
+    current_user,
+    delete_user,
+    first_allowed_endpoint,
+    list_users,
+    login_user,
+    logout_user,
+    permission_required,
+    permissions_from_form,
+    update_user,
+    user_has_permission,
+    user_to_template,
+)
 from services.database import (
+    ensure_auth_ready,
     get_dashboard_summary,
     get_recent_records,
     health_check,
-    init_db,
     save_dataframe,
 )
 from services.excel_parser import parse_excel_file
@@ -27,8 +46,6 @@ from services.graph_client import (
     require_azure_config,
     save_token_result,
 )
-from services.graph_email import GraphEmailService
-from services.graph_onedrive import GraphOneDriveService
 from services.milking_efficiency_summary import (
     METRIC_BY_KEY,
     SHIFT_OPTIONS,
@@ -37,7 +54,7 @@ from services.milking_efficiency_summary import (
     build_pen_breakdown,
     build_seven_day_summary,
 )
-from services.navigation import NAV_ITEMS, parent_nav_id
+from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import IMPORT_DAY_OPTIONS, format_sync_summary, sync_parlour_emails
 
@@ -76,9 +93,12 @@ def _ensure_database():
     if getattr(app, "_db_initialized", False):
         return
     try:
-        init_db()
+        _, seed_error = ensure_auth_ready()
         app._db_initialized = True
+        app._auth_seed_error = seed_error
         logger.info("Database tables ready")
+        if seed_error:
+            logger.error("Admin seed: %s", seed_error)
     except Exception:
         logger.exception("Database init failed; will retry on next request")
 
@@ -108,8 +128,9 @@ def _page_context(active_nav: str = "home", **extra):
     except Exception:
         logger.exception("Could not load Microsoft connection status")
 
+    user = current_user()
     ctx = {
-        "nav_items": NAV_ITEMS,
+        "nav_items": filter_nav_items(user),
         "active_nav": active_nav,
         "active_parent_nav": parent_nav_id(active_nav),
         "farms": FARMS,
@@ -117,6 +138,10 @@ def _page_context(active_nav: str = "home", **extra):
         "connected": connected,
         "auth_mode": auth_mode(),
         "redirect_uri": get_redirect_uri(),
+        "current_user": user_to_template(user),
+        "can_sync_outlook": user_has_permission(user, "perm_sync_outlook"),
+        "can_sync_onedrive": user_has_permission(user, "perm_sync_onedrive"),
+        "can_sync_dataflow": user_has_permission(user, "perm_sync_dataflow"),
     }
     ctx.update(extra)
     return ctx
@@ -127,12 +152,64 @@ def ensure_database():
     _ensure_database()
 
 
+@app.before_request
+def require_login():
+    if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint is None:
+        return None
+    if request.endpoint.startswith("static"):
+        return None
+    user = current_user()
+    if user is None:
+        if request.endpoint and request.endpoint.startswith("milking_efficiency"):
+            return jsonify({"error": "Authentication required."}), 401
+        return redirect(url_for("login", next=request.path))
+    return None
+
+
 @app.context_processor
 def inject_globals():
     return {"app_name": "Thomasson Farms Dashboard"}
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    user = current_user()
+    if user is not None:
+        return redirect(url_for(first_allowed_endpoint(user)))
+
+    seed_error = getattr(app, "_auth_seed_error", None)
+    error = None
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        account = authenticate(email, password)
+        if account is None:
+            error = "Invalid email or password."
+        else:
+            login_user(account)
+            flash(f"Signed in as {account.email}.", "success")
+            next_url = request.args.get("next") or request.form.get("next") or ""
+            if next_url.startswith("/") and not next_url.startswith("//"):
+                return redirect(next_url)
+            return redirect(url_for(first_allowed_endpoint(account)))
+
+    return render_template(
+        "login.html",
+        error=error,
+        seed_error=seed_error,
+        next=request.args.get("next") or "",
+    )
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    logout_user()
+    flash("Signed out.", "info")
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@permission_required("perm_home")
 def home():
     summary = {"total_records": 0, "total_batches": 0, "latest_import": None, "recent_batches": [], "category_totals": []}
     records = []
@@ -151,6 +228,7 @@ def home():
 
 
 @app.route("/office")
+@permission_required("perm_office")
 def office():
     return render_template(
         "office.html",
@@ -158,7 +236,80 @@ def office():
     )
 
 
+@app.route("/users")
+@admin_required
+def users_admin():
+    return render_template(
+        "users.html",
+        users=list_users(),
+        permission_keys=PERMISSION_KEYS,
+        permission_labels=PERMISSION_LABELS,
+        **_page_context(active_nav="users"),
+    )
+
+
+@app.route("/users/create", methods=["POST"])
+@admin_required
+def users_create():
+    try:
+        create_user(
+            email=request.form.get("email") or "",
+            password=request.form.get("password") or "",
+            is_admin=bool(request.form.get("is_admin")),
+            is_active=True,
+            permissions=permissions_from_form(request.form),
+        )
+        flash("User created.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        logger.exception("Create user failed")
+        flash(f"Could not create user: {exc}", "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/<int:user_id>/update", methods=["POST"])
+@admin_required
+def users_update(user_id: int):
+    password = (request.form.get("password") or "").strip() or None
+    try:
+        updated = update_user(
+            user_id,
+            email=request.form.get("email") or "",
+            is_admin=bool(request.form.get("is_admin")),
+            is_active=bool(request.form.get("is_active")),
+            permissions=permissions_from_form(request.form),
+            password=password,
+        )
+        actor = current_user()
+        if actor and actor.id == updated.id:
+            session["user_email"] = updated.email
+        flash("User updated.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        logger.exception("Update user failed")
+        flash(f"Could not update user: {exc}", "error")
+    return redirect(url_for("users_admin"))
+
+
+@app.route("/users/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def users_delete(user_id: int):
+    actor = current_user()
+    try:
+        delete_user(user_id, acting_user_id=actor.id if actor else None)
+        flash("User deleted.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        logger.exception("Delete user failed")
+        flash(f"Could not delete user: {exc}", "error")
+    return redirect(url_for("users_admin"))
+
+
 @app.route("/parlours")
+@permission_required("perm_parlours")
 def parlours():
     return render_template(
         "parlours.html",
@@ -167,6 +318,7 @@ def parlours():
 
 
 @app.route("/parlours/milking-efficiency")
+@permission_required("perm_parlours")
 def milking_efficiency():
     farm_code = (request.args.get("farm") or "ALH").upper()
     if farm_code not in {farm.code for farm in FARMS}:
@@ -190,6 +342,12 @@ def milking_efficiency():
 
 @app.route("/parlours/milking-efficiency/pens")
 def milking_efficiency_pens():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not user_has_permission(user, "perm_parlours"):
+        return jsonify({"error": "Permission denied."}), 403
+
     farm_code = (request.args.get("farm") or "ALH").upper()
     if farm_code not in {farm.code for farm in FARMS}:
         farm_code = "ALH"
@@ -214,6 +372,12 @@ def milking_efficiency_pens():
 
 @app.route("/parlours/milking-efficiency/trend")
 def milking_efficiency_trend():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not user_has_permission(user, "perm_parlours"):
+        return jsonify({"error": "Permission denied."}), 403
+
     farm_code = (request.args.get("farm") or "ALH").upper()
     if farm_code not in {farm.code for farm in FARMS}:
         farm_code = "ALH"
@@ -240,6 +404,7 @@ def milking_efficiency_trend():
 
 
 @app.route("/stock-inventory")
+@permission_required("perm_stock")
 def stock_inventory():
     return render_template(
         "stock_inventory.html",
@@ -249,11 +414,13 @@ def stock_inventory():
 
 # Keep old URL working
 @app.route("/dashboard")
+@permission_required("perm_home")
 def dashboard():
     return redirect(url_for("home"))
 
 
 @app.route("/auth/login")
+@permission_required("perm_office")
 def auth_login():
     missing = require_azure_config()
     if missing:
@@ -266,6 +433,7 @@ def auth_login():
 
 
 @app.route("/auth/callback")
+@permission_required("perm_office")
 def auth_callback():
     error = request.args.get("error")
     if error:
@@ -295,6 +463,7 @@ def auth_callback():
 
 
 @app.route("/auth/logout", methods=["POST"])
+@permission_required("perm_office")
 def auth_logout():
     try:
         clear_saved_token()
@@ -305,6 +474,7 @@ def auth_logout():
 
 
 @app.route("/sync", methods=["POST"])
+@permission_required("perm_sync_outlook")
 def sync_from_outlook():
     missing = require_azure_config()
     if missing:
@@ -331,6 +501,7 @@ def sync_from_outlook():
 
 
 @app.route("/sync-onedrive", methods=["POST"])
+@permission_required("perm_sync_onedrive")
 def sync_from_onedrive():
     missing = require_azure_config()
     if missing:
@@ -357,6 +528,7 @@ def sync_from_onedrive():
 
 
 @app.route("/sync-milk-flow", methods=["POST"])
+@permission_required("perm_sync_dataflow")
 def sync_milk_flow():
     """Manual import: look back N days and overwrite parlour data in that window."""
     farm_code = (request.form.get("farm") or request.args.get("farm") or "ALH").upper()

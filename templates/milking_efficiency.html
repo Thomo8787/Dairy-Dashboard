@@ -40,34 +40,38 @@
           Farm/shift chips only change what you view. An hourly job also checks for
           new emails while the dashboard is open.
         </p>
-        <form
-          class="js-sync-form"
-          method="post"
-          action="{{ url_for('sync_milk_flow') }}"
-          data-sync-message="Synchronising all farms & shifts from DataFlow…"
-        >
-          <input type="hidden" name="farm" value="{{ selected_farm }}">
-          <input type="hidden" name="shift" value="{{ selected_shift }}">
-          <label class="me-label" for="days_back">Days back</label>
-          <select id="days_back" name="days_back" class="me-select">
-            {% for days in import_day_options %}
-              <option value="{{ days }}" {% if days == 7 %}selected{% endif %}>
-                Last {{ days }} day{% if days != 1 %}s{% endif %}
-              </option>
-            {% endfor %}
-          </select>
-          <button class="btn me-import-btn" type="submit">
-            <span class="btn-label">Import &amp; overwrite</span>
-            <span class="btn-busy" aria-hidden="true">
-              <span class="sync-spinner"></span>
-              Synchronising…
-            </span>
-          </button>
-          <p class="sync-status" data-sync-status role="status" aria-live="polite">
-            <span class="sync-spinner is-dark" aria-hidden="true"></span>
-            <span data-sync-status-text>Synchronising…</span>
-          </p>
-        </form>
+        {% if can_sync_dataflow %}
+          <form
+            class="js-sync-form"
+            method="post"
+            action="{{ url_for('sync_milk_flow') }}"
+            data-sync-message="Synchronising all farms & shifts from DataFlow…"
+          >
+            <input type="hidden" name="farm" value="{{ selected_farm }}">
+            <input type="hidden" name="shift" value="{{ selected_shift }}">
+            <label class="me-label" for="days_back">Days back</label>
+            <select id="days_back" name="days_back" class="me-select">
+              {% for days in import_day_options %}
+                <option value="{{ days }}" {% if days == 7 %}selected{% endif %}>
+                  Last {{ days }} day{% if days != 1 %}s{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <button class="btn me-import-btn" type="submit">
+              <span class="btn-label">Import &amp; overwrite</span>
+              <span class="btn-busy" aria-hidden="true">
+                <span class="sync-spinner"></span>
+                Synchronising…
+              </span>
+            </button>
+            <p class="sync-status" data-sync-status role="status" aria-live="polite">
+              <span class="sync-spinner is-dark" aria-hidden="true"></span>
+              <span data-sync-status-text>Synchronising…</span>
+            </p>
+          </form>
+        {% else %}
+          <p class="me-help">You do not have permission to import DataFlow reports.</p>
+        {% endif %}
       </div>
 
       <div class="me-filter-block me-upload">
