@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import requests
 
 from services.graph_client import GRAPH_BASE, auth_mode, graph_get, graph_get_bytes, graph_headers
+
+logger = logging.getLogger(__name__)
 
 
 class DataFlowCsvEmailService:
@@ -36,6 +39,40 @@ class DataFlowCsvEmailService:
             return "me"
         return f"users/{quote(self.mailbox)}"
 
+    def _message_matches(
+        self,
+        message: dict,
+        *,
+        since: datetime | None,
+        skip_message_ids: set[str],
+    ) -> bool:
+        message_id = message.get("id") or ""
+        if message_id in skip_message_ids:
+            return False
+        if not message.get("hasAttachments"):
+            return False
+
+        received_at = _parse_received(message.get("receivedDateTime"))
+        if since is not None:
+            if received_at is None:
+                return False
+            since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+            if received_at < since_aware:
+                return False
+
+        subject = (message.get("subject") or "").lower()
+        sender = (
+            message.get("from", {})
+            .get("emailAddress", {})
+            .get("address", "")
+            .lower()
+        )
+        if self.SUBJECT_CONTAINS not in subject:
+            return False
+        if self.SENDER_DOMAIN not in sender:
+            return False
+        return True
+
     def _search_messages(
         self,
         top: int = 50,
@@ -43,11 +80,82 @@ class DataFlowCsvEmailService:
         since: datetime | None = None,
         skip_message_ids: set[str] | None = None,
     ) -> list[dict]:
+        """
+        Prefer newest-first inbox paging filtered by receivedDateTime.
+
+        Graph $search ranks by relevance and often misses the newest reports when
+        many historical Milk Flow / Rotary Entry emails exist.
+        """
+        skip = skip_message_ids or set()
+        since_aware = since
+        if since_aware is None:
+            since_aware = datetime.now(timezone.utc) - timedelta(days=14)
+        elif since_aware.tzinfo is None:
+            since_aware = since_aware.replace(tzinfo=timezone.utc)
+
+        matches = self._list_messages_by_received(
+            top=top, since=since_aware, skip_message_ids=skip
+        )
+        if matches:
+            return matches
+
+        logger.warning(
+            "Date-ordered Graph fetch returned no %s matches; falling back to $search",
+            self.SEARCH_SUBJECT,
+        )
+        return self._list_messages_by_search(
+            top=top, since=since_aware, skip_message_ids=skip
+        )
+
+    def _list_messages_by_received(
+        self,
+        *,
+        top: int,
+        since: datetime,
+        skip_message_ids: set[str],
+    ) -> list[dict]:
+        root = self._mailbox_root()
+        since_iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        query = urlencode(
+            {
+                "$filter": f"receivedDateTime ge {since_iso} and hasAttachments eq true",
+                "$orderby": "receivedDateTime desc",
+                "$top": "50",
+                "$select": "id,subject,receivedDateTime,from,hasAttachments",
+            }
+        )
+        url: str | None = f"{GRAPH_BASE}/{root}/messages?{query}"
+        matches: list[dict] = []
+        pages = 0
+
+        while url and len(matches) < top and pages < 20:
+            pages += 1
+            response = requests.get(url, headers=graph_headers(), timeout=60)
+            response.raise_for_status()
+            payload = response.json()
+            for message in payload.get("value", []):
+                if self._message_matches(
+                    message, since=since, skip_message_ids=skip_message_ids
+                ):
+                    matches.append(message)
+                    if len(matches) >= top:
+                        break
+            url = payload.get("@odata.nextLink")
+
+        return matches
+
+    def _list_messages_by_search(
+        self,
+        *,
+        top: int,
+        since: datetime,
+        skip_message_ids: set[str],
+    ) -> list[dict]:
         root = self._mailbox_root()
         url = (
             f"{GRAPH_BASE}/{root}/messages"
             f'?$search="subject:{self.SEARCH_SUBJECT}"'
-            f"&$top={top}"
+            f"&$top={max(top, 100)}"
             f"&$select=id,subject,receivedDateTime,from,hasAttachments"
         )
         response = requests.get(
@@ -56,36 +164,12 @@ class DataFlowCsvEmailService:
             timeout=60,
         )
         response.raise_for_status()
-        messages = response.json().get("value", [])
-        skip = skip_message_ids or set()
         matches = []
-        for message in messages:
-            message_id = message.get("id") or ""
-            if message_id in skip:
-                continue
-            if not message.get("hasAttachments"):
-                continue
-
-            received_at = _parse_received(message.get("receivedDateTime"))
-            if since is not None and received_at is not None:
-                since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
-                if received_at < since_aware:
-                    continue
-            elif since is not None and received_at is None:
-                continue
-
-            subject = (message.get("subject") or "").lower()
-            sender = (
-                message.get("from", {})
-                .get("emailAddress", {})
-                .get("address", "")
-                .lower()
-            )
-            if self.SUBJECT_CONTAINS not in subject:
-                continue
-            if self.SENDER_DOMAIN not in sender:
-                continue
-            matches.append(message)
+        for message in response.json().get("value", []):
+            if self._message_matches(
+                message, since=since, skip_message_ids=skip_message_ids
+            ):
+                matches.append(message)
         return matches
 
     def _list_attachments(self, message_id: str) -> list[dict]:
@@ -112,7 +196,7 @@ class DataFlowCsvEmailService:
 
     def fetch_csvs(
         self,
-        top: int = 50,
+        top: int = 100,
         *,
         since: datetime | None = None,
         skip_message_ids: set[str] | None = None,

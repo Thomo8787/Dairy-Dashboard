@@ -54,6 +54,11 @@
       </header>
 
       <main class="content">
+        <div id="syncBanner" class="sync-banner" role="status" aria-live="polite" hidden>
+          <span class="sync-spinner" aria-hidden="true"></span>
+          <span id="syncBannerText">Synchronising…</span>
+        </div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             {% for category, message in messages %}
@@ -73,6 +78,42 @@
     if (toggle && sidebar) {
       toggle.addEventListener("click", () => sidebar.classList.toggle("is-open"));
     }
+
+    function setSyncingUI(form, message) {
+      const banner = document.getElementById("syncBanner");
+      const bannerText = document.getElementById("syncBannerText");
+      const button = form.querySelector('button[type="submit"]');
+      const status = form.querySelector("[data-sync-status]");
+      const statusText = form.querySelector("[data-sync-status-text]");
+
+      if (button) {
+        button.classList.add("is-syncing");
+        button.setAttribute("aria-busy", "true");
+        // Disable after the browser has queued the POST so days_back still submits.
+        window.setTimeout(() => {
+          button.disabled = true;
+        }, 0);
+      }
+      if (status) {
+        status.classList.add("is-visible");
+        if (statusText) statusText.textContent = message;
+      }
+      if (banner && bannerText) {
+        bannerText.textContent = message;
+        banner.hidden = false;
+        banner.classList.add("is-visible");
+      }
+      document.body.classList.add("is-syncing");
+    }
+
+    document.querySelectorAll("form.js-sync-form").forEach((form) => {
+      form.addEventListener("submit", () => {
+        const message =
+          form.getAttribute("data-sync-message") || "Synchronising…";
+        setSyncingUI(form, message);
+      });
+    });
   </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

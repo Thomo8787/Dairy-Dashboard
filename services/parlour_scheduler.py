@@ -25,7 +25,7 @@ def _run_incremental_sync() -> None:
     from services.parlour_sync import format_sync_summary, sync_parlour_emails
 
     try:
-        result = sync_parlour_emails(farm_code="ALH", overwrite=False, days_back=2)
+        result = sync_parlour_emails(farm_code=None, overwrite=False, days_back=2)
         if result.get("skipped"):
             logger.info("Hourly parlour sync: no new emails — skipped")
         else:

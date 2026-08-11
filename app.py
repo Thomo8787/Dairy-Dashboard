@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 from services.database import (
     get_dashboard_summary,
@@ -29,7 +29,14 @@ from services.graph_client import (
 )
 from services.graph_email import GraphEmailService
 from services.graph_onedrive import GraphOneDriveService
-from services.milking_efficiency_summary import SHIFT_OPTIONS, build_seven_day_summary
+from services.milking_efficiency_summary import (
+    METRIC_BY_KEY,
+    SHIFT_OPTIONS,
+    TREND_DAY_COUNT,
+    build_metric_trend,
+    build_pen_breakdown,
+    build_seven_day_summary,
+)
 from services.navigation import NAV_ITEMS, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import IMPORT_DAY_OPTIONS, format_sync_summary, sync_parlour_emails
@@ -42,13 +49,27 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
-# Local/dev: pick up HTML/CSS changes on browser refresh without restarting.
-# Python (.py) changes still need a restart (or debug reloader).
+# Local/dev: templates/static refresh on browser reload; Python auto-reloads via
+# FLASK_USE_RELOADER (enabled by the desktop launcher).
 _running_local = not bool(os.environ.get("RENDER"))
 if _running_local or os.environ.get("FLASK_DEBUG", "").lower() == "true":
     app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.jinja_env.auto_reload = True
+
+
+def _use_reloader() -> bool:
+    raw = os.environ.get("FLASK_USE_RELOADER")
+    if raw is None:
+        return _running_local
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_start_background_jobs() -> bool:
+    """Avoid starting the hourly sync twice under Werkzeug's reloader parent."""
+    if not _use_reloader():
+        return True
+    return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
 
 def _ensure_database():
@@ -164,6 +185,57 @@ def milking_efficiency():
         selected_farm=farm_code,
         selected_shift=shift_id,
         **_page_context(active_nav="milking_efficiency"),
+    )
+
+
+@app.route("/parlours/milking-efficiency/pens")
+def milking_efficiency_pens():
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    if farm_code not in {farm.code for farm in FARMS}:
+        farm_code = "ALH"
+    shift_id = request.args.get("shift") or "Morning"
+    if shift_id not in {item["id"] for item in SHIFT_OPTIONS}:
+        shift_id = "Morning"
+
+    date_raw = (request.args.get("date") or "").strip()
+    try:
+        milking_date = datetime.strptime(date_raw, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+
+    return jsonify(
+        build_pen_breakdown(
+            farm_code=farm_code,
+            shift_id=shift_id,
+            milking_date=milking_date,
+        )
+    )
+
+
+@app.route("/parlours/milking-efficiency/trend")
+def milking_efficiency_trend():
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    if farm_code not in {farm.code for farm in FARMS}:
+        farm_code = "ALH"
+
+    metric_key = (request.args.get("metric") or "").strip()
+    if metric_key not in METRIC_BY_KEY:
+        return jsonify({"error": "Unknown metric."}), 400
+
+    try:
+        days = int(request.args.get("days") or TREND_DAY_COUNT)
+    except ValueError:
+        days = TREND_DAY_COUNT
+
+    pen = (request.args.get("pen") or "").strip() or None
+
+    return jsonify(
+        build_metric_trend(
+            farm_code=farm_code,
+            metric_key=metric_key,
+            days=days,
+            pen=pen,
+        )
     )
 
 
@@ -304,10 +376,10 @@ def sync_milk_flow():
 
     try:
         result = sync_parlour_emails(
-            farm_code="ALH",
+            farm_code=None,
             days_back=days_back,
             overwrite=True,
-            top=max(80, days_back * 12),
+            top=max(150, days_back * 25),
         )
         flash(format_sync_summary(result), "info" if result.get("skipped") else "success")
     except Exception as exc:
@@ -332,10 +404,26 @@ def health():
 
 with app.app_context():
     _ensure_database()
-    start_parlour_hourly_sync(app)
+    if _should_start_background_jobs():
+        start_parlour_hourly_sync(app)
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    reloader = _use_reloader()
+    if reloader:
+        logger.info("Auto-reloader enabled — Python changes apply without a manual restart")
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=debug,
+        use_reloader=reloader,
+        use_debugger=debug,
+        exclude_patterns=[
+            "*/data/*",
+            "*/.venv/*",
+            "*/__pycache__/*",
+            "*/.git/*",
+        ],
+    )

@@ -18,6 +18,8 @@ class Farm:
     """Logical dairy data group id, e.g. 'alh_bnk' for shared DairyComp."""
     has_dairycomp: bool = False
     active_for_imports: bool = False
+    # DataFlow night/evening milkings keep one milking_date across midnight.
+    night_shift_crosses_midnight: bool = True
 
 
 FARMS: tuple[Farm, ...] = (
@@ -28,6 +30,7 @@ FARMS: tuple[Farm, ...] = (
         dairy_data_group="alh_bnk",
         has_dairycomp=True,
         active_for_imports=True,
+        night_shift_crosses_midnight=True,
     ),
     Farm(
         code="BNK",
@@ -36,6 +39,7 @@ FARMS: tuple[Farm, ...] = (
         dairy_data_group="alh_bnk",
         has_dairycomp=True,
         active_for_imports=True,
+        night_shift_crosses_midnight=True,
     ),
     Farm(
         code="SFR",
@@ -44,6 +48,7 @@ FARMS: tuple[Farm, ...] = (
         dairy_data_group="sfr",
         has_dairycomp=False,
         active_for_imports=False,
+        night_shift_crosses_midnight=True,
     ),
     Farm(
         code="PRK",
@@ -52,6 +57,7 @@ FARMS: tuple[Farm, ...] = (
         dairy_data_group="prk",
         has_dairycomp=False,
         active_for_imports=False,
+        night_shift_crosses_midnight=True,
     ),
     Farm(
         code="COF",
@@ -60,6 +66,7 @@ FARMS: tuple[Farm, ...] = (
         dairy_data_group="cof",
         has_dairycomp=False,
         active_for_imports=False,
+        night_shift_crosses_midnight=True,
     ),
 )
 

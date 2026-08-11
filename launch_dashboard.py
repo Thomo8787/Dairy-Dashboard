@@ -140,17 +140,19 @@ def main() -> int:
         input("Press Enter to close...")
         return 1
 
+    env = os.environ.copy()
+    # Auto-reload Python on save. Templates/static already refresh on browser reload.
+    env.setdefault("FLASK_USE_RELOADER", "true")
+    env.setdefault("FLASK_DEBUG", "false")
+    env.setdefault("TEMPLATES_AUTO_RELOAD", "true")
+
     print("Starting Thomasson Farms Dashboard...")
     print(f"Project: {root}")
     print(f"Python:  {python}")
     print(f"URL:     {HOST_URL}")
+    print("Auto-reload is on — save a .py file and wait a second; no manual restart needed.")
     print("Leave this window open while using the dashboard.")
     print("Close this window to stop the server.\n")
-
-    env = os.environ.copy()
-    # Keep templates/static refreshing on browser reload while developing locally.
-    env.setdefault("FLASK_DEBUG", "false")
-    env.setdefault("TEMPLATES_AUTO_RELOAD", "true")
 
     proc = subprocess.Popen(
         [str(python), str(app_path)],

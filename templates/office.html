@@ -29,15 +29,33 @@
         {% endif %}
       {% endif %}
 
-      <form method="post" action="{{ url_for('sync_from_outlook') }}">
+      <form
+        class="js-sync-form"
+        method="post"
+        action="{{ url_for('sync_from_outlook') }}"
+        data-sync-message="Synchronising Outlook…"
+      >
         <button class="btn" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
-          Sync from Outlook
+          <span class="btn-label">Sync from Outlook</span>
+          <span class="btn-busy" aria-hidden="true">
+            <span class="sync-spinner"></span>
+            Synchronising…
+          </span>
         </button>
       </form>
 
-      <form method="post" action="{{ url_for('sync_from_onedrive') }}">
+      <form
+        class="js-sync-form"
+        method="post"
+        action="{{ url_for('sync_from_onedrive') }}"
+        data-sync-message="Synchronising OneDrive…"
+      >
         <button class="btn secondary" type="submit" {% if auth_mode == 'delegated' and not connected %}disabled{% endif %}>
-          Sync from OneDrive
+          <span class="btn-label">Sync from OneDrive</span>
+          <span class="btn-busy" aria-hidden="true">
+            <span class="sync-spinner"></span>
+            Synchronising…
+          </span>
         </button>
       </form>
     </div>
