@@ -15,6 +15,11 @@ services:
         value: "3.12.7"
       - key: FLASK_DEBUG
         value: "false"
+      - key: FLASK_USE_RELOADER
+        value: "false"
+      # Hourly fetch is handled by the cron service below (web free tier sleeps).
+      - key: PARLOUR_HOURLY_SYNC
+        value: "false"
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
@@ -24,29 +29,57 @@ services:
       - key: GRAPH_AUTH_MODE
         value: application
       - key: AZURE_CLIENT_ID
-        value: ""
+        sync: false
       - key: AZURE_CLIENT_SECRET
-        value: ""
+        sync: false
       - key: AZURE_TENANT_ID
-        value: ""
+        sync: false
       - key: AZURE_REDIRECT_URI
-        value: ""
+        sync: false
       - key: OUTLOOK_MAILBOX
-        value: parlours@alhfarm.com
+        sync: false
       - key: OUTLOOK_SENDER_FILTER
         value: ""
       - key: OUTLOOK_SUBJECT_FILTER
         value: ""
       - key: ONEDRIVE_USER
-        value: parlours@alhfarm.com
+        sync: false
       - key: ONEDRIVE_SHARE_URL
-        value: ""
+        sync: false
       - key: ONEDRIVE_FOLDER_PATH
         value: ""
       - key: ONEDRIVE_FILENAME_FILTER
         value: ""
       - key: ONEDRIVE_MAX_FILES
         value: "100"
+
+  # Hourly DataFlow Milk Flow + Rotary Entry ID import (UTC).
+  # Uses the same Azure + mailbox secrets as the web service.
+  - type: cron
+    name: parlour-email-sync
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "0 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/sync_parlour_emails.py --days-back 2
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: GRAPH_AUTH_MODE
+        value: application
+      - key: AZURE_CLIENT_ID
+        sync: false
+      - key: AZURE_CLIENT_SECRET
+        sync: false
+      - key: AZURE_TENANT_ID
+        sync: false
+      - key: OUTLOOK_MAILBOX
+        sync: false
 
 databases:
   - name: dairy-dashboard-db
