@@ -38,14 +38,20 @@
           <strong>all shifts</strong> found in the emails (farm code is read from the
           filename, e.g. ALH / COF). Manual import overwrites that date window.
           Farm/shift chips only change what you view. An hourly job also checks for
-          new emails while the dashboard is open.
+          new emails while the dashboard is open. Large imports run in the
+          background — refresh after a few minutes to see updated figures.
         </p>
         {% if can_sync_dataflow %}
+          {% if manual_sync_status and manual_sync_status.running %}
+            <p class="me-help sync-running" role="status">
+              Import in progress for last {{ manual_sync_status.days_back }} day(s)…
+            </p>
+          {% endif %}
           <form
             class="js-sync-form"
             method="post"
             action="{{ url_for('sync_milk_flow') }}"
-            data-sync-message="Synchronising all farms & shifts from DataFlow…"
+            data-sync-message="Starting DataFlow import for all farms &amp; shifts…"
           >
             <input type="hidden" name="farm" value="{{ selected_farm }}">
             <input type="hidden" name="shift" value="{{ selected_shift }}">

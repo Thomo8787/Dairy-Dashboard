@@ -356,6 +356,16 @@ def save_milk_flow_records(
 
         inserted = 0
         seen_keys: set[tuple] = set()
+        pending: list[MilkFlowRecord] = []
+
+        def _flush_pending() -> None:
+            nonlocal pending, inserted
+            if not pending:
+                return
+            session.bulk_save_objects(pending)
+            inserted += len(pending)
+            pending = []
+
         for row in records:
             key = (
                 row["farm_code"],
@@ -385,7 +395,7 @@ def save_milk_flow_records(
                 if exists:
                     continue
 
-            session.add(
+            pending.append(
                 MilkFlowRecord(
                     batch_id=batch.id,
                     farm_code=row["farm_code"],
@@ -411,8 +421,11 @@ def save_milk_flow_records(
                     milking_point=row.get("milking_point"),
                 )
             )
-            inserted += 1
+            # Chunked flush keeps memory down on large overwrite imports.
+            if not skip_duplicates and len(pending) >= 500:
+                _flush_pending()
 
+        _flush_pending()
         batch.row_count = inserted
         return batch.id, inserted
 
@@ -491,6 +504,16 @@ def save_rotary_entry_id_records(
 
         inserted = 0
         seen_keys: set[tuple] = set()
+        pending: list[RotaryEntryIdRecord] = []
+
+        def _flush_pending() -> None:
+            nonlocal pending, inserted
+            if not pending:
+                return
+            session.bulk_save_objects(pending)
+            inserted += len(pending)
+            pending = []
+
         for row in records:
             key = (
                 row["farm_code"],
@@ -516,7 +539,7 @@ def save_rotary_entry_id_records(
                 if exists:
                     continue
 
-            session.add(
+            pending.append(
                 RotaryEntryIdRecord(
                     batch_id=batch.id,
                     farm_code=row["farm_code"],
@@ -526,8 +549,10 @@ def save_rotary_entry_id_records(
                     identification_time=row["identification_time"],
                 )
             )
-            inserted += 1
+            if not skip_duplicates and len(pending) >= 500:
+                _flush_pending()
 
+        _flush_pending()
         batch.row_count = inserted
         return batch.id, inserted
 

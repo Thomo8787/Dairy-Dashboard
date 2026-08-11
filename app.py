@@ -56,7 +56,12 @@ from services.milking_efficiency_summary import (
 )
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
-from services.parlour_sync import IMPORT_DAY_OPTIONS, format_sync_summary, sync_parlour_emails
+from services.parlour_sync import (
+    IMPORT_DAY_OPTIONS,
+    consume_manual_sync_result,
+    get_manual_sync_status,
+    start_manual_sync_job,
+)
 
 load_dotenv()
 
@@ -328,6 +333,13 @@ def milking_efficiency():
         shift_id = "Morning"
 
     summary = build_seven_day_summary(farm_code=farm_code, shift_id=shift_id)
+    sync_status = get_manual_sync_status()
+    if not sync_status.get("running"):
+        finished = consume_manual_sync_result()
+        if finished and finished.get("error"):
+            flash(f"Last parlour import failed: {finished['error']}", "error")
+        elif finished and finished.get("summary"):
+            flash(finished["summary"], "success")
 
     return render_template(
         "milking_efficiency.html",
@@ -336,6 +348,7 @@ def milking_efficiency():
         import_day_options=IMPORT_DAY_OPTIONS,
         selected_farm=farm_code,
         selected_shift=shift_id,
+        manual_sync_status=sync_status,
         **_page_context(active_nav="milking_efficiency"),
     )
 
@@ -546,17 +559,14 @@ def sync_milk_flow():
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
 
-    try:
-        result = sync_parlour_emails(
-            farm_code=None,
-            days_back=days_back,
-            overwrite=True,
-            top=max(150, days_back * 25),
-        )
-        flash(format_sync_summary(result), "info" if result.get("skipped") else "success")
-    except Exception as exc:
-        logger.exception("Parlour report sync failed")
-        flash(f"Parlour report sync failed: {exc}", "error")
+    # Run off the request thread so the single Gunicorn worker can still answer
+    # /health while Graph download + multi-farm insert runs (minutes, not seconds).
+    started, message = start_manual_sync_job(
+        days_back=days_back,
+        farm_code=None,
+        overwrite=True,
+    )
+    flash(message, "info" if started else "error")
 
     return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
 

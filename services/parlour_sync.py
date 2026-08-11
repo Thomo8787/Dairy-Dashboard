@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -25,6 +26,110 @@ logger = logging.getLogger(__name__)
 
 IMPORT_DAY_OPTIONS = (1, 3, 7, 14, 30)
 _FARM_CODES = tuple(sorted(FARMS_BY_CODE.keys(), key=len, reverse=True))
+
+# Manual UI sync runs in a background thread so the web worker can still
+# answer Render health checks (single sync worker + long overwrite = restart).
+_manual_job_lock = threading.Lock()
+_manual_job_state: dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "days_back": None,
+    "summary": None,
+    "error": None,
+}
+
+
+def recommended_email_top(days_back: int) -> int:
+    """Cap Graph page size so a 7–30 day overwrite doesn't download forever."""
+    days = max(1, int(days_back))
+    return min(120, max(40, days * 12))
+
+
+def get_manual_sync_status() -> dict[str, Any]:
+    with _manual_job_lock:
+        return dict(_manual_job_state)
+
+
+def consume_manual_sync_result() -> dict[str, Any] | None:
+    """Return and clear a finished run's summary/error (for one-shot flash)."""
+    with _manual_job_lock:
+        if _manual_job_state["running"]:
+            return dict(_manual_job_state)
+        summary = _manual_job_state.get("summary")
+        error = _manual_job_state.get("error")
+        if not summary and not error:
+            return None
+        snapshot = dict(_manual_job_state)
+        _manual_job_state["summary"] = None
+        _manual_job_state["error"] = None
+        return snapshot
+
+
+def start_manual_sync_job(
+    *,
+    days_back: int,
+    farm_code: str | None = None,
+    overwrite: bool = True,
+) -> tuple[bool, str]:
+    """
+    Kick off overwrite import in a daemon thread.
+    Returns (started, message). If already running, started=False.
+    """
+    with _manual_job_lock:
+        if _manual_job_state["running"]:
+            return (
+                False,
+                "A parlour import is already running. Wait for it to finish, then refresh.",
+            )
+        _manual_job_state.update(
+            {
+                "running": True,
+                "started_at": datetime.now(timezone.utc),
+                "finished_at": None,
+                "days_back": days_back,
+                "summary": None,
+                "error": None,
+            }
+        )
+
+    top = recommended_email_top(days_back)
+
+    def _runner() -> None:
+        try:
+            logger.info(
+                "Manual parlour import started (days_back=%s overwrite=%s top=%s)",
+                days_back,
+                overwrite,
+                top,
+            )
+            result = sync_parlour_emails(
+                farm_code=farm_code,
+                days_back=days_back,
+                overwrite=overwrite,
+                top=top,
+            )
+            summary = format_sync_summary(result)
+            with _manual_job_lock:
+                _manual_job_state["summary"] = summary
+                _manual_job_state["error"] = None
+            logger.info("Manual parlour import finished: %s", summary)
+        except Exception as exc:
+            logger.exception("Manual parlour import failed")
+            with _manual_job_lock:
+                _manual_job_state["summary"] = None
+                _manual_job_state["error"] = str(exc)
+        finally:
+            with _manual_job_lock:
+                _manual_job_state["running"] = False
+                _manual_job_state["finished_at"] = datetime.now(timezone.utc)
+
+    threading.Thread(target=_runner, name="parlour-manual-sync", daemon=True).start()
+    return (
+        True,
+        f"Import started for the last {days_back} day(s). "
+        "This can take several minutes — refresh the page shortly for results.",
+    )
 
 
 def detect_farm_code(*texts: str) -> str | None:
@@ -115,27 +220,30 @@ def sync_parlour_emails(
         days = max(1, int(days_back or 7))
         since = _since_for_days_back(days)
         start_date, end_date = _date_window(days)
-        deleted = delete_parlour_records_in_date_range(scoped_farm, start_date, end_date)
-        logger.info(
-            "Overwrite window %s..%s for %s — deleted milk=%s entry=%s",
-            start_date,
-            end_date,
-            scoped_farm or "ALL FARMS",
-            deleted["milk_flow_deleted"],
-            deleted["rotary_entry_deleted"],
-        )
     else:
         # Hourly / incremental: ignore already-imported Graph message IDs (any farm).
         skip_ids = get_imported_parlour_message_ids(None)
         since = _since_for_days_back(int(days_back or 2))
 
+    # Fetch first, then delete — avoids wiping the window if Graph fails mid-run.
     milk_service = MilkFlowEmailService()
     entry_service = RotaryEntryEmailService()
+    logger.info(
+        "Fetching parlour emails (top=%s since=%s overwrite=%s)",
+        top,
+        since,
+        overwrite,
+    )
     milk_downloads = milk_service.fetch_milk_flow_csvs(
         top=top, since=since, skip_message_ids=skip_ids
     )
     entry_downloads = entry_service.fetch_rotary_entry_csvs(
         top=top, since=since, skip_message_ids=skip_ids
+    )
+    logger.info(
+        "Fetched milk=%s rotary=%s email attachment(s)",
+        len(milk_downloads),
+        len(entry_downloads),
     )
 
     if not milk_downloads and not entry_downloads:
@@ -156,7 +264,19 @@ def sync_parlour_emails(
             "skipped_files": 0,
         }
 
-    skip_duplicates = True
+    if overwrite and start_date and end_date:
+        deleted = delete_parlour_records_in_date_range(scoped_farm, start_date, end_date)
+        logger.info(
+            "Overwrite window %s..%s for %s — deleted milk=%s entry=%s",
+            start_date,
+            end_date,
+            scoped_farm or "ALL FARMS",
+            deleted["milk_flow_deleted"],
+            deleted["rotary_entry_deleted"],
+        )
+
+    # After overwrite delete, skip per-row EXISTS checks (N+1) — window is empty.
+    skip_duplicates = not overwrite
     milk_files = 0
     milk_rows = 0
     entry_files = 0
@@ -165,7 +285,7 @@ def sync_parlour_emails(
     farms_seen: set[str] = set()
     milking_dates_seen: set[date] = set()
 
-    for item in milk_downloads:
+    for index, item in enumerate(milk_downloads, start=1):
         farm = detect_farm_code(item.get("filename", ""), item.get("email_subject", ""))
         if not farm:
             skipped_files += 1
@@ -198,8 +318,16 @@ def sync_parlour_emails(
         milk_files += 1
         milk_rows += inserted
         farms_seen.add(farm)
+        if index == 1 or index % 5 == 0 or index == len(milk_downloads):
+            logger.info(
+                "Milk Flow progress %s/%s — %s rows so far (%s)",
+                index,
+                len(milk_downloads),
+                milk_rows,
+                item.get("filename"),
+            )
 
-    for item in entry_downloads:
+    for index, item in enumerate(entry_downloads, start=1):
         farm = detect_farm_code(item.get("filename", ""), item.get("email_subject", ""))
         if not farm:
             skipped_files += 1
@@ -232,6 +360,14 @@ def sync_parlour_emails(
         entry_files += 1
         entry_rows += inserted
         farms_seen.add(farm)
+        if index == 1 or index % 5 == 0 or index == len(entry_downloads):
+            logger.info(
+                "Rotary Entry progress %s/%s — %s rows so far (%s)",
+                index,
+                len(entry_downloads),
+                entry_rows,
+                item.get("filename"),
+            )
 
     return {
         "skipped": False,
