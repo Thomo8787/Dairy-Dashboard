@@ -299,9 +299,15 @@ def health_check() -> bool:
         return True
 
 
-def save_milk_flow_records(batch_meta: dict, records: list[dict]) -> tuple[int, int]:
+def save_milk_flow_records(
+    batch_meta: dict,
+    records: list[dict],
+    *,
+    skip_duplicates: bool = True,
+) -> tuple[int, int]:
     """
-    Persist Milk Flow rows. Skips duplicates by unique milking key.
+    Persist Milk Flow rows.
+    When skip_duplicates is True, skips rows that already exist by unique milking key.
     Returns (batch_id, inserted_count).
     """
     with get_session() as session:
@@ -320,20 +326,21 @@ def save_milk_flow_records(batch_meta: dict, records: list[dict]) -> tuple[int, 
 
         inserted = 0
         for row in records:
-            exists = (
-                session.query(MilkFlowRecord.id)
-                .filter_by(
-                    farm_code=row["farm_code"],
-                    cow_number=row["cow_number"],
-                    milking_date=row["milking_date"],
-                    shift=row.get("shift"),
-                    cow_milking_start_time=row.get("cow_milking_start_time"),
-                    milking_point=row.get("milking_point"),
+            if skip_duplicates:
+                exists = (
+                    session.query(MilkFlowRecord.id)
+                    .filter_by(
+                        farm_code=row["farm_code"],
+                        cow_number=row["cow_number"],
+                        milking_date=row["milking_date"],
+                        shift=row.get("shift"),
+                        cow_milking_start_time=row.get("cow_milking_start_time"),
+                        milking_point=row.get("milking_point"),
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if exists:
-                continue
+                if exists:
+                    continue
 
             session.add(
                 MilkFlowRecord(
@@ -413,9 +420,15 @@ def get_recent_milk_flow_records(farm_code: str = "ALH", limit: int = 100) -> li
         return records
 
 
-def save_rotary_entry_id_records(batch_meta: dict, records: list[dict]) -> tuple[int, int]:
+def save_rotary_entry_id_records(
+    batch_meta: dict,
+    records: list[dict],
+    *,
+    skip_duplicates: bool = True,
+) -> tuple[int, int]:
     """
-    Persist Rotary Entry ID rows. Skips duplicates by cow + date + identification time.
+    Persist Rotary Entry ID rows.
+    When skip_duplicates is True, skips rows that already exist by cow + date + time.
     Returns (batch_id, inserted_count).
     """
     with get_session() as session:
@@ -434,18 +447,19 @@ def save_rotary_entry_id_records(batch_meta: dict, records: list[dict]) -> tuple
 
         inserted = 0
         for row in records:
-            exists = (
-                session.query(RotaryEntryIdRecord.id)
-                .filter_by(
-                    farm_code=row["farm_code"],
-                    cow_number=row["cow_number"],
-                    milking_date=row["milking_date"],
-                    identification_time=row["identification_time"],
+            if skip_duplicates:
+                exists = (
+                    session.query(RotaryEntryIdRecord.id)
+                    .filter_by(
+                        farm_code=row["farm_code"],
+                        cow_number=row["cow_number"],
+                        milking_date=row["milking_date"],
+                        identification_time=row["identification_time"],
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if exists:
-                continue
+                if exists:
+                    continue
 
             session.add(
                 RotaryEntryIdRecord(
@@ -461,3 +475,47 @@ def save_rotary_entry_id_records(batch_meta: dict, records: list[dict]) -> tuple
 
         batch.row_count = inserted
         return batch.id, inserted
+
+
+def get_imported_parlour_message_ids(farm_code: str = "ALH") -> set[str]:
+    with get_session() as session:
+        rows = (
+            session.query(ParlourImportBatch.message_id)
+            .filter(
+                ParlourImportBatch.farm_code == farm_code,
+                ParlourImportBatch.message_id.isnot(None),
+            )
+            .all()
+        )
+        return {row[0] for row in rows if row[0]}
+
+
+def delete_parlour_records_in_date_range(
+    farm_code: str,
+    start_date,
+    end_date,
+) -> dict[str, int]:
+    """Delete milk-flow and rotary-entry rows for a farm between inclusive dates."""
+    with get_session() as session:
+        milk_deleted = (
+            session.query(MilkFlowRecord)
+            .filter(
+                MilkFlowRecord.farm_code == farm_code,
+                MilkFlowRecord.milking_date >= start_date,
+                MilkFlowRecord.milking_date <= end_date,
+            )
+            .delete(synchronize_session=False)
+        )
+        entry_deleted = (
+            session.query(RotaryEntryIdRecord)
+            .filter(
+                RotaryEntryIdRecord.farm_code == farm_code,
+                RotaryEntryIdRecord.milking_date >= start_date,
+                RotaryEntryIdRecord.milking_date <= end_date,
+            )
+            .delete(synchronize_session=False)
+        )
+        return {
+            "milk_flow_deleted": int(milk_deleted or 0),
+            "rotary_entry_deleted": int(entry_deleted or 0),
+        }

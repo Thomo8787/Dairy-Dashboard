@@ -14,8 +14,6 @@ from services.database import (
     health_check,
     init_db,
     save_dataframe,
-    save_milk_flow_records,
-    save_rotary_entry_id_records,
 )
 from services.excel_parser import parse_excel_file
 from services.farms import FARMS, active_farms
@@ -32,11 +30,9 @@ from services.graph_client import (
 from services.graph_email import GraphEmailService
 from services.graph_onedrive import GraphOneDriveService
 from services.milking_efficiency_summary import SHIFT_OPTIONS, build_seven_day_summary
-from services.milk_flow_email import MilkFlowEmailService
-from services.milk_flow_parser import parse_milk_flow_csv
 from services.navigation import NAV_ITEMS, parent_nav_id
-from services.rotary_entry_email import RotaryEntryEmailService
-from services.rotary_entry_parser import parse_rotary_entry_id_csv
+from services.parlour_scheduler import start_parlour_hourly_sync
+from services.parlour_sync import IMPORT_DAY_OPTIONS, format_sync_summary, sync_parlour_emails
 
 load_dotenv()
 
@@ -164,6 +160,7 @@ def milking_efficiency():
         "milking_efficiency.html",
         summary=summary,
         shift_options=SHIFT_OPTIONS,
+        import_day_options=IMPORT_DAY_OPTIONS,
         selected_farm=farm_code,
         selected_shift=shift_id,
         **_page_context(active_nav="milking_efficiency"),
@@ -289,9 +286,16 @@ def sync_from_onedrive():
 
 @app.route("/sync-milk-flow", methods=["POST"])
 def sync_milk_flow():
-    """Import Milk Flow + Rotary Entry ID CSVs from @dataflow2.com and stamp as ALH."""
+    """Manual import: look back N days and overwrite parlour data in that window."""
     farm_code = (request.form.get("farm") or request.args.get("farm") or "ALH").upper()
     shift_id = request.form.get("shift") or request.args.get("shift") or "Morning"
+
+    try:
+        days_back = int(request.form.get("days_back") or 7)
+    except ValueError:
+        days_back = 7
+    if days_back not in IMPORT_DAY_OPTIONS:
+        days_back = 7
 
     missing = require_azure_config()
     if missing:
@@ -299,60 +303,13 @@ def sync_milk_flow():
         return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
 
     try:
-        milk_downloads = MilkFlowEmailService().fetch_milk_flow_csvs(top=40)
-        entry_downloads = RotaryEntryEmailService().fetch_rotary_entry_csvs(top=40)
-
-        if not milk_downloads and not entry_downloads:
-            flash("No Milk Flow or Rotary Entry ID CSVs found from @dataflow2.com.", "info")
-            return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
-
-        milk_files = 0
-        milk_rows = 0
-        for item in milk_downloads:
-            records = parse_milk_flow_csv(item["file_path"], farm_code="ALH")
-            if not records:
-                continue
-            _, inserted = save_milk_flow_records(
-                {
-                    "farm_code": "ALH",
-                    "report_type": "milk_flow",
-                    "filename": item["filename"],
-                    "email_subject": item["email_subject"],
-                    "email_from": item["email_from"],
-                    "email_received_at": item["email_received_at"],
-                    "message_id": item["message_id"],
-                },
-                records,
-            )
-            milk_files += 1
-            milk_rows += inserted
-
-        entry_files = 0
-        entry_rows = 0
-        for item in entry_downloads:
-            records = parse_rotary_entry_id_csv(item["file_path"], farm_code="ALH")
-            if not records:
-                continue
-            _, inserted = save_rotary_entry_id_records(
-                {
-                    "farm_code": "ALH",
-                    "report_type": "rotary_entry_id",
-                    "filename": item["filename"],
-                    "email_subject": item["email_subject"],
-                    "email_from": item["email_from"],
-                    "email_received_at": item["email_received_at"],
-                    "message_id": item["message_id"],
-                },
-                records,
-            )
-            entry_files += 1
-            entry_rows += inserted
-
-        flash(
-            f"ALH import — Milk Flow: {milk_files} file(s), {milk_rows} new rows; "
-            f"Rotary Entry ID: {entry_files} file(s), {entry_rows} new rows.",
-            "success",
+        result = sync_parlour_emails(
+            farm_code="ALH",
+            days_back=days_back,
+            overwrite=True,
+            top=max(80, days_back * 12),
         )
+        flash(format_sync_summary(result), "info" if result.get("skipped") else "success")
     except Exception as exc:
         logger.exception("Parlour report sync failed")
         flash(f"Parlour report sync failed: {exc}", "error")
@@ -375,9 +332,10 @@ def health():
 
 with app.app_context():
     _ensure_database()
+    start_parlour_hourly_sync(app)
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     app.run(host="0.0.0.0", port=port, debug=debug)

@@ -16,3 +16,6 @@ requests==2.32.3
 
 # Environment & utilities
 python-dotenv==1.0.1
+
+# Background jobs
+apscheduler==3.10.4
