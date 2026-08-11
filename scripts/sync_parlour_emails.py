@@ -23,7 +23,11 @@ logging.basicConfig(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Sync DataFlow parlour emails")
-    parser.add_argument("--farm", default="ALH")
+    parser.add_argument(
+        "--farm",
+        default="ALL",
+        help="Farm code to import (default ALL = every farm detected in filenames)",
+    )
     parser.add_argument(
         "--days-back",
         type=int,
@@ -43,8 +47,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.overwrite and not args.days_back:
         parser.error("--overwrite requires --days-back")
 
+    farm = (args.farm or "").strip().upper()
+    if farm in {"", "ALL", "*"}:
+        farm = None
+
     result = sync_parlour_emails(
-        farm_code=args.farm,
+        farm_code=farm,
         days_back=args.days_back,
         overwrite=args.overwrite,
         top=args.top,

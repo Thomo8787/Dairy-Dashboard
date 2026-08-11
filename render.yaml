@@ -62,7 +62,7 @@ services:
     branch: main
     schedule: "0 * * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/sync_parlour_emails.py --days-back 2
+    startCommand: python scripts/sync_parlour_emails.py --days-back 2 --farm ALL
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"

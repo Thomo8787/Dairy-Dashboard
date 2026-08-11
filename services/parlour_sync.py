@@ -99,8 +99,10 @@ def sync_parlour_emails(
         raise RuntimeError(f"Missing Microsoft Graph configuration: {', '.join(missing)}")
 
     init_db()
-    scoped_farm = (farm_code or "").upper() or None
-    if scoped_farm and scoped_farm not in FARMS_BY_CODE:
+    scoped_farm = (farm_code or "").strip().upper() or None
+    if scoped_farm in {"ALL", "*"} or (
+        scoped_farm and scoped_farm not in FARMS_BY_CODE
+    ):
         scoped_farm = None
 
     since: datetime | None = None
