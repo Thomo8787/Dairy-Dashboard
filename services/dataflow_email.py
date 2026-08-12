@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,12 +13,19 @@ from urllib.parse import quote, urlencode
 
 import requests
 
-from services.graph_client import GRAPH_BASE, auth_mode, graph_get, graph_get_bytes, graph_headers
+from services.graph_client import (
+    GRAPH_BASE,
+    _request_with_retries,
+    auth_mode,
+    graph_get,
+    graph_get_bytes,
+    graph_headers,
+)
 
 logger = logging.getLogger(__name__)
 
-# Keep concurrency modest on Render free (512MB / shared CPU).
-_DOWNLOAD_WORKERS = 6
+# Keep concurrency low — Graph throttles mailbox attachment reads hard (429).
+_DOWNLOAD_WORKERS = 2
 
 
 class DataFlowCsvEmailService:
@@ -134,7 +142,9 @@ class DataFlowCsvEmailService:
                 since=since,
                 skip_message_ids=skip_message_ids,
             )
-            if scoped is not None:
+            # Non-empty hit — done. Empty list can be a false miss from
+            # ConsistencyLevel eventual, so fall through to attachment scan.
+            if scoped:
                 return scoped
 
         return self._list_messages_attachment_scan(
@@ -177,14 +187,9 @@ class DataFlowCsvEmailService:
         try:
             while url and len(matches) < top and pages < 20:
                 pages += 1
-                response = requests.get(url, headers=headers, timeout=60)
-                if response.status_code >= 400:
-                    logger.warning(
-                        "Subject-filtered Graph list failed (%s); using attachment scan. Body: %s",
-                        response.status_code,
-                        (response.text or "")[:300],
-                    )
-                    return None
+                response = _request_with_retries(
+                    "GET", url, timeout=60, headers=headers
+                )
                 payload = response.json()
                 for message in payload.get("value", []):
                     if self._message_matches(
@@ -233,8 +238,7 @@ class DataFlowCsvEmailService:
 
         while url and len(matches) < top and pages < 20:
             pages += 1
-            response = requests.get(url, headers=graph_headers(), timeout=60)
-            response.raise_for_status()
+            response = _request_with_retries("GET", url, timeout=60)
             payload = response.json()
             for message in payload.get("value", []):
                 if self._message_matches(
@@ -267,18 +271,23 @@ class DataFlowCsvEmailService:
             f"&$top={max(top, 100)}"
             f"&$select=id,subject,receivedDateTime,from,hasAttachments"
         )
-        response = requests.get(
+        response = _request_with_retries(
+            "GET",
             url,
-            headers={**graph_headers(), "ConsistencyLevel": "eventual"},
             timeout=60,
+            headers={**graph_headers(), "ConsistencyLevel": "eventual"},
         )
-        response.raise_for_status()
         matches = []
         for message in response.json().get("value", []):
             if self._message_matches(
                 message, since=since, skip_message_ids=skip_message_ids
             ):
                 matches.append(message)
+        logger.info(
+            "Graph $search for %r returned %s message(s) after date filter",
+            self.SEARCH_SUBJECT,
+            len(matches),
+        )
         return matches
 
     def _list_attachments(self, message_id: str) -> list[dict]:
@@ -362,6 +371,7 @@ class DataFlowCsvEmailService:
             return []
 
         downloads: list[dict] = []
+        failures = 0
         workers = min(_DOWNLOAD_WORKERS, len(messages))
         logger.info(
             "Downloading %s %r attachment(s) with %s worker(s)",
@@ -381,6 +391,7 @@ class DataFlowCsvEmailService:
                 try:
                     downloads.extend(future.result())
                 except Exception as exc:
+                    failures += 1
                     message = futures[future]
                     logger.warning(
                         "Failed downloading attachments for %s: %s",
@@ -394,14 +405,25 @@ class DataFlowCsvEmailService:
                         len(messages),
                         self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
                     )
+                # Small pause between completions to stay under Graph throttle.
+                if done < len(messages):
+                    time.sleep(0.2)
 
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         logger.info(
-            "Fetched %s CSV(s) for %r in %.1fs",
+            "Fetched %s CSV(s) for %r in %.1fs (%s download failure(s))",
             len(downloads),
             self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
             elapsed,
+            failures,
         )
+        if messages and not downloads:
+            raise RuntimeError(
+                f"Found {len(messages)} '{self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS}' "
+                f"email(s) but downloaded 0 CSVs "
+                f"({failures} attachment request(s) failed). "
+                "Likely Microsoft Graph rate limiting — retry shortly."
+            )
         return downloads
 
 

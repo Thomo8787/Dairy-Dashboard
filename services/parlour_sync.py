@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -25,11 +24,11 @@ from services.rotary_entry_parser import parse_rotary_entry_id_csv
 
 logger = logging.getLogger(__name__)
 
-IMPORT_DAY_OPTIONS = (1, 3, 7, 14, 30)
+IMPORT_DAY_OPTIONS = (1, 2, 3, 7, 14, 30)
 _FARM_CODES = tuple(sorted(FARMS_BY_CODE.keys(), key=len, reverse=True))
 
 # Manual UI sync runs in a background thread so the web worker can still
-# answer Render health checks (single sync worker + long overwrite = restart).
+# answer Render health checks (single sync worker + long sync = restart).
 _manual_job_lock = threading.Lock()
 _manual_job_state: dict[str, Any] = {
     "running": False,
@@ -76,10 +75,10 @@ def start_manual_sync_job(
     *,
     days_back: int,
     farm_code: str | None = None,
-    overwrite: bool = True,
+    overwrite: bool = False,
 ) -> tuple[bool, str]:
     """
-    Kick off overwrite import in a daemon thread.
+    Kick off incremental parlour import in a daemon thread (same mode as cron).
     Returns (started, message). If already running, started=False.
     """
     with _manual_job_lock:
@@ -133,8 +132,8 @@ def start_manual_sync_job(
     threading.Thread(target=_runner, name="parlour-manual-sync", daemon=True).start()
     return (
         True,
-        f"Import started for the last {days_back} day(s). "
-        "This can take several minutes — refresh the page shortly for results.",
+        f"Import started — checking the last {days_back} day(s) for new emails "
+        "(same as the hourly job). Refresh shortly for results.",
     )
 
 
@@ -196,11 +195,12 @@ def sync_parlour_emails(
     Farm codes are read from each attachment filename/subject (ALH, COF, …).
     All shifts present in the CSVs are imported — UI shift chips are view-only.
 
-    Incremental (hourly cron):
+    Incremental (hourly cron + manual button):
       overwrite=False
       → only messages not already imported; skip entirely if none are new.
+      days_back controls how far back to scan the mailbox (cron uses 2).
 
-    Manual days-back:
+    CLI overwrite rebuild:
       days_back=N, overwrite=True
       → emails received in last N days; delete DB rows in that calendar window
         for all farms (or one farm if farm_code is set); then re-insert.
@@ -231,8 +231,8 @@ def sync_parlour_emails(
         skip_ids = get_imported_parlour_message_ids(None)
         since = _since_for_days_back(int(days_back or 2))
 
-    # Fetch first, then delete — avoids wiping the window if Graph fails mid-run.
-    # Milk Flow + Rotary Entry run in parallel (separate Graph queries).
+    # Always Milk Flow first, then Rotary Entry ID (stall ID) — keeps Graph under
+    # the rate limit and means milk rows exist before entry IDs are imported.
     milk_service = MilkFlowEmailService()
     entry_service = RotaryEntryEmailService()
     logger.info(
@@ -242,26 +242,20 @@ def sync_parlour_emails(
         overwrite,
     )
     fetch_started = datetime.now(timezone.utc)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        milk_future = pool.submit(
-            milk_service.fetch_milk_flow_csvs,
-            top,
-            since=since,
-            skip_message_ids=skip_ids,
-        )
-        entry_future = pool.submit(
-            entry_service.fetch_rotary_entry_csvs,
-            top,
-            since=since,
-            skip_message_ids=skip_ids,
-        )
-        milk_downloads = milk_future.result()
-        entry_downloads = entry_future.result()
+    logger.info("Step 1/2 — downloading Milk Flow reports")
+    milk_downloads = milk_service.fetch_milk_flow_csvs(
+        top=top, since=since, skip_message_ids=skip_ids
+    )
+    logger.info("Step 2/2 — downloading Rotary Entry ID reports")
+    entry_downloads = entry_service.fetch_rotary_entry_csvs(
+        top=top, since=since, skip_message_ids=skip_ids
+    )
+    fetch_secs = (datetime.now(timezone.utc) - fetch_started).total_seconds()
     logger.info(
         "Fetched milk=%s rotary=%s email attachment(s) in %.1fs",
         len(milk_downloads),
         len(entry_downloads),
-        (datetime.now(timezone.utc) - fetch_started).total_seconds(),
+        fetch_secs,
     )
 
     if not milk_downloads and not entry_downloads:

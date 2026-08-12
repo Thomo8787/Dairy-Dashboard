@@ -543,28 +543,27 @@ def sync_from_onedrive():
 @app.route("/sync-milk-flow", methods=["POST"])
 @permission_required("perm_sync_dataflow")
 def sync_milk_flow():
-    """Manual import: look back N days and overwrite parlour data in that window."""
+    """Manual import: same incremental sync as the cron, with a chosen lookback."""
     farm_code = (request.form.get("farm") or request.args.get("farm") or "ALH").upper()
     shift_id = request.form.get("shift") or request.args.get("shift") or "Morning"
 
     try:
-        days_back = int(request.form.get("days_back") or 7)
+        days_back = int(request.form.get("days_back") or 2)
     except ValueError:
-        days_back = 7
+        days_back = 2
     if days_back not in IMPORT_DAY_OPTIONS:
-        days_back = 7
+        days_back = 2
 
     missing = require_azure_config()
     if missing:
         flash(f"Missing Microsoft Graph configuration: {', '.join(missing)}", "error")
         return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
 
-    # Run off the request thread so the single Gunicorn worker can still answer
-    # /health while Graph download + multi-farm insert runs (minutes, not seconds).
+    # Same mode as the hourly cron (overwrite=False); only days_back differs.
     started, message = start_manual_sync_job(
         days_back=days_back,
         farm_code=None,
-        overwrite=True,
+        overwrite=False,
     )
     flash(message, "info" if started else "error")
 

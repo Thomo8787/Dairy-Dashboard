@@ -33,13 +33,12 @@
       <div class="me-filter-block">
         <h3>Import from Email</h3>
         <p class="me-help">
-          Pulls <strong>Milk Flow</strong> and <strong>Rotary Entry ID</strong> CSVs
-          from <strong>@dataflow2.com</strong> for <strong>all farms</strong> and
-          <strong>all shifts</strong> found in the emails (farm code is read from the
-          filename, e.g. ALH / COF). Manual import overwrites that date window.
-          Farm/shift chips only change what you view. An hourly job also checks for
-          new emails while the dashboard is open. Large imports run in the
-          background — refresh after a few minutes to see updated figures.
+          Same job as the hourly cron: pulls new <strong>Milk Flow</strong> and
+          <strong>Rotary Entry ID</strong> CSVs from <strong>@dataflow2.com</strong>
+          for <strong>all farms</strong> and <strong>all shifts</strong>, skipping
+          emails already imported. Choose how many days of mailbox history to check.
+          Farm/shift chips only change what you view. Runs in the background —
+          refresh after a minute if needed.
         </p>
         {% if can_sync_dataflow %}
           {% if manual_sync_status and manual_sync_status.running %}
@@ -51,20 +50,20 @@
             class="js-sync-form"
             method="post"
             action="{{ url_for('sync_milk_flow') }}"
-            data-sync-message="Starting DataFlow import for all farms &amp; shifts…"
+            data-sync-message="Checking DataFlow emails for new reports…"
           >
             <input type="hidden" name="farm" value="{{ selected_farm }}">
             <input type="hidden" name="shift" value="{{ selected_shift }}">
             <label class="me-label" for="days_back">Days back</label>
             <select id="days_back" name="days_back" class="me-select">
               {% for days in import_day_options %}
-                <option value="{{ days }}" {% if days == 7 %}selected{% endif %}>
+                <option value="{{ days }}" {% if days == 2 %}selected{% endif %}>
                   Last {{ days }} day{% if days != 1 %}s{% endif %}
                 </option>
               {% endfor %}
             </select>
             <button class="btn me-import-btn" type="submit">
-              <span class="btn-label">Import &amp; overwrite</span>
+              <span class="btn-label">Import new emails</span>
               <span class="btn-busy" aria-hidden="true">
                 <span class="sync-spinner"></span>
                 Synchronising…
@@ -168,11 +167,7 @@
       {% else %}
         <p class="empty">
           No milking data for {{ selected_farm }} / {{ selected_shift }} yet.
-          {% if selected_farm == 'ALH' %}
-            Use <strong>Import &amp; overwrite</strong> to pull reports for all farms and shifts.
-          {% else %}
-            Only ALH is populated from email today; {{ selected_farm }} will be added later.
-          {% endif %}
+          Use <strong>Import new emails</strong> to pull reports for all farms and shifts.
         </p>
       {% endif %}
     </section>

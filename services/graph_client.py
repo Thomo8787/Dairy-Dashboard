@@ -5,13 +5,17 @@ Supports two modes (GRAPH_AUTH_MODE):
 - delegated: user signs in once — for testing without admin consent
 """
 
+import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import msal
 import requests
 
 from services.database import get_session
+
+logger = logging.getLogger(__name__)
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 EXCEL_EXTENSIONS = {".xlsx", ".xls", ".xlsm"}
@@ -188,13 +192,57 @@ def graph_headers() -> dict:
     return {"Authorization": f"Bearer {get_access_token()}"}
 
 
+def _request_with_retries(
+    method: str,
+    url: str,
+    *,
+    timeout: int,
+    headers: dict | None = None,
+    max_attempts: int = 6,
+) -> requests.Response:
+    """GET/POST with backoff on Graph throttling (429) and transient 5xx."""
+    hdrs = headers or graph_headers()
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        response = requests.request(method, url, headers=hdrs, timeout=timeout)
+        if response.status_code == 429 or response.status_code >= 500:
+            retry_after = response.headers.get("Retry-After")
+            try:
+                wait_s = float(retry_after) if retry_after else min(2 ** attempt, 30)
+            except ValueError:
+                wait_s = min(2 ** attempt, 30)
+            last_error = requests.HTTPError(
+                f"{response.status_code} for url: {url}",
+                response=response,
+            )
+            if attempt >= max_attempts:
+                response.raise_for_status()
+            # Slight jitter so parallel workers don't retry in lockstep.
+            wait_s = wait_s + (attempt * 0.15)
+            logger.warning(
+                "Graph %s — retry %s/%s after %.1fs (%s)",
+                response.status_code,
+                attempt,
+                max_attempts,
+                wait_s,
+                url.split("?")[0][-80:],
+            )
+            time.sleep(wait_s)
+            # Refresh token header in case the wait crossed expiry.
+            hdrs = headers or graph_headers()
+            continue
+        response.raise_for_status()
+        return response
+
+    assert last_error is not None
+    raise last_error
+
+
 def graph_get(url: str, timeout: int = 60) -> dict:
-    response = requests.get(url, headers=graph_headers(), timeout=timeout)
-    response.raise_for_status()
+    response = _request_with_retries("GET", url, timeout=timeout)
     return response.json()
 
 
 def graph_get_bytes(url: str, timeout: int = 120) -> bytes:
-    response = requests.get(url, headers=graph_headers(), timeout=timeout)
-    response.raise_for_status()
+    response = _request_with_retries("GET", url, timeout=timeout)
     return response.content
