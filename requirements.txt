@@ -9,6 +9,7 @@ sqlalchemy==2.0.36
 # Data processing
 pandas==2.2.3
 openpyxl==3.1.5
+python-calamine==0.8.2
 
 # Microsoft Graph / Outlook
 msal==1.31.1

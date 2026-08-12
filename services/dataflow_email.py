@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 # Keep concurrency low — Graph throttles mailbox attachment reads hard (429).
 _DOWNLOAD_WORKERS = 2
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0"
+_ZIP_MAGIC = b"PK"
+_CSV_EXTENSIONS = (".csv",)
+_EXCEL_EXTENSIONS = (".xls", ".xlsx")
 
 
 class DataFlowCsvEmailService:
@@ -312,23 +316,63 @@ class DataFlowCsvEmailService:
             f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments/{attachment['id']}/$value"
         )
 
-    def _download_csv(self, message_id: str, attachment: dict) -> Path | None:
-        name = attachment.get("name", "")
-        if not name.lower().endswith(".csv"):
+    def _looks_like_excel(self, name: str, content: bytes) -> bool:
+        lower = name.lower()
+        if lower.endswith(_EXCEL_EXTENSIONS):
+            return True
+        # DataFlow sometimes labels Excel as .csv
+        return content.startswith(_OLE_MAGIC) or (
+            lower.endswith(".csv") and content.startswith(_ZIP_MAGIC)
+        )
+
+    def _excel_to_csv_file(self, content: bytes, destination: Path, source_name: str) -> Path | None:
+        """Convert .xls/.xlsx (or mislabeled Excel) into a CSV the parsers expect."""
+        import io
+
+        import pandas as pd
+
+        try:
+            frame = pd.read_excel(io.BytesIO(content), engine="calamine")
+        except Exception as exc:
+            logger.warning("Could not read Excel attachment %s: %s", source_name, exc)
             return None
-        if self.FILENAME_CONTAINS not in name.lower():
+        if frame.empty:
+            logger.warning("Excel attachment %s has no rows", source_name)
+            return None
+        keep = [col for col in frame.columns if not str(col).startswith("Unnamed")]
+        if keep:
+            frame = frame.loc[:, keep]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(destination, index=False)
+        return destination
+
+    def _download_csv(self, message_id: str, attachment: dict) -> Path | None:
+        name = attachment.get("name", "") or ""
+        lower = name.lower()
+        if not (
+            lower.endswith(_CSV_EXTENSIONS)
+            or lower.endswith(_EXCEL_EXTENSIONS)
+        ):
+            return None
+        if self.FILENAME_CONTAINS not in lower:
             return None
 
         content = self._attachment_bytes(message_id, attachment)
         if content is None:
             return None
-        # Reject OLE/Excel binaries that were mislabeled as .csv
-        if content.startswith(b"\xd0\xcf\x11\xe0"):
-            logger.warning("Skipping non-CSV binary attachment: %s", name)
-            return None
-        safe_name = Path(name).name
+
+        safe_stem = Path(name).stem
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        destination = self.download_dir / f"{timestamp}_{safe_name}"
+        destination = self.download_dir / f"{timestamp}_{safe_stem}.csv"
+
+        if self._looks_like_excel(name, content):
+            converted = self._excel_to_csv_file(content, destination, name)
+            if converted is None:
+                logger.warning("Skipping unreadable Excel attachment: %s", name)
+                return None
+            logger.info("Converted Excel attachment %s → %s", name, converted.name)
+            return converted
+
         destination.write_bytes(content)
         return destination
 
@@ -420,9 +464,9 @@ class DataFlowCsvEmailService:
         if messages and not downloads:
             raise RuntimeError(
                 f"Found {len(messages)} '{self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS}' "
-                f"email(s) but downloaded 0 CSVs "
+                f"email(s) but downloaded 0 usable CSV/Excel attachments "
                 f"({failures} attachment request(s) failed). "
-                "Likely Microsoft Graph rate limiting — retry shortly."
+                "Check attachment names/formats, or retry if Graph was throttling."
             )
         return downloads
 
