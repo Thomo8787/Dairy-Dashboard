@@ -25,11 +25,15 @@ from services.graph_client import (
 logger = logging.getLogger(__name__)
 
 # Keep concurrency low — Graph throttles mailbox attachment reads hard (429).
-_DOWNLOAD_WORKERS = 2
+# Single worker also caps peak RAM when a large Excel lands (Render free ~512MB).
+_DOWNLOAD_WORKERS = 1
 _OLE_MAGIC = b"\xd0\xcf\x11\xe0"
 _ZIP_MAGIC = b"PK"
 _CSV_EXTENSIONS = (".csv",)
 _EXCEL_EXTENSIONS = (".xls", ".xlsx")
+# Normal Milk Flow / Rotary CSVs are <300KB; PRK .xls ~100KB.
+# One mislabeled ALH Excel was ~18MB / 65k rows and OOM'd the web dyno.
+_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 
 
 class DataFlowCsvEmailService:
@@ -327,6 +331,7 @@ class DataFlowCsvEmailService:
 
     def _excel_to_csv_file(self, content: bytes, destination: Path, source_name: str) -> Path | None:
         """Convert .xls/.xlsx (or mislabeled Excel) into a CSV the parsers expect."""
+        import gc
         import io
 
         import pandas as pd
@@ -344,6 +349,8 @@ class DataFlowCsvEmailService:
             frame = frame.loc[:, keep]
         destination.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(destination, index=False)
+        del frame
+        gc.collect()
         return destination
 
     def _download_csv(self, message_id: str, attachment: dict) -> Path | None:
@@ -357,8 +364,31 @@ class DataFlowCsvEmailService:
         if self.FILENAME_CONTAINS not in lower:
             return None
 
+        declared = attachment.get("size")
+        try:
+            declared_size = int(declared) if declared is not None else None
+        except (TypeError, ValueError):
+            declared_size = None
+        if declared_size is not None and declared_size > _MAX_ATTACHMENT_BYTES:
+            logger.warning(
+                "Skipping oversized attachment %s (declared %s bytes > %s limit)",
+                name,
+                declared_size,
+                _MAX_ATTACHMENT_BYTES,
+            )
+            return None
+
         content = self._attachment_bytes(message_id, attachment)
         if content is None:
+            return None
+
+        if len(content) > _MAX_ATTACHMENT_BYTES:
+            logger.warning(
+                "Skipping oversized attachment %s (%s bytes > %s limit)",
+                name,
+                len(content),
+                _MAX_ATTACHMENT_BYTES,
+            )
             return None
 
         safe_stem = Path(name).stem
@@ -462,12 +492,21 @@ class DataFlowCsvEmailService:
             failures,
         )
         if messages and not downloads:
-            raise RuntimeError(
-                f"Found {len(messages)} '{self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS}' "
-                f"email(s) but downloaded 0 usable CSV/Excel attachments "
-                f"({failures} attachment request(s) failed). "
-                "Check attachment names/formats, or retry if Graph was throttling."
+            if failures:
+                raise RuntimeError(
+                    f"Found {len(messages)} '{self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS}' "
+                    f"email(s) but downloaded 0 usable CSV/Excel attachments "
+                    f"({failures} attachment request(s) failed). "
+                    "Check attachment names/formats, or retry if Graph was throttling."
+                )
+            # Intentional skips (oversized / wrong type) — not a hard failure.
+            logger.info(
+                "Found %s %r email(s) but no usable attachments after filters "
+                "(oversized or unmatched); treating as nothing to import.",
+                len(messages),
+                self.SEARCH_SUBJECT or self.SUBJECT_CONTAINS,
             )
+            return []
         return downloads
 
 
