@@ -75,6 +75,8 @@ html, body {
   flex-direction: column;
   gap: 0.35rem;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-group { display: flex; flex-direction: column; gap: 0.2rem; }
@@ -101,11 +103,15 @@ html, body {
 }
 
 .nav-sub {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 0.15rem;
   padding-left: 0.7rem;
   margin-bottom: 0.35rem;
+}
+
+.nav-sub.is-open {
+  display: flex;
 }
 
 .nav-sub-link {
