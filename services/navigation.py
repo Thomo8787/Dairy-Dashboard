@@ -63,6 +63,20 @@ NAV_ITEMS = [
             {"id": "stock_heifers_due", "label": "Heifers Due", "endpoint": "stock_heifers_due", "permission": "perm_stock"},
         ],
     },
+    {
+        "id": "genetics",
+        "label": "Genetics",
+        "endpoint": "genetics",
+        "permission": "perm_genetics",
+        "children": [
+            {
+                "id": "genetics_genomic_progress",
+                "label": "Genomic Progress",
+                "endpoint": "genetics_genomic_progress",
+                "permission": "perm_genetics",
+            },
+        ],
+    },
 ]
 
 

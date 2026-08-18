@@ -1,0 +1,34 @@
+{% if can_sync_onedrive %}
+<div class="filter-section">
+  <span class="section-label">AHDB + DairyComp import</span>
+  <p class="meta-line">
+    Reads <strong>Genetics/animals_ahdb.csv</strong> and current DCEXPORT inventory
+    from Parlours OneDrive. Graphs only include animals still in inventory,
+    matched on the last 12 digits of eartag / etag.
+    Cron also runs daily at 05:00 UK time.
+  </p>
+  <form
+    class="js-sync-form"
+    method="post"
+    action="{{ url_for('sync_herd_exports') }}"
+    data-sync-message="Importing Genetics/animals_ahdb and DCEXPORT files from OneDrive…"
+    data-sync-poll-url="{{ url_for('events_herd_import_status') }}"
+    data-sync-complete-message="Sync complete"
+    data-sync-reload="true"
+    {% if herd_import_status and herd_import_status.running %}data-sync-polling{% endif %}
+  >
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <button class="btn" type="submit">
+      <span class="btn-label">Refresh from OneDrive</span>
+      <span class="btn-busy" aria-hidden="true">
+        <span class="sync-spinner"></span>
+        Importing…
+      </span>
+    </button>
+    <p class="sync-status" data-sync-status role="status" aria-live="polite">
+      <span class="sync-spinner is-dark" aria-hidden="true"></span>
+      <span data-sync-status-text>Importing…</span>
+    </p>
+  </form>
+</div>
+{% endif %}

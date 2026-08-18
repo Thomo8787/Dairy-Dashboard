@@ -66,6 +66,12 @@ from services.beef_inventory import (
 from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
+from services.genomic_progress import (
+    build_genomic_progress,
+    build_genomic_scatter,
+    genetics_template_extras,
+    list_traits,
+)
 from services.farms import FARMS, HERD_FARM_OPTIONS, active_farms
 from services.graph_client import (
     auth_mode,
@@ -517,6 +523,83 @@ def stock_calves_due():
 @permission_required("perm_stock")
 def stock_heifers_due():
     return _render_stock_page("heifers-due")
+
+
+def _genetics_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_genetics"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+@app.route("/genetics")
+@permission_required("perm_genetics")
+def genetics():
+    return redirect(url_for("genetics_genomic_progress"))
+
+
+@app.route("/genetics/genomic-progress")
+@permission_required("perm_genetics")
+def genetics_genomic_progress():
+    status = get_herd_import_status()
+    if not status.get("running"):
+        finished = consume_herd_import_result()
+        if finished and finished.get("error"):
+            flash(f"Last herd import failed: {finished['error']}", "error")
+        elif finished and finished.get("summary"):
+            flash(finished["summary"], "success")
+
+    return render_template(
+        "genetics/genomic_progress.html",
+        **_page_context(active_nav="genetics_genomic_progress"),
+        **genetics_template_extras(),
+    )
+
+
+@app.route("/genetics/api/genomic-progress/traits")
+def genetics_api_traits():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    return jsonify({"traits": list_traits()})
+
+
+@app.route("/genetics/api/genomic-progress")
+def genetics_api_progress():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    trait = (request.args.get("trait") or "pli").strip()
+    farms = request.args.getlist("farm") or None
+    try:
+        with get_session() as session:
+            return jsonify(build_genomic_progress(session, trait=trait, farms=farms))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/genetics/api/genomic-scatter")
+def genetics_api_scatter():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    x_trait = (request.args.get("x_trait") or "milk_kg").strip()
+    y_trait = (request.args.get("y_trait") or "pli").strip()
+    farms = request.args.getlist("farm") or None
+    try:
+        with get_session() as session:
+            return jsonify(
+                build_genomic_scatter(
+                    session,
+                    x_trait=x_trait,
+                    y_trait=y_trait,
+                    farms=farms,
+                )
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 def _selected_stock_farms() -> list[str]:
@@ -1018,6 +1101,7 @@ def events_herd_import_status():
     if not (
         user_has_permission(user, "perm_events")
         or user_has_permission(user, "perm_stock")
+        or user_has_permission(user, "perm_genetics")
     ):
         return jsonify({"error": "Permission denied."}), 403
     return jsonify(herd_import_status_payload())
@@ -1027,7 +1111,11 @@ def events_herd_import_status():
 @permission_required("perm_sync_onedrive")
 def sync_herd_exports():
     next_path = request.form.get("next") or url_for("events_calvings")
-    if not next_path.startswith("/events") and not next_path.startswith("/stock-inventory"):
+    if not (
+        next_path.startswith("/events")
+        or next_path.startswith("/stock-inventory")
+        or next_path.startswith("/genetics")
+    ):
         next_path = url_for("events_calvings")
     started, message = start_herd_import_job(force=False)
     flash(message, "info" if started else "error")

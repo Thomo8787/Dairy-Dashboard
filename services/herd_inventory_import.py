@@ -30,6 +30,13 @@ from services.inventory_processor import load_inventory_csv, process_inventory_f
 
 logger = logging.getLogger(__name__)
 
+# Bump this when inventory processing changes so cron reimports already-fingerprinted files.
+_INVENTORY_PROCESSOR = "category-months-v1"
+
+
+def inventory_source_fingerprint(source_file: str, last_modified: str) -> str:
+    return source_fingerprint(source_file, last_modified, processor=_INVENTORY_PROCESSOR)
+
 
 def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[dict[str, Any]]:
     df = df.reset_index(drop=True)
@@ -138,7 +145,7 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
         farm = entry["farm"]
         relative_path = entry["relative_path"]
         last_modified = entry.get("last_modified") or ""
-        fingerprint = source_fingerprint(relative_path, last_modified)
+        fingerprint = inventory_source_fingerprint(relative_path, last_modified)
         sources.append(
             {
                 "farm": farm,

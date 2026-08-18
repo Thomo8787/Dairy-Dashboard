@@ -86,6 +86,7 @@ class User(Base):
     perm_parlours = Column(Boolean, nullable=False, default=False)
     perm_stock = Column(Boolean, nullable=False, default=False)
     perm_events = Column(Boolean, nullable=False, default=False)
+    perm_genetics = Column(Boolean, nullable=False, default=False)
     perm_sync_outlook = Column(Boolean, nullable=False, default=False)
     perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
     perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
@@ -305,6 +306,38 @@ class HerdInventory(Base):
     import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class GenomicResult(Base):
+    """AHDB genomic evaluation traits from Genetics/animals_ahdb, keyed by last 12 eartag digits."""
+
+    __tablename__ = "genomic_results"
+
+    id = Column(Integer, primary_key=True)
+    hbn = Column(String(32), unique=True, nullable=False, index=True)
+    eartag = Column(String(64))
+    sire_name = Column(String(128))
+    sire_reg = Column(String(64))
+    milk_kg = Column(Float)
+    fat_kg = Column(Float)
+    protein_kg = Column(Float)
+    fat_pct = Column(Float)
+    protein_pct = Column(Float)
+    pli = Column(Float)
+    cci = Column(Float)
+    fertility_index = Column(Float)
+    scc = Column(Float)
+    life_span = Column(Float)
+    mastitis = Column(Float)
+    milking_speed = Column(Float)
+    type_merit = Column(Float)
+    mammary = Column(Float)
+    legs_and_feet = Column(Float)
+    stature = Column(Float)
+    chest_width = Column(Float)
+    body_depth = Column(Float)
+    mature_weight = Column(Float)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class BreedingSireClassification(Base):
     """Manual beef/dairy classification for breeding sires without .b/.s suffix."""
 
@@ -373,6 +406,8 @@ def _ensure_user_permission_columns(engine) -> None:
     existing = {col["name"] for col in inspector.get_columns("users")}
     needed = {
         "perm_events": "ALTER TABLE users ADD COLUMN perm_events BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_stock": "ALTER TABLE users ADD COLUMN perm_stock BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_genetics": "ALTER TABLE users ADD COLUMN perm_genetics BOOLEAN NOT NULL DEFAULT FALSE",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():
