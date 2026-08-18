@@ -36,6 +36,22 @@ NAV_ITEMS = [
         ],
     },
     {
+        "id": "events",
+        "label": "Events",
+        "endpoint": "events",
+        "permission": "perm_events",
+        "children": [
+            {"id": "events_calvings", "label": "Calvings", "endpoint": "events_calvings", "permission": "perm_events"},
+            {"id": "events_births", "label": "Births", "endpoint": "events_births", "permission": "perm_events"},
+            {"id": "events_sales", "label": "Sales", "endpoint": "events_sales", "permission": "perm_events"},
+            {"id": "events_deaths", "label": "Deaths", "endpoint": "events_deaths", "permission": "perm_events"},
+            {"id": "events_disease", "label": "Disease", "endpoint": "events_disease", "permission": "perm_events"},
+            {"id": "events_hooftrimming", "label": "Hoof Trimming", "endpoint": "events_hooftrimming", "permission": "perm_events"},
+            {"id": "events_breedings", "label": "Breedings", "endpoint": "events_breedings", "permission": "perm_events"},
+            {"id": "events_total_protein", "label": "Total Protein", "endpoint": "events_total_protein", "permission": "perm_events"},
+        ],
+    },
+    {
         "id": "stock_inventory",
         "label": "Stock Inventory",
         "endpoint": "stock_inventory",

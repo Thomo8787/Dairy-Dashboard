@@ -1,0 +1,2792 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(200px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+    }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-child { margin-bottom: 0; }
+    .filter-actions {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+    .filter-actions button { width: 100%; margin: 0; }
+    .filter-section label.section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-filter {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin: 0;
+      padding: 0;
+      border: none;
+    }
+    .farm-filter label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .filter-select {
+      width: 100%;
+      margin: 0;
+    }
+    .slicer-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .slicer-btn:hover {
+      border-color: #c5ccd3;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .slicer-btn[data-value="primiparous"].selected {
+      background: #e8f5e9;
+      border-color: #81c784;
+      color: #2e7d32;
+    }
+    .slicer-btn[data-value="primiparous"].selected .slicer-icon {
+      background: #a5d6a7;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="multiparous"].selected {
+      background: #dceaf7;
+      border-color: #7eb0d8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="multiparous"].selected .slicer-icon {
+      background: #9ec5e8;
+      color: #1e3a5f;
+    }
+    .parity-slicer.with-beef {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+    .slicer-btn[data-value="CM"].selected {
+      background: #dceaf7;
+      border-color: #5a9fd4;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="CM"].selected .slicer-icon {
+      background: #9ec5e8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="GAD"].selected {
+      background: #ffecd9;
+      border-color: #ffb366;
+      color: #b45309;
+    }
+    .slicer-btn[data-value="GAD"].selected .slicer-icon {
+      background: #ffc285;
+      color: #b45309;
+    }
+    .semen-slicer {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.35rem;
+    }
+    .semen-slicer .slicer-btn {
+      flex-direction: row;
+      min-height: 0;
+      padding: 0.3rem 0.2rem;
+      gap: 0.2rem;
+      font-size: 0.6875rem;
+      border-radius: 6px;
+      border-width: 1.5px;
+      line-height: 1.1;
+    }
+    .semen-slicer .slicer-btn .slicer-icon {
+      width: 1rem;
+      height: 1rem;
+      font-size: 0.55rem;
+      flex-shrink: 0;
+    }
+    .slicer-btn[data-value="beef"].selected {
+      background: #f5ebe0;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="beef"].selected .slicer-icon {
+      background: #8B4513;
+      color: #fff;
+    }
+    .slicer-btn[data-value="dairy"].selected {
+      background: #e8f5e9;
+      border-color: #2ca02c;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="dairy"].selected .slicer-icon {
+      background: #2ca02c;
+      color: #fff;
+    }
+    .slicer-btn[data-value="unknown"].selected {
+      background: #fce4ec;
+      border-color: #e91e8c;
+      color: #880e4f;
+    }
+    .slicer-btn[data-value="unknown"].selected .slicer-icon {
+      background: #e91e8c;
+      color: #fff;
+    }
+    .view-toggle {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .view-toggle label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label {
+      font-weight: 600;
+      min-width: 4.5rem;
+      text-align: right;
+    }
+    .y-range-inputs {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .y-range-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .y-range-inputs input[type="number"] {
+      width: 5.5rem;
+      margin: 0;
+      text-align: right;
+    }
+    .summary-panel {
+      display: none;
+      flex-direction: column;
+      gap: 0.65rem;
+      padding: 0.85rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .summary-panel h3 {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+    .summary-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      font-size: 0.875rem;
+    }
+    .summary-row-header {
+      font-weight: 700;
+      color: var(--text);
+    }
+    .summary-row-detail {
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .summary-row-total {
+      padding-top: 0.5rem;
+      margin-top: 0.15rem;
+      border-top: 1px solid var(--line);
+    }
+    .content-panel { min-width: 0; }
+    .meta-line {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .chart-wrap {
+      position: relative;
+      height: 500px;
+      max-width: 100%;
+    }
+    .chart-wrap-scatter {
+      height: 420px;
+      margin-top: 1.5rem;
+    }
+    .chart-wrap-incidence {
+      height: 420px;
+      margin-top: 1.5rem;
+    }
+    .chart-wrap-secondary {
+      margin-top: 1.5rem;
+    }
+    .chart-wrap-protocols {
+      height: 520px;
+      margin-top: 1.5rem;
+    }
+    .protocol-dropdown {
+      position: relative;
+      width: 100%;
+    }
+    .protocol-trigger {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      margin: 0;
+      padding: 0.45rem 0.6rem;
+      font-size: 0.875rem;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .protocol-trigger-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .protocol-chevron {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+    .protocol-panel {
+      position: absolute;
+      z-index: 40;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: 16rem;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      padding: 0.35rem 0;
+    }
+    .protocol-option {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.3rem 0.65rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      margin: 0;
+    }
+    .protocol-option:hover {
+      background: rgba(0, 0, 0, 0.04);
+    }
+    .protocol-option input {
+      margin: 0;
+      flex-shrink: 0;
+    }
+    .protocol-option-all {
+      font-weight: 600;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.45rem;
+      margin-bottom: 0.2rem;
+    }
+    #events-table {
+      width: auto;
+      table-layout: auto;
+    }
+    #events-table th, #events-table td {
+      text-align: right;
+      white-space: nowrap;
+      padding: 0.45rem 0.75rem;
+    }
+    #events-table th:first-child, #events-table td:first-child {
+      text-align: left;
+    }
+    #events-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+    }
+    #events-table thead th.farm-cm {
+      background: #b8d4e8;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #events-table thead th.farm-gad {
+      background: #f0c98e;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #events-table thead th.farm-combined {
+      background: #eef2f6;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #events-table thead th.reason-sub {
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+    #events-table thead th.reason-sub.farm-cm {
+      background: #d4e6f3;
+    }
+    #events-table thead th.reason-sub.farm-gad {
+      background: #f7ddb0;
+    }
+    #events-table thead th.reason-sub.farm-combined {
+      background: #f4f6f8;
+    }
+    #events-table tbody td.farm-total {
+      font-weight: 600;
+    }
+    #events-table tbody tr.grand-total td {
+      background: #eef2f6;
+      font-weight: 700;
+      border-top: 2px solid var(--line);
+    }
+    .table-section-title {
+      margin: 0 0 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .table-wrap {
+      overflow: visible;
+      max-height: none;
+    }
+    .table-wrap-secondary {
+      margin-top: 1.75rem;
+    }
+    .events-data-table {
+      width: auto;
+      table-layout: auto;
+    }
+    .events-data-table th,
+    .events-data-table td {
+      text-align: right;
+      white-space: nowrap;
+      padding: 0.45rem 0.75rem;
+    }
+    .events-data-table th:first-child,
+    .events-data-table td:first-child {
+      text-align: left;
+    }
+    .events-data-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+    }
+    .events-data-table tbody tr.grand-total td {
+      background: #eef2f6;
+      font-weight: 700;
+      border-top: 2px solid var(--line);
+    }
+    .empty-state {
+      padding: 2rem;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .sire-settings-panel {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+    }
+    .sire-settings-panel h3 {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+    }
+    .sire-settings-toggle {
+      width: 100%;
+      text-align: left;
+    }
+    .sire-settings-body {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .sire-settings-body.open {
+      display: block;
+    }
+    .sire-columns {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+    .sire-column h4 {
+      margin: 0 0 0.5rem;
+      font-size: 0.85rem;
+      text-transform: capitalize;
+    }
+    .sire-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 12rem;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg);
+    }
+    .sire-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.8rem;
+    }
+    .sire-list li:last-child {
+      border-bottom: none;
+    }
+    .sire-meta {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+    .sire-actions {
+      display: flex;
+      gap: 0.25rem;
+      flex-shrink: 0;
+    }
+    .sire-actions button {
+      padding: 0.15rem 0.35rem;
+      font-size: 0.7rem;
+    }
+    .sire-badge {
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-left: 0.25rem;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="view-toggle">
+    <label><input type="radio" name="view-mode" value="graph" checked> Graph</label>
+    <label><input type="radio" name="view-mode" value="table"> Table</label>
+  </div>
+
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="{{ farm }}"
+              aria-pressed="true"
+            >
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        {% if show_lact_filter %}
+        <div class="filter-section">
+          <span class="section-label">Lactation</span>
+          <fieldset class="farm-filter">
+            <label>
+              <input type="checkbox" class="lact-cb" value="1" checked>
+              1
+            </label>
+            <label>
+              <input type="checkbox" class="lact-cb" value="2" checked>
+              2
+            </label>
+            <label>
+              <input type="checkbox" class="lact-cb" value="3+" checked>
+              3+
+            </label>
+          </fieldset>
+        </div>
+        {% endif %}
+        {% if show_parity_filter %}
+        <div class="filter-section">
+          <span class="section-label">{% if show_parity_beef %}Stock group{% else %}Parity{% endif %}</span>
+          <div class="slicer-group parity-slicer{% if show_parity_beef %} with-beef{% endif %}" role="group" aria-label="{% if show_parity_beef %}Stock group{% else %}Parity{% endif %}">
+            <button
+              type="button"
+              class="slicer-btn{% if parity_default_both %} selected{% endif %}"
+              data-value="primiparous"
+              aria-pressed="{{ 'true' if parity_default_both else 'false' }}"
+            >
+              <span class="slicer-icon" aria-hidden="true">Y</span>
+              Youngstock
+            </button>
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="multiparous"
+              aria-pressed="true"
+            >
+              <span class="slicer-icon" aria-hidden="true">C</span>
+              Cows
+            </button>
+            {% if show_parity_beef %}
+            <button
+              type="button"
+              class="slicer-btn"
+              data-value="beef"
+              aria-pressed="false"
+            >
+              <span class="slicer-icon" aria-hidden="true">B</span>
+              Beef
+            </button>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+        {% if show_disease_filter %}
+        <div class="filter-section">
+          <span class="section-label">Disease</span>
+          <select id="disease-select" class="filter-select">
+            <option value="">All diseases</option>
+            {% for opt in disease_options %}
+            <option value="{{ opt.value }}">{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        {% if show_breedings_semen_chart %}
+        <div class="filter-section">
+          <span class="section-label">Semen type</span>
+          <div class="slicer-group semen-slicer" role="group" aria-label="Semen type">
+            <button type="button" class="slicer-btn selected" data-value="beef" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">B</span>
+              Beef
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="dairy" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">D</span>
+              Dairy
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="unknown" aria-pressed="true" id="semen-unknown-slicer">
+              <span class="slicer-icon" aria-hidden="true">?</span>
+              Unknown
+            </button>
+          </div>
+        </div>
+        {% endif %}
+        {% if show_hooftrimming_charts %}
+        <div class="filter-section">
+          <span class="section-label">Protocol</span>
+          <div class="protocol-dropdown" id="protocol-dropdown">
+            <button type="button" class="protocol-trigger" id="protocol-trigger" aria-expanded="false" aria-haspopup="listbox">
+              <span class="protocol-trigger-label" id="protocol-trigger-label">All</span>
+              <span class="protocol-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="protocol-panel" id="protocol-panel" hidden>
+              <p class="meta-line" style="padding:0.35rem 0.65rem;margin:0;">Loading protocols…</p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        <div class="filter-section">
+          <span class="section-label">Fiscal year</span>
+          <select id="fiscal-year-select" class="filter-select">
+            <option value="">Any</option>
+          </select>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Event date range</span>
+          <div class="date-inputs">
+            <label>
+              From
+              <span class="month-label" id="min-date-label">—</span>
+            </label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0">
+            <label>
+              To
+              <span class="month-label" id="max-date-label">—</span>
+            </label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0">
+          </div>
+        </div>
+        {% if show_disease_scatter %}
+        <div class="filter-section" id="y-range-section">
+          <span class="section-label" id="y-range-label">DIM range</span>
+          <div class="y-range-inputs">
+            <label>
+              From
+              <input type="number" id="min-y-input" min="0" max="0" value="0" step="1">
+            </label>
+            <label>
+              To
+              <input type="number" id="max-y-input" min="0" max="0" value="0" step="1">
+            </label>
+          </div>
+        </div>
+        {% endif %}
+        <div class="filter-actions">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
+        </div>
+        {% include "events/_refresh.html" %}
+        {% if show_breedings_sire_settings %}
+        <div class="sire-settings-panel">
+          <button type="button" class="secondary small sire-settings-toggle" id="sire-settings-toggle">
+            Sire settings
+          </button>
+          <div class="sire-settings-body" id="sire-settings-body">
+            <h3>Bull classifications</h3>
+            <div class="sire-columns" id="sire-columns">
+              <p class="meta-line">Loading sires…</p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </aside>
+
+      <div class="summary-panel" id="summary-panel">
+        <h3>Summary</h3>
+        <div id="summary-rows"></div>
+      </div>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line"></p>
+      <div id="graph-view">
+        <div class="chart-wrap">
+          <canvas id="events-chart"></canvas>
+        </div>
+        {% if show_breedings_semen_chart %}
+        <div class="chart-wrap chart-wrap-secondary">
+          <canvas id="breedings-semen-chart"></canvas>
+        </div>
+        {% endif %}
+        {% if show_hooftrimming_charts %}
+        <div class="chart-wrap chart-wrap-secondary">
+          <canvas id="lame-events-chart"></canvas>
+        </div>
+        <div class="chart-wrap chart-wrap-secondary">
+          <canvas id="lame-dim-chart"></canvas>
+        </div>
+        <div class="chart-wrap chart-wrap-protocols">
+          <canvas id="lame-protocols-chart"></canvas>
+        </div>
+        {% endif %}
+        {% if show_disease_scatter %}
+        <div class="chart-wrap chart-wrap-scatter">
+          <canvas id="disease-scatter-chart"></canvas>
+        </div>
+        <div class="chart-wrap chart-wrap-incidence">
+          <canvas id="disease-incidence-chart"></canvas>
+        </div>
+        {% endif %}
+      </div>
+      <div id="table-view" style="display:none;">
+        <div class="table-wrap">
+          {% if show_hooftrimming_charts %}
+          <h3 class="table-section-title" id="main-table-title"></h3>
+          {% endif %}
+          <table id="events-table" class="events-data-table">
+            <thead id="events-table-head">
+              <tr>
+                <th>Event Month</th>
+                <th>CM</th>
+                <th>GAD</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+        {% if show_hooftrimming_charts %}
+        <div class="table-wrap table-wrap-secondary">
+          <h3 class="table-section-title" id="lame-events-table-title"></h3>
+          <table id="lame-events-table" class="events-data-table">
+            <thead>
+              <tr>
+                <th>Event Month</th>
+                <th>CM</th>
+                <th>GAD</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="lame-events-body"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap table-wrap-secondary">
+          <h3 class="table-section-title" id="lame-dim-table-title"></h3>
+          <table id="lame-dim-table" class="events-data-table">
+            <thead>
+              <tr>
+                <th>DIM bin</th>
+                <th>CM</th>
+                <th>GAD</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="lame-dim-body"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap table-wrap-secondary">
+          <h3 class="table-section-title" id="lame-protocols-table-title"></h3>
+          <table id="lame-protocols-table" class="events-data-table">
+            <thead>
+              <tr>
+                <th>Protocol</th>
+                <th>CM</th>
+                <th>GAD</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="lame-protocols-body"></tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+      <div id="empty-state" class="empty-state" style="display:none;"></div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  {% if show_disease_scatter %}
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" crossorigin="anonymous"></script>
+  {% endif %}
+  <script>
+    const API_SLUG = {{ api_slug | tojson }};
+    const CHART_TITLE = {{ chart_title | tojson }};
+    const SHOW_LACT_FILTER = {{ show_lact_filter | default(false) | tojson }};
+    const SHOW_PARITY_FILTER = {{ show_parity_filter | default(false) | tojson }};
+    const PARITY_EXCLUSIVE = {{ parity_exclusive | default(false) | tojson }};
+    const SHOW_PARITY_BEEF = {{ show_parity_beef | default(false) | tojson }};
+    const PARITY_DEFAULT_BOTH = {{ parity_default_both | default(false) | tojson }};
+    const SHOW_DISEASE_FILTER = {{ show_disease_filter | default(false) | tojson }};
+    const SHOW_DISEASE_SCATTER = {{ show_disease_scatter | default(false) | tojson }};
+    const SHOW_REASON_TABLE = {{ show_reason_table | default(false) | tojson }};
+    const SHOW_BREEDINGS_SEMEN_CHART = {{ show_breedings_semen_chart | default(false) | tojson }};
+    const SHOW_BREEDINGS_SEMEN_TABLE = {{ show_breedings_semen_table | default(false) | tojson }};
+    const SHOW_BREEDINGS_SIRE_SETTINGS = {{ show_breedings_sire_settings | default(false) | tojson }};
+    const SHOW_HOOFTRIMMING_CHARTS = {{ show_hooftrimming_charts | default(false) | tojson }};
+    const CAN_EDIT_SIRES = {{ can_edit_sires | default(false) | tojson }};
+    const FARM_COLORS = {{ farm_colors | tojson }};
+    const HERD_FARMS = {{ farm_options | tojson }};
+    const SEMEN_COLORS = { beef: "#8B4513", dairy: "#2ca02c", unknown: "#e91e8c" };
+    const BREEDINGS_SEMEN_CHART_TITLE = "Breedings by Month — Beef vs Dairy";
+    const LAME_EVENTS_CHART_TITLE = "Lame Events by Month — Stacked by Farm";
+    const LAME_PROTOCOLS_CHART_TITLE = "Lame Event Protocols";
+    const LAME_DIM_CHART_TITLE = "Lame Events by DIM (30-day bins)";
+    let eventsChart = null;
+    let breedingsSemenChart = null;
+    let lameEventsChart = null;
+    let lameProtocolsChart = null;
+    let lameDimChart = null;
+    let diseaseScatterChart = null;
+    let diseaseIncidenceChart = null;
+    let lastReportData = null;
+    let protocolOptions = [];
+    let selectedProtocolSet = null; // null = all; Set = selected
+    let protocolDropdownBound = false;
+    let monthList = [];
+    let dateBoundsInitialized = false;
+    let storedDateBounds = null;
+    let storedFullDateBounds = null;
+    let lastFiscalYear = null;
+    let lastAppliedDisease = SHOW_DISEASE_FILTER ? null : null;
+    let yBoundsInitialized = false;
+    let storedYBoundsMax = null;
+    const DEFAULT_MONTH_SPAN = 12;
+
+    function clearFilters() {
+      resetFarmSlicers();
+      if (SHOW_LACT_FILTER) {
+        document.querySelectorAll(".lact-cb").forEach(cb => { cb.checked = true; });
+      }
+      if (SHOW_PARITY_FILTER) {
+        resetParitySlicers();
+      }
+      if (SHOW_DISEASE_FILTER) {
+        document.getElementById("disease-select").value = "";
+      }
+      if (SHOW_BREEDINGS_SEMEN_CHART) {
+        resetSemenSlicers();
+      }
+      if (SHOW_HOOFTRIMMING_CHARTS) {
+        resetProtocolFilter();
+      }
+      document.getElementById("fiscal-year-select").value = "";
+      lastFiscalYear = null;
+      yBoundsInitialized = false;
+      storedYBoundsMax = null;
+      if (storedFullDateBounds) {
+        syncDateControls(storedFullDateBounds, true, true);
+      } else if (storedDateBounds) {
+        syncDateControls(storedDateBounds, true, true);
+      }
+      loadReport();
+    }
+
+    function parseIsoDate(iso) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function buildMonthList(minIso, maxIso) {
+      const months = [];
+      let d = parseIsoDate(minIso);
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = parseIsoDate(maxIso);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(new Date(d));
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      return months;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      const yr = String(date.getFullYear()).slice(-2);
+      return `${mon}-${yr}`;
+    }
+
+    function toIsoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function lastDayOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function updateDateLabels() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      document.getElementById("min-date-label").textContent =
+        monthList[minIdx] ? formatMonthLabel(monthList[minIdx]) : "—";
+      document.getElementById("max-date-label").textContent =
+        monthList[maxIdx] ? formatMonthLabel(monthList[maxIdx]) : "—";
+    }
+
+    function fiscalYearBounds(year) {
+      const y = Number(year);
+      return {
+        min: `${y - 1}-04-01`,
+        max: `${y}-03-31`,
+      };
+    }
+
+    function defaultSliderIndices(maxIdx) {
+      const minIdx = Math.max(0, maxIdx - (DEFAULT_MONTH_SPAN - 1));
+      return { minIdx, maxIdx };
+    }
+
+    function monthStartIso(isoDate) {
+      if (!isoDate) return null;
+      return `${String(isoDate).slice(0, 7)}-01`;
+    }
+
+    function findMonthIndex(isoDate) {
+      const target = monthStartIso(isoDate);
+      if (!target) return -1;
+      return monthList.findIndex(month => toIsoDate(month) === target);
+    }
+
+    function syncDateControls(dateBounds, resetValues, useLastTwelveMonths = false) {
+      if (!dateBounds?.min || !dateBounds?.max) return;
+
+      // Remember the currently selected months by calendar date before rebuilding
+      // the slider list. Farm toggles change date_bounds length, and index-based
+      // clamping would otherwise jump the range to the wrong months.
+      let preserveFrom = null;
+      let preserveTo = null;
+      if (!resetValues && monthList.length) {
+        try {
+          const current = currentDateRangeParams();
+          preserveFrom = current.event_from;
+          preserveTo = current.event_to;
+        } catch (_) {
+          preserveFrom = null;
+          preserveTo = null;
+        }
+      }
+
+      monthList = buildMonthList(dateBounds.min, dateBounds.max);
+      const maxIdx = Math.max(0, monthList.length - 1);
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      minRange.min = 0;
+      minRange.max = maxIdx;
+      maxRange.min = 0;
+      maxRange.max = maxIdx;
+      if (resetValues) {
+        if (useLastTwelveMonths) {
+          const { minIdx, maxIdx: hi } = defaultSliderIndices(maxIdx);
+          minRange.value = minIdx;
+          maxRange.value = hi;
+        } else {
+          minRange.value = 0;
+          maxRange.value = maxIdx;
+        }
+      } else if (preserveFrom && preserveTo) {
+        let lo = findMonthIndex(preserveFrom);
+        let hi = findMonthIndex(preserveTo);
+        if (lo < 0) lo = 0;
+        if (hi < 0) hi = maxIdx;
+        if (lo > hi) [lo, hi] = [hi, lo];
+        minRange.value = lo;
+        maxRange.value = hi;
+      } else {
+        minRange.value = Math.min(parseInt(minRange.value, 10) || 0, maxIdx);
+        maxRange.value = Math.min(parseInt(maxRange.value, 10) || maxIdx, maxIdx);
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+      }
+      updateDateLabels();
+    }
+
+    function currentDateRangeParams() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      let lo = Number.isNaN(minIdx) ? 0 : minIdx;
+      let hi = Number.isNaN(maxIdx) ? Math.max(0, monthList.length - 1) : maxIdx;
+      if (lo > hi) [lo, hi] = [hi, lo];
+      const startMonth = monthList[lo];
+      const endMonth = monthList[hi];
+      return {
+        event_from: toIsoDate(startMonth),
+        event_to: toIsoDate(lastDayOfMonth(endMonth)),
+      };
+    }
+
+    function appendDateParams(params) {
+      if (!monthList.length) return params;
+      const { event_from, event_to } = currentDateRangeParams();
+      params.set("event_from", event_from);
+      params.set("event_to", event_to);
+      return params;
+    }
+
+    function bindDateInputs() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+
+      function clampAndLoad() {
+        let minVal = parseInt(minRange.value, 10);
+        let maxVal = parseInt(maxRange.value, 10);
+        if (Number.isNaN(minVal)) minVal = 0;
+        if (Number.isNaN(maxVal)) maxVal = Math.max(0, monthList.length - 1);
+        if (minVal > maxVal) maxVal = minVal;
+        minRange.value = minVal;
+        maxRange.value = maxVal;
+        updateDateLabels();
+        loadReport();
+      }
+
+      minRange.addEventListener("input", () => {
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+        updateDateLabels();
+        loadReport();
+      });
+      maxRange.addEventListener("input", () => {
+        if (parseInt(maxRange.value, 10) < parseInt(minRange.value, 10)) {
+          minRange.value = maxRange.value;
+        }
+        updateDateLabels();
+        loadReport();
+      });
+      minRange.addEventListener("change", clampAndLoad);
+      maxRange.addEventListener("change", clampAndLoad);
+    }
+
+    function clampYInputs() {
+      if (!SHOW_DISEASE_SCATTER) return;
+      const minInput = document.getElementById("min-y-input");
+      const maxInput = document.getElementById("max-y-input");
+      if (!minInput || !maxInput) return;
+      const maxY = Math.max(0, parseInt(maxInput.max, 10) || 0);
+      let minVal = parseInt(minInput.value, 10);
+      let maxVal = parseInt(maxInput.value, 10);
+      if (Number.isNaN(minVal) || minInput.value === "") minVal = 0;
+      if (Number.isNaN(maxVal) || maxInput.value === "") maxVal = maxY;
+      minVal = Math.max(0, Math.min(minVal, maxY));
+      maxVal = Math.max(0, Math.min(maxVal, maxY));
+      if (minVal > maxVal) maxVal = minVal;
+      minInput.value = minVal;
+      maxInput.value = maxVal;
+    }
+
+    function syncYControls(yBounds, resetValues) {
+      if (!SHOW_DISEASE_SCATTER || !yBounds) return;
+      const minInput = document.getElementById("min-y-input");
+      const maxInput = document.getElementById("max-y-input");
+      if (!minInput || !maxInput) return;
+      const maxY = Math.max(0, Number(yBounds.max) || 0);
+      minInput.min = 0;
+      minInput.max = maxY;
+      maxInput.min = 0;
+      maxInput.max = maxY;
+      if (resetValues) {
+        minInput.value = 0;
+        maxInput.value = maxY;
+      } else {
+        clampYInputs();
+      }
+    }
+
+    function currentYRange() {
+      const minInput = document.getElementById("min-y-input");
+      const maxInput = document.getElementById("max-y-input");
+      if (!minInput || !maxInput) {
+        return { minY: 0, maxY: Number.MAX_SAFE_INTEGER };
+      }
+      let minY = parseInt(minInput.value, 10);
+      let maxY = parseInt(maxInput.value, 10);
+      const boundMax = Math.max(0, parseInt(maxInput.max, 10) || 0);
+      if (Number.isNaN(minY)) minY = 0;
+      if (Number.isNaN(maxY)) maxY = boundMax;
+      if (minY > maxY) [minY, maxY] = [maxY, minY];
+      return { minY, maxY };
+    }
+
+    function appendYParams(params) {
+      if (!SHOW_DISEASE_SCATTER || !yBoundsInitialized) return params;
+      const { minY, maxY } = currentYRange();
+      params.set("y_min", String(minY));
+      params.set("y_max", String(maxY));
+      return params;
+    }
+
+    function bindYInputs() {
+      if (!SHOW_DISEASE_SCATTER) return;
+      const minInput = document.getElementById("min-y-input");
+      const maxInput = document.getElementById("max-y-input");
+      if (!minInput || !maxInput) return;
+
+      function applyYRange() {
+        clampYInputs();
+        loadReport();
+      }
+
+      [minInput, maxInput].forEach(input => {
+        input.addEventListener("change", applyYRange);
+        input.addEventListener("blur", applyYRange);
+        input.addEventListener("keydown", event => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyYRange();
+          }
+        });
+      });
+    }
+
+    function breedingsSemenSummaryLines(counts, monthCount) {
+      const avg = value => {
+        if (!monthCount) return 0;
+        return Math.round((value / monthCount) * 10) / 10;
+      };
+      const formatLine = (label, value) =>
+        `${label}: ${value.toLocaleString("en-GB")} (avg ${avg(value).toLocaleString("en-GB")})`;
+      const lines = [
+        formatLine("Dairy", counts.dairy ?? 0),
+        formatLine("Beef", counts.beef ?? 0),
+      ];
+      const unknown = counts.unknown ?? 0;
+      if (unknown > 0) {
+        lines.push(`Unknown: ${unknown.toLocaleString("en-GB")}`);
+      }
+      return lines.join("<br>");
+    }
+
+    function renderSummary(data) {
+      const panel = document.getElementById("summary-panel");
+      const container = document.getElementById("summary-rows");
+      const summary = data.range_summary;
+      const farms = selectedFarms();
+
+      if (!summary || !data.date_bounds || !farms.length) {
+        panel.style.display = "none";
+        container.innerHTML = "";
+        return;
+      }
+
+      if (SHOW_BREEDINGS_SEMEN_CHART && data.breedings_semen_summary) {
+        const semenSummary = data.breedings_semen_summary;
+        const byFarm = semenSummary.by_farm || {};
+        const totalCounts = semenSummary.total || {};
+        const monthCount = semenSummary.month_count || 0;
+        const totalLabel = farms.length > 1 ? "All farms" : "Total";
+
+        let html = farms.map(farm => `
+          <div class="summary-row">
+            <span class="summary-row-header">${farm}</span>
+            <span class="summary-row-detail">
+              ${breedingsSemenSummaryLines(byFarm[farm] || {}, monthCount)}
+            </span>
+          </div>
+        `).join("");
+
+        html += `
+          <div class="summary-row summary-row-total">
+            <span class="summary-row-header">${totalLabel}</span>
+            <span class="summary-row-detail">
+              ${breedingsSemenSummaryLines(totalCounts, monthCount)}
+            </span>
+          </div>
+        `;
+
+        container.innerHTML = html;
+        panel.style.display = "flex";
+        return;
+      }
+
+      function farmRow(farm) {
+        const stats = summary[farm] || { total: 0, average_per_month: 0 };
+        const farmIncidence = data.disease_incidence?.summary?.[farm];
+        const cohortLabel = data.disease_incidence?.cohort_label || "Calvings";
+        let diseaseLines = "";
+        if (SHOW_DISEASE_SCATTER && farmIncidence) {
+          diseaseLines = `<br>Incidence: ${farmIncidence.incidence_pct.toLocaleString("en-GB")}%`;
+          diseaseLines += `<br>${cohortLabel}: ${farmIncidence.cohort_size.toLocaleString("en-GB")}`;
+        }
+        return `
+          <div class="summary-row">
+            <span class="summary-row-header">${farm}</span>
+            <span class="summary-row-detail">
+              Total: ${stats.total.toLocaleString("en-GB")}<br>
+              Avg per month: ${stats.average_per_month.toLocaleString("en-GB")}${diseaseLines}
+            </span>
+          </div>
+        `;
+      }
+
+      let html = farms.map(farmRow).join("");
+      const totalLabel = farms.length > 1 ? "All farms" : "Total";
+      const totalIncidence = data.disease_incidence?.summary?.total;
+      const cohortLabel = data.disease_incidence?.cohort_label || "Calvings";
+      let totalDiseaseLines = "";
+      if (SHOW_DISEASE_SCATTER && totalIncidence) {
+        totalDiseaseLines = `<br>Incidence: ${totalIncidence.incidence_pct.toLocaleString("en-GB")}%`;
+        totalDiseaseLines += `<br>${cohortLabel}: ${totalIncidence.cohort_size.toLocaleString("en-GB")}`;
+      }
+      html += `
+        <div class="summary-row summary-row-total">
+          <span class="summary-row-header">${totalLabel}</span>
+          <span class="summary-row-detail">
+            Total: ${summary.total.toLocaleString("en-GB")}<br>
+            Avg per month: ${summary.average_per_month.toLocaleString("en-GB")}${totalDiseaseLines}
+          </span>
+        </div>
+      `;
+
+      container.innerHTML = html;
+      panel.style.display = "flex";
+    }
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function resetFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function bindFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          btn.classList.toggle("selected");
+          btn.setAttribute(
+            "aria-pressed",
+            btn.classList.contains("selected") ? "true" : "false"
+          );
+          loadReport();
+        });
+      });
+    }
+
+    function selectedLactGroups() {
+      if (!SHOW_LACT_FILTER) return [];
+      return [...document.querySelectorAll(".lact-cb:checked")].map(cb => cb.value);
+    }
+
+    function appendFarmParams(params) {
+      selectedFarms().forEach(farm => params.append("farm", farm));
+      return params;
+    }
+
+    function appendLactParams(params) {
+      if (!SHOW_LACT_FILTER) return params;
+      selectedLactGroups().forEach(group => params.append("lact", group));
+      return params;
+    }
+
+    function selectedParityGroups() {
+      if (!SHOW_PARITY_FILTER) return [];
+      return [...document.querySelectorAll(".parity-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function resetParitySlicers() {
+      document.querySelectorAll(".parity-slicer .slicer-btn").forEach(btn => {
+        const selected = btn.dataset.value === "multiparous"
+          || (PARITY_DEFAULT_BOTH && btn.dataset.value === "primiparous");
+        btn.classList.toggle("selected", selected);
+        btn.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+    }
+
+    function bindParitySlicers() {
+      document.querySelectorAll(".parity-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (PARITY_EXCLUSIVE) {
+            if (btn.classList.contains("selected")) {
+              return;
+            }
+            document.querySelectorAll(".parity-slicer .slicer-btn").forEach(other => {
+              other.classList.remove("selected");
+              other.setAttribute("aria-pressed", "false");
+            });
+            btn.classList.add("selected");
+            btn.setAttribute("aria-pressed", "true");
+          } else {
+            btn.classList.toggle("selected");
+            btn.setAttribute(
+              "aria-pressed",
+              btn.classList.contains("selected") ? "true" : "false"
+            );
+          }
+          loadReport();
+        });
+      });
+    }
+
+    function selectedDisease() {
+      if (!SHOW_DISEASE_FILTER) return null;
+      const value = document.getElementById("disease-select").value;
+      return value || null;
+    }
+
+    function appendDiseaseParams(params) {
+      if (!SHOW_DISEASE_FILTER) return params;
+      const disease = selectedDisease();
+      if (disease) {
+        params.set("disease", disease);
+      }
+      return params;
+    }
+
+    function appendParityParams(params) {
+      if (!SHOW_PARITY_FILTER) return params;
+      selectedParityGroups().forEach(group => params.append("parity", group));
+      return params;
+    }
+
+    function selectedSemenTypes() {
+      if (!SHOW_BREEDINGS_SEMEN_CHART) return [];
+      return [...document.querySelectorAll(".semen-slicer .slicer-btn.selected")]
+        .filter(btn => !btn.hidden)
+        .map(btn => btn.dataset.value);
+    }
+
+    let semenFilterFromUrl = false;
+
+    function resetSemenSlicers() {
+      semenFilterFromUrl = false;
+      document.querySelectorAll(".semen-slicer .slicer-btn").forEach(btn => {
+        if (btn.hidden) {
+          btn.classList.remove("selected");
+          btn.setAttribute("aria-pressed", "false");
+          return;
+        }
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function applySemenSlicersFromUrl() {
+      if (!SHOW_BREEDINGS_SEMEN_CHART) return;
+      const allowed = new Set(["beef", "dairy", "unknown"]);
+      const wanted = new Set(
+        new URLSearchParams(window.location.search)
+          .getAll("semen")
+          .map((value) => String(value || "").trim().toLowerCase())
+          .filter((value) => allowed.has(value))
+      );
+      if (!wanted.size) return;
+      semenFilterFromUrl = true;
+      document.querySelectorAll(".semen-slicer .slicer-btn").forEach((btn) => {
+        const on = wanted.has(btn.dataset.value);
+        btn.classList.toggle("selected", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    }
+
+    function updateUnknownSemenSlicerVisibility(data) {
+      if (!SHOW_BREEDINGS_SEMEN_CHART) return false;
+      const btn = document.getElementById("semen-unknown-slicer")
+        || document.querySelector('.semen-slicer .slicer-btn[data-value="unknown"]');
+      if (!btn) return false;
+      const availableUnknown = data?.breedings_semen_summary?.available?.unknown
+        ?? data?.breedings_semen_summary?.total?.unknown
+        ?? 0;
+      const show = Number(availableUnknown) > 0;
+      const wasHidden = btn.hidden;
+      btn.hidden = !show;
+      if (!show) {
+        btn.classList.remove("selected");
+        btn.setAttribute("aria-pressed", "false");
+        return false;
+      }
+      if (wasHidden && !semenFilterFromUrl) {
+        // Newly available again — select by default and refetch so it is included.
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+        return true;
+      }
+      return false;
+    }
+
+    function bindSemenSlicers() {
+      document.querySelectorAll(".semen-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          semenFilterFromUrl = false;
+          btn.classList.toggle("selected");
+          btn.setAttribute(
+            "aria-pressed",
+            btn.classList.contains("selected") ? "true" : "false"
+          );
+          loadReport();
+        });
+      });
+    }
+
+    function appendSemenParams(params) {
+      if (!SHOW_BREEDINGS_SEMEN_CHART) return params;
+      selectedSemenTypes().forEach(value => params.append("semen", value));
+      return params;
+    }
+
+    function escHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function selectedProtocols() {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return [];
+      if (selectedProtocolSet === null) return protocolOptions.slice();
+      return protocolOptions.filter(protocol => selectedProtocolSet.has(protocol));
+    }
+
+    function allProtocolsSelected() {
+      return selectedProtocolSet === null
+        || (protocolOptions.length > 0 && selectedProtocolSet.size === protocolOptions.length);
+    }
+
+    function updateProtocolTriggerLabel() {
+      const label = document.getElementById("protocol-trigger-label");
+      if (!label) return;
+      if (!protocolOptions.length) {
+        label.textContent = "No protocols";
+        return;
+      }
+      const selected = selectedProtocols();
+      if (!selected.length) {
+        label.textContent = "None selected";
+        return;
+      }
+      if (allProtocolsSelected()) {
+        label.textContent = "All";
+        return;
+      }
+      if (selected.length === 1) {
+        label.textContent = selected[0];
+        return;
+      }
+      label.textContent = `${selected.length} selected`;
+    }
+
+    function resetProtocolFilter() {
+      selectedProtocolSet = null;
+      renderProtocolDropdownOptions();
+      updateProtocolTriggerLabel();
+    }
+
+    function renderProtocolDropdownOptions() {
+      const panel = document.getElementById("protocol-panel");
+      if (!panel) return;
+      if (!protocolOptions.length) {
+        panel.innerHTML = '<p class="meta-line" style="padding:0.35rem 0.65rem;margin:0;">No protocols in range</p>';
+        updateProtocolTriggerLabel();
+        return;
+      }
+      const allChecked = allProtocolsSelected();
+      const optionsHtml = protocolOptions.map(protocol => {
+        const checked = selectedProtocolSet === null || selectedProtocolSet.has(protocol);
+        return `
+          <label class="protocol-option">
+            <input type="checkbox" class="protocol-cb" value="${escHtml(protocol)}" ${checked ? "checked" : ""}>
+            <span>${escHtml(protocol)}</span>
+          </label>
+        `;
+      }).join("");
+      panel.innerHTML = `
+        <label class="protocol-option protocol-option-all">
+          <input type="checkbox" id="protocol-all-cb" ${allChecked ? "checked" : ""}>
+          <span>All</span>
+        </label>
+        ${optionsHtml}
+      `;
+      updateProtocolTriggerLabel();
+    }
+
+    function syncProtocolOptionsFromData(data) {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return;
+      const nextOptions = Array.isArray(data.available_protocols)
+        ? data.available_protocols.slice()
+        : [];
+      const prevSelected = selectedProtocols();
+      protocolOptions = nextOptions;
+      if (!protocolOptions.length) {
+        selectedProtocolSet = new Set();
+      } else if (selectedProtocolSet === null) {
+        // Keep all selected.
+      } else {
+        const nextSelected = protocolOptions.filter(protocol => prevSelected.includes(protocol));
+        if (!nextSelected.length || nextSelected.length === protocolOptions.length) {
+          selectedProtocolSet = null;
+        } else {
+          selectedProtocolSet = new Set(nextSelected);
+        }
+      }
+      renderProtocolDropdownOptions();
+    }
+
+    function setProtocolDropdownOpen(open) {
+      const trigger = document.getElementById("protocol-trigger");
+      const panel = document.getElementById("protocol-panel");
+      if (!trigger || !panel) return;
+      panel.hidden = !open;
+      trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    function bindProtocolDropdown() {
+      if (!SHOW_HOOFTRIMMING_CHARTS || protocolDropdownBound) return;
+      const dropdown = document.getElementById("protocol-dropdown");
+      const trigger = document.getElementById("protocol-trigger");
+      const panel = document.getElementById("protocol-panel");
+      if (!dropdown || !trigger || !panel) return;
+      protocolDropdownBound = true;
+
+      trigger.addEventListener("click", () => {
+        setProtocolDropdownOpen(panel.hidden);
+      });
+
+      panel.addEventListener("change", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+
+        if (target.id === "protocol-all-cb") {
+          selectedProtocolSet = target.checked ? null : new Set();
+          renderProtocolDropdownOptions();
+          loadReport();
+          return;
+        }
+
+        if (!target.classList.contains("protocol-cb")) return;
+        const checked = [...panel.querySelectorAll(".protocol-cb:checked")].map(cb => cb.value);
+        if (!checked.length) {
+          selectedProtocolSet = new Set();
+        } else if (checked.length === protocolOptions.length) {
+          selectedProtocolSet = null;
+        } else {
+          selectedProtocolSet = new Set(checked);
+        }
+        renderProtocolDropdownOptions();
+        loadReport();
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!dropdown.contains(event.target)) {
+          setProtocolDropdownOpen(false);
+        }
+      });
+    }
+
+    function appendProtocolParams(params) {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return params;
+      if (allProtocolsSelected()) return params;
+      selectedProtocols().forEach(value => params.append("protocol", value));
+      return params;
+    }
+
+    function selectedFiscalYear() {
+      const value = document.getElementById("fiscal-year-select").value;
+      return value ? value : null;
+    }
+
+    function appendFiscalYearParam(params) {
+      const fiscalYear = selectedFiscalYear();
+      if (fiscalYear) {
+        params.set("fiscal_year", fiscalYear);
+      }
+      return params;
+    }
+
+    function renderFiscalYearOptions(options) {
+      const select = document.getElementById("fiscal-year-select");
+      const current = select.value;
+      const years = options || [];
+      let html = '<option value="">Any</option>';
+      html += years.map(year => `<option value="${year}">${year}</option>`).join("");
+      select.innerHTML = html;
+      if (current && years.includes(Number(current))) {
+        select.value = current;
+      } else {
+        select.value = "";
+      }
+    }
+
+    function viewMode() {
+      return document.querySelector('input[name="view-mode"]:checked')?.value || "graph";
+    }
+
+    function updateViewVisibility() {
+      const mode = viewMode();
+      document.getElementById("graph-view").style.display = mode === "graph" ? "" : "none";
+      document.getElementById("table-view").style.display = mode === "table" ? "" : "none";
+    }
+
+    const SALES_TABLE_REASONS = ["CULL", "TB", "OFS", "Beef", "Dairy"];
+    const BREEDINGS_SEMEN_LABELS = { beef: "Beef", dairy: "Dairy", unknown: "Unknown" };
+    const BREEDINGS_TABLE_SEMEN_ORDER = ["beef", "dairy", "unknown"];
+
+    function capitalizeSemenLabel(value) {
+      return BREEDINGS_SEMEN_LABELS[value] || value;
+    }
+
+    function breedingsFarmClass(farm) {
+      return `farm-${String(farm).toLowerCase()}`;
+      if (farm === "Total") return "farm-combined";
+      return "";
+    }
+
+    function renderBreedingsSemenTableHeader(farms, semenTypes, showCombinedTotal) {
+      const head = document.getElementById("events-table-head");
+      const typeList = semenTypes || BREEDINGS_TABLE_SEMEN_ORDER;
+      const displayFarms = showCombinedTotal ? [...farms, "Total"] : farms;
+      const colsPerFarm = typeList.length + 1;
+      const farmHeader = displayFarms.map(farm => {
+        const farmClass = breedingsFarmClass(farm);
+        return `<th colspan="${colsPerFarm}" class="${farmClass}">${farm}</th>`;
+      }).join("");
+      const typeHeader = displayFarms.map(farm => {
+        const farmClass = breedingsFarmClass(farm);
+        const typeCells = typeList.map(semenType =>
+          `<th class="reason-sub ${farmClass}">${capitalizeSemenLabel(semenType)}</th>`
+        ).join("");
+        return `${typeCells}<th class="reason-sub ${farmClass}">Total</th>`;
+      }).join("");
+      head.innerHTML = `
+        <tr>
+          <th rowspan="2">Month</th>
+          ${farmHeader}
+        </tr>
+        <tr>${typeHeader}</tr>
+      `;
+    }
+
+    function breedingsSemenCellsForFarm(row, farm, semenTypes, totals) {
+      let farmTotal = 0;
+      const typeCells = semenTypes.map(semenType => {
+        const value = row[farm]?.[semenType] ?? 0;
+        if (totals) {
+          totals.types[semenType] += value;
+          totals.total += value;
+        }
+        farmTotal += value;
+        return `<td>${value}</td>`;
+      }).join("");
+      return `${typeCells}<td class="farm-total">${farmTotal}</td>`;
+    }
+
+    function breedingsCombinedSemenCells(row, farms, semenTypes, combinedTotals) {
+      const combined = Object.fromEntries(semenTypes.map(semenType => [semenType, 0]));
+      farms.forEach(farm => {
+        semenTypes.forEach(semenType => {
+          combined[semenType] += row[farm]?.[semenType] ?? 0;
+        });
+      });
+      let lineTotal = 0;
+      const typeCells = semenTypes.map(semenType => {
+        const value = combined[semenType];
+        combinedTotals.types[semenType] += value;
+        lineTotal += value;
+        return `<td>${value}</td>`;
+      }).join("");
+      combinedTotals.total += lineTotal;
+      return `${typeCells}<td class="farm-total">${lineTotal}</td>`;
+    }
+
+    function renderSalesTableHeader(farms, reasons) {
+      const head = document.getElementById("events-table-head");
+      const reasonList = reasons || SALES_TABLE_REASONS;
+      const colsPerFarm = reasonList.length + 1;
+      const farmHeader = farms.map(farm => {
+        const farmClass = `farm-${String(farm).toLowerCase()}`;
+        return `<th colspan="${colsPerFarm}" class="${farmClass}">${farm}</th>`;
+      }).join("");
+      const reasonHeader = farms.map(farm => {
+        const farmClass = `farm-${String(farm).toLowerCase()}`;
+        const reasonCells = reasonList.map(reason =>
+          `<th class="reason-sub ${farmClass}">${reason}</th>`
+        ).join("");
+        return `${reasonCells}<th class="reason-sub ${farmClass}">Total</th>`;
+      }).join("");
+      head.innerHTML = `
+        <tr>
+          <th rowspan="2">Month</th>
+          ${farmHeader}
+        </tr>
+        <tr>${reasonHeader}</tr>
+      `;
+    }
+
+    function renderDefaultTableHeader() {
+      document.getElementById("events-table-head").innerHTML = `
+        <tr>
+          <th>Event Month</th>
+          {% for farm in farm_options %}<th>{{ farm }}</th>{% endfor %}
+          <th>Total</th>
+        </tr>
+      `;
+    }
+
+    function farmCountsForRow(row, farms) {
+      const counts = {};
+      let total = 0;
+      farms.forEach(farm => {
+        const value = Number(row[farm] ?? 0);
+        counts[farm] = value;
+        total += value;
+      });
+      counts.total = total;
+      return counts;
+    }
+
+    function renderSimpleFarmTableBody(rows, labelKey, farms) {
+      if (!rows.length) return "";
+      const totals = Object.fromEntries(farms.map(farm => [farm, 0]));
+      totals.total = 0;
+      let html = rows.map(row => {
+        const counts = farmCountsForRow(row, farms);
+        farms.forEach(farm => { totals[farm] += counts[farm]; });
+        totals.total += counts.total;
+        const farmCells = farms.map(farm => `<td>${counts[farm]}</td>`).join("");
+        return `
+          <tr>
+            <td>${escHtml(row[labelKey] ?? "")}</td>
+            ${farmCells}
+            <td>${counts.total}</td>
+          </tr>
+        `;
+      }).join("");
+      const totalCells = farms.map(farm => `<td>${totals[farm]}</td>`).join("");
+      html += `
+        <tr class="grand-total">
+          <td>Grand Total</td>
+          ${totalCells}
+          <td>${totals.total}</td>
+        </tr>
+      `;
+      return html;
+    }
+
+    function renderSimpleFarmTableHeader(headEl, firstLabel, farms) {
+      if (!headEl) return;
+      const farmHeaders = farms.map(farm => `<th>${escHtml(farm)}</th>`).join("");
+      headEl.innerHTML = `
+        <tr>
+          <th>${escHtml(firstLabel)}</th>
+          ${farmHeaders}
+          <th>Total</th>
+        </tr>
+      `;
+    }
+
+    function renderHooftrimmingTables(data) {
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const mainTitle = document.getElementById("main-table-title");
+      if (mainTitle) mainTitle.textContent = CHART_TITLE;
+      const lameTitle = document.getElementById("lame-events-table-title");
+      if (lameTitle) lameTitle.textContent = LAME_EVENTS_CHART_TITLE;
+      const dimTitle = document.getElementById("lame-dim-table-title");
+      if (dimTitle) dimTitle.textContent = LAME_DIM_CHART_TITLE;
+      const protocolTitle = document.getElementById("lame-protocols-table-title");
+      if (protocolTitle) protocolTitle.textContent = LAME_PROTOCOLS_CHART_TITLE;
+
+      renderSimpleFarmTableHeader(
+        document.getElementById("events-table-head"),
+        "Event Month",
+        farms
+      );
+      document.getElementById("events-body").innerHTML = renderSimpleFarmTableBody(
+        data.rows || [],
+        "event_month",
+        farms
+      );
+
+      renderSimpleFarmTableHeader(
+        document.querySelector("#lame-events-table thead"),
+        "Event Month",
+        farms
+      );
+      document.getElementById("lame-events-body").innerHTML = renderSimpleFarmTableBody(
+        data.lame_rows || [],
+        "event_month",
+        farms
+      );
+
+      renderSimpleFarmTableHeader(
+        document.querySelector("#lame-dim-table thead"),
+        "DIM bin",
+        farms
+      );
+      document.getElementById("lame-dim-body").innerHTML = renderSimpleFarmTableBody(
+        data.lame_dim_rows || [],
+        "bin_label",
+        farms
+      );
+
+      renderSimpleFarmTableHeader(
+        document.querySelector("#lame-protocols-table thead"),
+        "Protocol",
+        farms
+      );
+      document.getElementById("lame-protocols-body").innerHTML = renderSimpleFarmTableBody(
+        data.lame_protocol_rows || [],
+        "protocol",
+        farms
+      );
+    }
+
+    function renderTable(data) {
+      if (SHOW_HOOFTRIMMING_CHARTS) {
+        renderHooftrimmingTables(data);
+        return;
+      }
+
+      const body = document.getElementById("events-body");
+      const rows = data.rows || [];
+      if (!rows.length) {
+        body.innerHTML = "";
+        return;
+      }
+
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      let html = "";
+
+      if (SHOW_REASON_TABLE && data.sales_table_rows) {
+        const tableRows = data.sales_table_rows;
+        const reasons = data.sales_table_reasons || SALES_TABLE_REASONS;
+        renderSalesTableHeader(farms, reasons);
+
+        const totals = {};
+        farms.forEach(farm => {
+          totals[farm] = { reasons: {}, total: 0 };
+          reasons.forEach(reason => { totals[farm].reasons[reason] = 0; });
+        });
+
+        html = tableRows.map(row => {
+          const cells = farms.map(farm => {
+            let farmTotal = 0;
+            const reasonCells = reasons.map(reason => {
+              const value = row[farm]?.[reason] ?? 0;
+              totals[farm].reasons[reason] += value;
+              farmTotal += value;
+              return `<td>${value}</td>`;
+            }).join("");
+            totals[farm].total += farmTotal;
+            return `${reasonCells}<td class="farm-total">${farmTotal}</td>`;
+          }).join("");
+          return `
+            <tr>
+              <td>${row.event_month}</td>
+              ${cells}
+            </tr>
+          `;
+        }).join("");
+
+        const totalCells = farms.map(farm => {
+          const reasonCells = reasons.map(reason =>
+            `<td>${totals[farm].reasons[reason]}</td>`
+          ).join("");
+          return `${reasonCells}<td class="farm-total">${totals[farm].total}</td>`;
+        }).join("");
+        html += `
+          <tr class="grand-total">
+            <td>Grand Total</td>
+            ${totalCells}
+          </tr>
+        `;
+      } else if (SHOW_BREEDINGS_SEMEN_TABLE && data.breedings_semen_rows) {
+        const tableRows = data.breedings_semen_rows;
+        let semenTypes = data.breedings_semen_types || BREEDINGS_TABLE_SEMEN_ORDER;
+        const unknownAvailable = data.breedings_semen_summary?.available?.unknown
+          ?? data.breedings_semen_summary?.total?.unknown
+          ?? 0;
+        if (unknownAvailable === 0) {
+          semenTypes = semenTypes.filter(semenType => semenType !== "unknown");
+        } else if (!selectedSemenTypes().includes("unknown")) {
+          semenTypes = semenTypes.filter(semenType => semenType !== "unknown");
+        }
+        const showCombinedTotal = farms.length > 1;
+        renderBreedingsSemenTableHeader(farms, semenTypes, showCombinedTotal);
+
+        const totals = {};
+        farms.forEach(farm => {
+          totals[farm] = { types: {}, total: 0 };
+          semenTypes.forEach(semenType => { totals[farm].types[semenType] = 0; });
+        });
+        const combinedTotals = { types: {}, total: 0 };
+        semenTypes.forEach(semenType => { combinedTotals.types[semenType] = 0; });
+
+        html = tableRows.map(row => {
+          const cells = farms.map(farm =>
+            breedingsSemenCellsForFarm(row, farm, semenTypes, totals[farm])
+          ).join("");
+          const combinedCells = showCombinedTotal
+            ? breedingsCombinedSemenCells(row, farms, semenTypes, combinedTotals)
+            : "";
+          return `
+            <tr>
+              <td>${row.event_month}</td>
+              ${cells}${combinedCells}
+            </tr>
+          `;
+        }).join("");
+
+        const totalCells = farms.map(farm => {
+          const typeCells = semenTypes.map(semenType =>
+            `<td>${totals[farm].types[semenType]}</td>`
+          ).join("");
+          return `${typeCells}<td class="farm-total">${totals[farm].total}</td>`;
+        }).join("");
+        const combinedTotalCells = showCombinedTotal
+          ? `${semenTypes.map(semenType => `<td>${combinedTotals.types[semenType]}</td>`).join("")}<td class="farm-total">${combinedTotals.total}</td>`
+          : "";
+        html += `
+          <tr class="grand-total">
+            <td>Grand Total</td>
+            ${totalCells}${combinedTotalCells}
+          </tr>
+        `;
+      } else {
+        renderDefaultTableHeader();
+        html = rows.map(row => {
+          const farmCells = HERD_FARMS.map(farm => `<td>${row[farm] ?? 0}</td>`).join("");
+          return `
+          <tr>
+            <td>${row.event_month}</td>
+            ${farmCells}
+            <td>${row.total}</td>
+          </tr>`;
+        }).join("");
+        const gt = data.grand_total || {};
+        const gtCells = HERD_FARMS.map(farm => `<td>${gt[farm] ?? 0}</td>`).join("");
+        html += `
+          <tr class="grand-total">
+            <td>Grand Total</td>
+            ${gtCells}
+            <td>${gt.total ?? 0}</td>
+          </tr>
+        `;
+      }
+
+      body.innerHTML = html;
+    }
+
+    function renderChart(data) {
+      const canvas = document.getElementById("events-chart");
+      const rows = data.rows || [];
+      if (eventsChart) {
+        eventsChart.destroy();
+        eventsChart = null;
+      }
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.event_month);
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(r => r[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        stack: "events",
+      }));
+
+      eventsChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: CHART_TITLE,
+            },
+            legend: { title: { display: true, text: "Farm" } },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              title: { display: true, text: "Event Month" },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              title: { display: true, text: "Number of Events" },
+            },
+          },
+        },
+      });
+    }
+
+    function destroyBreedingsSemenChart() {
+      if (breedingsSemenChart) {
+        breedingsSemenChart.destroy();
+        breedingsSemenChart = null;
+      }
+    }
+
+    function renderBreedingsSemenChart(data) {
+      if (!SHOW_BREEDINGS_SEMEN_CHART) return;
+      const canvas = document.getElementById("breedings-semen-chart");
+      if (!canvas) return;
+
+      destroyBreedingsSemenChart();
+
+      const rows = data.breedings_semen_chart_rows || [];
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.event_month);
+      const datasets = ["dairy", "beef"].map(semenType => ({
+        label: capitalizeSemenLabel(semenType),
+        data: rows.map(r => r[semenType] ?? 0),
+        backgroundColor: SEMEN_COLORS[semenType] || "#888",
+        stack: "semen",
+      }));
+
+      breedingsSemenChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: BREEDINGS_SEMEN_CHART_TITLE,
+            },
+            legend: { title: { display: true, text: "Semen type" } },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              title: { display: true, text: "Event Month" },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              title: { display: true, text: "Number of Breedings" },
+            },
+          },
+        },
+      });
+    }
+
+    function destroyLameEventsChart() {
+      if (lameEventsChart) {
+        lameEventsChart.destroy();
+        lameEventsChart = null;
+      }
+    }
+
+    function destroyLameProtocolsChart() {
+      if (lameProtocolsChart) {
+        lameProtocolsChart.destroy();
+        lameProtocolsChart = null;
+      }
+    }
+
+    function destroyLameDimChart() {
+      if (lameDimChart) {
+        lameDimChart.destroy();
+        lameDimChart = null;
+      }
+    }
+
+    function renderLameEventsChart(data) {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return;
+      const canvas = document.getElementById("lame-events-chart");
+      if (!canvas) return;
+
+      destroyLameEventsChart();
+
+      const rows = data.lame_rows || [];
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.event_month);
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(r => r[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        stack: "lame",
+      }));
+
+      lameEventsChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: LAME_EVENTS_CHART_TITLE,
+            },
+            legend: { title: { display: true, text: "Farm" } },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              title: { display: true, text: "Event Month" },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              title: { display: true, text: "Number of Lame Events" },
+            },
+          },
+        },
+      });
+    }
+
+    function renderLameProtocolsChart(data) {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return;
+      const canvas = document.getElementById("lame-protocols-chart");
+      if (!canvas) return;
+
+      destroyLameProtocolsChart();
+
+      const rows = data.lame_protocol_rows || [];
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.protocol);
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(r => r[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        stack: "protocols",
+      }));
+
+      lameProtocolsChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: LAME_PROTOCOLS_CHART_TITLE,
+            },
+            legend: { title: { display: true, text: "Farm" } },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              beginAtZero: true,
+              title: { display: true, text: "Number of Lame Events" },
+            },
+            y: {
+              stacked: true,
+              title: { display: true, text: "Protocol" },
+            },
+          },
+        },
+      });
+    }
+
+    function renderLameDimChart(data) {
+      if (!SHOW_HOOFTRIMMING_CHARTS) return;
+      const canvas = document.getElementById("lame-dim-chart");
+      if (!canvas) return;
+
+      destroyLameDimChart();
+
+      const rows = data.lame_dim_rows || [];
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.bin_label);
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(r => r[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        stack: "dim",
+      }));
+
+      lameDimChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: LAME_DIM_CHART_TITLE,
+            },
+            legend: { title: { display: true, text: "Farm" } },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              title: { display: true, text: "DIM bin" },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              title: { display: true, text: "Number of Lame Events" },
+            },
+          },
+        },
+      });
+    }
+
+    function destroyDiseaseScatterChart() {
+      if (diseaseScatterChart) {
+        diseaseScatterChart.destroy();
+        diseaseScatterChart = null;
+      }
+    }
+
+    function renderDiseaseScatterChart(data) {
+      if (!SHOW_DISEASE_SCATTER) return;
+      const canvas = document.getElementById("disease-scatter-chart");
+      if (!canvas) return;
+
+      destroyDiseaseScatterChart();
+
+      const scatter = data.disease_scatter || {};
+      const points = scatter.points || [];
+      if (!points.length) return;
+
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const yAxisLabel = scatter.y_axis_label || "DIM";
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: points
+          .filter(point => point.farm === farm)
+          .map(point => ({ x: point.x, y: point.y })),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        pointRadius: 4,
+        pointHoverRadius: 6,
+      })).filter(dataset => dataset.data.length);
+
+      if (!datasets.length) return;
+
+      diseaseScatterChart = new Chart(canvas, {
+        type: "scatter",
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: `Disease timing by ${yAxisLabel}`,
+            },
+            legend: { title: { display: true, text: "Farm" } },
+            tooltip: {
+              callbacks: {
+                label(context) {
+                  const point = context.raw;
+                  const dateLabel = point.x
+                    ? new Date(point.x).toLocaleDateString("en-GB")
+                    : "—";
+                  return `${context.dataset.label}: ${dateLabel}, ${yAxisLabel} ${point.y}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              type: "time",
+              time: {
+                unit: "month",
+                tooltipFormat: "dd MMM yyyy",
+                displayFormats: { month: "MMM yy" },
+              },
+              title: { display: true, text: "Event date" },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: yAxisLabel },
+            },
+          },
+        },
+      });
+    }
+
+    function destroyDiseaseIncidenceChart() {
+      if (diseaseIncidenceChart) {
+        diseaseIncidenceChart.destroy();
+        diseaseIncidenceChart = null;
+      }
+    }
+
+    function renderDiseaseIncidenceChart(data) {
+      if (!SHOW_DISEASE_SCATTER) return;
+      const canvas = document.getElementById("disease-incidence-chart");
+      if (!canvas) return;
+
+      destroyDiseaseIncidenceChart();
+
+      const incidence = data.disease_incidence || {};
+      const rows = incidence.rows || [];
+      if (!rows.length) return;
+
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+      const xAxisLabel = incidence.x_axis_label || "Calving month";
+      const cohortLabel = incidence.cohort_label || "Calvings";
+      const cohortLabelLower = cohortLabel.toLowerCase();
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(row => row[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+      }));
+
+      diseaseIncidenceChart = new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: rows.map(row => row.cohort_month),
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: "Disease incidence by cohort",
+            },
+            legend: { title: { display: true, text: "Farm" } },
+            tooltip: {
+              callbacks: {
+                label(context) {
+                  const row = rows[context.dataIndex] || {};
+                  const farm = context.dataset.label;
+                  const pct = context.parsed.y;
+                  const cohortSize = row.cohort?.[farm] ?? 0;
+                  const affected = row.affected?.[farm] ?? 0;
+                  return `${farm}: ${pct}% (${affected} of ${cohortSize} ${cohortLabelLower})`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: xAxisLabel },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: "Incidence (%)" },
+              ticks: {
+                callback: value => `${value}%`,
+              },
+            },
+          },
+        },
+      });
+    }
+
+    async function loadReport() {
+      const farms = selectedFarms();
+      const lactGroups = selectedLactGroups();
+      const parityGroups = selectedParityGroups();
+      const empty = document.getElementById("empty-state");
+      const graphView = document.getElementById("graph-view");
+      const tableView = document.getElementById("table-view");
+      const meta = document.getElementById("meta-line");
+
+      if (!farms.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one farm.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        updateUnknownSemenSlicerVisibility(null);
+        return;
+      }
+
+      if (SHOW_BREEDINGS_SEMEN_CHART && !selectedSemenTypes().length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one semen type.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      if (SHOW_HOOFTRIMMING_CHARTS && protocolOptions.length && !selectedProtocols().length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one protocol.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      if (SHOW_LACT_FILTER && !lactGroups.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one lactation group.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      if (SHOW_PARITY_FILTER && !PARITY_EXCLUSIVE && !parityGroups.length) {
+        empty.style.display = "";
+        empty.textContent = SHOW_PARITY_BEEF
+          ? "Please select Cows, Youngstock and/or Beef."
+          : "Please select Cows and/or Youngstock.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      const fiscalYear = selectedFiscalYear();
+      if (fiscalYear !== lastFiscalYear) {
+        if (fiscalYear) {
+          syncDateControls(fiscalYearBounds(fiscalYear), true);
+        } else if (storedFullDateBounds) {
+          syncDateControls(storedFullDateBounds, true, true);
+        }
+        lastFiscalYear = fiscalYear;
+      }
+
+      const params = appendYParams(appendFiscalYearParam(
+        appendProtocolParams(
+          appendDiseaseParams(
+            appendSemenParams(
+              appendParityParams(appendLactParams(appendDateParams(appendFarmParams(new URLSearchParams()))))
+            )
+          )
+        )
+      ));
+
+      const res = await fetch(`/events/api/${API_SLUG}?${params}`);
+      if (!res.ok) {
+        empty.style.display = "";
+        empty.textContent = "Failed to load events data.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      const data = await res.json();
+      const shouldRefetchForUnknown = updateUnknownSemenSlicerVisibility(data);
+      if (shouldRefetchForUnknown) {
+        loadReport();
+        return;
+      }
+      syncProtocolOptionsFromData(data);
+
+      if (data.fiscal_year_options) {
+        renderFiscalYearOptions(data.fiscal_year_options);
+      }
+
+      if (data.date_bounds) {
+        storedDateBounds = data.date_bounds;
+        if (!fiscalYear) {
+          storedFullDateBounds = data.date_bounds;
+        }
+        if (!dateBoundsInitialized) {
+          syncDateControls(data.date_bounds, true, !fiscalYear);
+          dateBoundsInitialized = true;
+          if (SHOW_DISEASE_FILTER) {
+            lastAppliedDisease = selectedDisease() || "";
+          }
+          if (!fiscalYear) {
+            loadReport();
+            return;
+          }
+        } else {
+          // Preserve the user's selected months when farms / disease filters change.
+          syncDateControls(data.date_bounds, false);
+          if (SHOW_DISEASE_FILTER) {
+            lastAppliedDisease = selectedDisease() || "";
+          }
+        }
+      }
+
+      const importNote = data.latest_import
+        ? `Latest import: ${new Date(data.latest_import).toLocaleString("en-GB")}`
+        : "No events import found — run the herd import cron job.";
+      const episodeNote = data.counting_mode === "disease_episodes"
+        ? "Counts use disease episodes (duplicate events within each disease’s gap period are excluded)."
+        : "";
+      meta.textContent = episodeNote
+        ? `${importNote} · ${episodeNote}`
+        : importNote;
+
+      if (!data.date_bounds || !data.rows || !data.rows.length) {
+        empty.style.display = "";
+        empty.textContent = data.latest_import
+          ? "No events in the selected filters."
+          : "No events data available.";
+        graphView.style.display = "none";
+        tableView.style.display = "none";
+        document.getElementById("summary-panel").style.display = "none";
+        if (eventsChart) { eventsChart.destroy(); eventsChart = null; }
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+        lastReportData = null;
+        return;
+      }
+
+      empty.style.display = "none";
+      lastReportData = data;
+      if (SHOW_DISEASE_SCATTER && data.disease_scatter) {
+        const yLabel = data.disease_scatter.y_axis_label || "DIM";
+        const yRangeLabel = document.getElementById("y-range-label");
+        if (yRangeLabel) {
+          yRangeLabel.textContent = `${yLabel} range`;
+        }
+        const newMax = Number(data.disease_scatter.y_bounds?.max) || 0;
+        const firstY = !yBoundsInitialized;
+        // Only reset DIM inputs on first load. Farm toggles change the max but
+        // should keep the user's selected range (and avoid a second refetch).
+        syncYControls(
+          { min: 0, max: Math.max(newMax, storedYBoundsMax || 0) },
+          firstY
+        );
+        yBoundsInitialized = true;
+        storedYBoundsMax = Math.max(storedYBoundsMax || 0, newMax);
+        if (firstY) {
+          loadReport();
+          return;
+        }
+      }
+      renderSummary(data);
+      updateViewVisibility();
+      renderTable(data);
+      if (viewMode() === "graph") {
+        renderChart(data);
+        renderBreedingsSemenChart(data);
+        renderLameEventsChart(data);
+        renderLameProtocolsChart(data);
+        renderLameDimChart(data);
+        renderDiseaseScatterChart(data);
+        renderDiseaseIncidenceChart(data);
+      } else {
+        destroyBreedingsSemenChart();
+        destroyLameEventsChart();
+        destroyLameProtocolsChart();
+        destroyLameDimChart();
+        destroyDiseaseScatterChart();
+        destroyDiseaseIncidenceChart();
+      }
+    }
+
+    async function setSireClassification(sireCode, semenType) {
+      const res = await fetch(`/events/api/breedings/sires/${encodeURIComponent(sireCode)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ semen_type: semenType }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || err.detail || "Failed to update sire classification.");
+        return;
+      }
+      await loadSireSettings();
+      loadReport();
+    }
+
+    async function removeSireOverride(sireCode) {
+      const res = await fetch(`/events/api/breedings/sires/${encodeURIComponent(sireCode)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || err.detail || "Failed to remove sire override.");
+        return;
+      }
+      await loadSireSettings();
+      loadReport();
+    }
+
+    function renderSireColumn(title, sires, options = {}) {
+      const { showActions = false, showRemove = false } = options;
+      const items = (sires || []).map(sire => {
+        let actions = "";
+        if (showActions && CAN_EDIT_SIRES) {
+          actions = `
+            <span class="sire-actions">
+              <button type="button" class="secondary small" data-sire-action="beef" data-sire="${sire.sire_code}">→ Beef</button>
+              <button type="button" class="secondary small" data-sire-action="dairy" data-sire="${sire.sire_code}">→ Dairy</button>
+            </span>
+          `;
+        } else if (showRemove && CAN_EDIT_SIRES && sire.source === "override") {
+          actions = `
+            <span class="sire-actions">
+              <button type="button" class="secondary small" data-sire-action="remove" data-sire="${sire.sire_code}">Remove</button>
+            </span>
+          `;
+        }
+        const badge = sire.source === "auto"
+          ? '<span class="sire-badge">auto</span>'
+          : sire.source === "override"
+            ? '<span class="sire-badge">manual</span>'
+            : "";
+        return `
+          <li>
+            <span>
+              ${sire.sire_code}${badge}
+              <span class="sire-meta">(${sire.count})</span>
+            </span>
+            ${actions}
+          </li>
+        `;
+      }).join("");
+      return `
+        <div class="sire-column">
+          <h4>${title}</h4>
+          <ul class="sire-list">${items || '<li><span class="sire-meta">None</span></li>'}</ul>
+        </div>
+      `;
+    }
+
+    async function loadSireSettings() {
+      if (!SHOW_BREEDINGS_SIRE_SETTINGS) return;
+      const container = document.getElementById("sire-columns");
+      if (!container) return;
+
+      const res = await fetch("/events/api/breedings/sires");
+      if (!res.ok) {
+        container.innerHTML = '<p class="meta-line">Failed to load sires.</p>';
+        return;
+      }
+      const data = await res.json();
+      container.innerHTML = [
+        renderSireColumn("Beef", data.beef, { showRemove: true }),
+        renderSireColumn("Dairy", data.dairy, { showRemove: true }),
+        renderSireColumn("Unknown", data.unknown, { showActions: true }),
+      ].join("");
+
+      container.querySelectorAll("[data-sire-action]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const sireCode = btn.dataset.sire;
+          const action = btn.dataset.sireAction;
+          if (action === "remove") {
+            await removeSireOverride(sireCode);
+          } else {
+            await setSireClassification(sireCode, action);
+          }
+        });
+      });
+    }
+
+    function bindSireSettingsToggle() {
+      if (!SHOW_BREEDINGS_SIRE_SETTINGS) return;
+      const toggle = document.getElementById("sire-settings-toggle");
+      const body = document.getElementById("sire-settings-body");
+      if (!toggle || !body) return;
+      toggle.addEventListener("click", () => {
+        const open = body.classList.toggle("open");
+        if (open) {
+          loadSireSettings();
+        }
+      });
+    }
+
+    bindFarmSlicers();
+    if (SHOW_LACT_FILTER) {
+      document.querySelectorAll(".lact-cb").forEach(cb => {
+        cb.addEventListener("change", loadReport);
+      });
+    }
+    if (SHOW_PARITY_FILTER) {
+      bindParitySlicers();
+    }
+    if (SHOW_BREEDINGS_SEMEN_CHART) {
+      bindSemenSlicers();
+      applySemenSlicersFromUrl();
+    }
+    if (SHOW_HOOFTRIMMING_CHARTS) {
+      bindProtocolDropdown();
+    }
+    if (SHOW_DISEASE_FILTER) {
+      document.getElementById("disease-select").addEventListener("change", loadReport);
+    }
+    document.getElementById("fiscal-year-select").addEventListener("change", loadReport);
+    document.querySelectorAll('input[name="view-mode"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        updateViewVisibility();
+        loadReport();
+      });
+    });
+
+    bindDateInputs();
+    bindYInputs();
+    bindSireSettingsToggle();
+    document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
+    loadReport();
+  </script>
+{% endblock %}

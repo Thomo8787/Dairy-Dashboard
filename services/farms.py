@@ -1,7 +1,8 @@
 """Farm registry for Thomasson Farms Dashboard.
 
-ALH and BNK share a DairyComp data source. The other farms are standalone.
-Only ALH/BNK are active for Outlook/OneDrive imports for now.
+ALH and BNK share a DairyComp data source historically; SFR, PRK, and COF
+now also export DCEXPORT folders. BNK's DCEXPORT folder is coming soon.
+Only ALH/BNK are active for Outlook DataFlow imports for now.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ FARMS: tuple[Farm, ...] = (
         name="Park Hall Farm",
         short_name="SFR",
         dairy_data_group="sfr",
-        has_dairycomp=False,
+        has_dairycomp=True,
         active_for_imports=False,
         night_shift_crosses_midnight=True,
     ),
@@ -58,7 +59,7 @@ FARMS: tuple[Farm, ...] = (
         name="The Parkes",
         short_name="PRK",
         dairy_data_group="prk",
-        has_dairycomp=False,
+        has_dairycomp=True,
         active_for_imports=False,
         night_shift_crosses_midnight=True,
     ),
@@ -67,11 +68,20 @@ FARMS: tuple[Farm, ...] = (
         name="Cherry Orchard Farm",
         short_name="COF",
         dairy_data_group="cof",
-        has_dairycomp=False,
+        has_dairycomp=True,
         active_for_imports=False,
         night_shift_crosses_midnight=True,
     ),
 )
+
+HERD_FARM_OPTIONS: tuple[str, ...] = tuple(farm.code for farm in FARMS)
+FARM_CHART_COLORS: dict[str, str] = {
+    "ALH": "#1f7a4c",
+    "BNK": "#1f3b5a",
+    "SFR": "#c47a12",
+    "PRK": "#6b3fa0",
+    "COF": "#c45c12",
+}
 
 FARMS_BY_CODE = {farm.code: farm for farm in FARMS}
 

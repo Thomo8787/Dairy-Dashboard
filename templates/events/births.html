@@ -1,0 +1,999 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(200px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+    }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-actions {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+    .filter-actions button { width: 100%; margin: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .filter-select { width: 100%; margin: 0; }
+    .slicer-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .slicer-btn[data-value="CM"].selected {
+      background: #dceaf7;
+      border-color: #5a9fd4;
+      color: #1e3a5f;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .slicer-btn[data-value="CM"].selected .slicer-icon {
+      background: #9ec5e8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="GAD"].selected {
+      background: #ffecd9;
+      border-color: #ffb366;
+      color: #b45309;
+    }
+    .slicer-btn[data-value="GAD"].selected .slicer-icon {
+      background: #ffc285;
+      color: #b45309;
+    }
+    .slicer-btn[data-value="Dairy"].selected {
+      background: #e8f5e9;
+      border-color: #2ca02c;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="Dairy"].selected .slicer-icon {
+      background: #a5d6a7;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="Beef"].selected {
+      background: #f5e6d3;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="Beef"].selected .slicer-icon {
+      background: #c9a66b;
+      color: #5c2e0a;
+    }
+    .breed-slicer {
+      grid-template-columns: 1fr 1fr;
+    }
+    .date-inputs {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label {
+      font-weight: 600;
+      min-width: 4.5rem;
+      text-align: right;
+    }
+    .summary-panel {
+      display: none;
+      flex-direction: column;
+      gap: 0.65rem;
+      padding: 0.85rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .summary-panel h3 {
+      margin: 0;
+      font-size: 0.95rem;
+    }
+    .summary-farm-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.875rem;
+    }
+    .summary-farm-block + .summary-farm-block {
+      padding-top: 0.65rem;
+      margin-top: 0.15rem;
+      border-top: 1px solid var(--line);
+    }
+    .summary-farm-block.summary-farm-total {
+      padding-top: 0.65rem;
+      margin-top: 0.15rem;
+      border-top: 2px solid var(--line);
+    }
+    .summary-row-header {
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.1rem;
+    }
+    .summary-breed-line {
+      color: var(--muted);
+      line-height: 1.45;
+      padding-left: 0.35rem;
+    }
+    .summary-breed-line.summary-breed-total {
+      font-weight: 700;
+      color: var(--text);
+      padding-left: 0;
+      margin-top: 0.1rem;
+    }
+    .summary-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      font-size: 0.875rem;
+    }
+    .summary-row-detail {
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .content-panel { min-width: 0; }
+    .view-toggle {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .view-toggle label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .meta-line {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .chart-wrap {
+      position: relative;
+      height: 420px;
+      max-width: 100%;
+    }
+    #births-table {
+      width: auto;
+      table-layout: auto;
+    }
+    #births-table th, #births-table td {
+      text-align: right;
+      white-space: nowrap;
+      padding: 0.45rem 0.75rem;
+    }
+    #births-table th:first-child, #births-table td:first-child {
+      text-align: left;
+    }
+    #births-table thead th.farm-cm {
+      background: #b8d4e8;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #births-table thead th.farm-gad {
+      background: #f0c98e;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #births-table thead th.farm-combined {
+      background: #eef2f6;
+      color: #1e3a5f;
+      text-align: center;
+    }
+    #births-table thead th.breed-sub {
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+    #births-table thead th.breed-sub.farm-cm {
+      background: #d4e6f3;
+    }
+    #births-table thead th.breed-sub.farm-gad {
+      background: #f7ddb0;
+    }
+    #births-table thead th.breed-sub.farm-combined {
+      background: #f4f6f8;
+    }
+    #births-table tbody td.farm-total {
+      font-weight: 600;
+    }
+    #births-table tbody tr.grand-total td {
+      background: #eef2f6;
+      font-weight: 700;
+      border-top: 2px solid var(--line);
+    }
+    .empty-state {
+      padding: 2rem;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    #content-stack.hidden { display: none; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="{{ farm }}"
+              aria-pressed="true"
+            >
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Breed</span>
+          <div class="slicer-group breed-slicer" role="group" aria-label="Breed">
+            <button type="button" class="slicer-btn selected" data-value="Dairy" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">D</span>
+              Dairy
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="Beef" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">B</span>
+              Beef
+            </button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Fiscal year</span>
+          <select id="fiscal-year-select" class="filter-select">
+            <option value="">Any</option>
+          </select>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Birth date range</span>
+          <div class="date-inputs">
+            <label>
+              From
+              <span class="month-label" id="min-date-label">—</span>
+            </label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0">
+            <label>
+              To
+              <span class="month-label" id="max-date-label">—</span>
+            </label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0">
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
+        </div>
+        {% include "events/_refresh.html" %}
+      </aside>
+
+      <div class="summary-panel" id="summary-panel">
+        <h3>Summary</h3>
+        <div id="summary-rows"></div>
+      </div>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line"></p>
+      <div id="empty-state" class="empty-state" style="display:none;"></div>
+      <div id="content-stack" class="hidden">
+        <div class="view-toggle">
+          <label><input type="radio" name="view-mode" value="graph" checked> Graph</label>
+          <label><input type="radio" name="view-mode" value="table"> Table</label>
+        </div>
+        <div id="graph-view">
+          <div class="chart-wrap">
+            <canvas id="births-chart"></canvas>
+          </div>
+        </div>
+        <div id="table-view" style="display:none;">
+          <div class="table-wrap">
+            <table id="births-table">
+              <thead id="births-table-head"></thead>
+              <tbody id="births-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    const FARM_COLORS = {{ farm_colors | tojson }};
+    const HERD_FARMS = {{ farm_options | tojson }};
+    const CATEGORY_DAIRY = "Dairy";
+    const CATEGORY_BEEF = "Beef";
+    const DEFAULT_MONTH_SPAN = 12;
+    let birthsChart = null;
+    let lastReportData = null;
+    let monthList = [];
+    let dateBoundsInitialized = false;
+    let storedDateBounds = null;
+    let storedFullDateBounds = null;
+    let lastFiscalYear = null;
+
+    function clearFilters() {
+      resetFarmSlicers();
+      resetBreedSlicers();
+      document.getElementById("fiscal-year-select").value = "";
+      lastFiscalYear = null;
+      if (storedFullDateBounds) {
+        syncDateControls(storedFullDateBounds, true, true);
+      } else if (storedDateBounds) {
+        syncDateControls(storedDateBounds, true, true);
+      }
+      loadReport();
+    }
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function resetFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function bindFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+          if (selected && count <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          loadReport();
+        });
+      });
+    }
+
+    function selectedCategories() {
+      return [...document.querySelectorAll(".breed-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function resetBreedSlicers() {
+      document.querySelectorAll(".breed-slicer .slicer-btn").forEach(btn => {
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function bindBreedSlicers() {
+      document.querySelectorAll(".breed-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(".breed-slicer .slicer-btn.selected").length;
+          if (selected && count <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          loadReport();
+        });
+      });
+    }
+
+    function parseIsoDate(iso) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function buildMonthList(minIso, maxIso) {
+      const months = [];
+      let d = parseIsoDate(minIso);
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = parseIsoDate(maxIso);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(new Date(d));
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      return months;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      const yr = String(date.getFullYear()).slice(-2);
+      return `${mon}-${yr}`;
+    }
+
+    function toIsoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function lastDayOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function updateDateLabels() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      document.getElementById("min-date-label").textContent =
+        monthList[minIdx] ? formatMonthLabel(monthList[minIdx]) : "—";
+      document.getElementById("max-date-label").textContent =
+        monthList[maxIdx] ? formatMonthLabel(monthList[maxIdx]) : "—";
+    }
+
+    function fiscalYearBounds(year) {
+      const y = Number(year);
+      return {
+        min: `${y - 1}-04-01`,
+        max: `${y}-03-31`,
+      };
+    }
+
+    function defaultSliderIndices(maxIdx) {
+      const minIdx = Math.max(0, maxIdx - (DEFAULT_MONTH_SPAN - 1));
+      return { minIdx, maxIdx };
+    }
+
+    function monthKey(date) {
+      return `${date.getFullYear()}-${date.getMonth()}`;
+    }
+
+    function findMonthIndex(date) {
+      const key = monthKey(date);
+      return monthList.findIndex(month => monthKey(month) === key);
+    }
+
+    function syncDateControls(dateBounds, resetValues, useLastTwelveMonths = false) {
+      if (!dateBounds?.min || !dateBounds?.max) return;
+
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      let preservedFromMonth = null;
+      let preservedToMonth = null;
+      if (!resetValues && monthList.length) {
+        const lo = parseInt(minRange.value, 10);
+        const hi = parseInt(maxRange.value, 10);
+        if (!Number.isNaN(lo) && monthList[lo]) preservedFromMonth = monthList[lo];
+        if (!Number.isNaN(hi) && monthList[hi]) preservedToMonth = monthList[hi];
+      }
+
+      monthList = buildMonthList(dateBounds.min, dateBounds.max);
+      const maxIdx = Math.max(0, monthList.length - 1);
+      minRange.min = 0;
+      minRange.max = maxIdx;
+      maxRange.min = 0;
+      maxRange.max = maxIdx;
+      if (resetValues) {
+        if (useLastTwelveMonths) {
+          const { minIdx, maxIdx: hi } = defaultSliderIndices(maxIdx);
+          minRange.value = minIdx;
+          maxRange.value = hi;
+        } else {
+          minRange.value = 0;
+          maxRange.value = maxIdx;
+        }
+      } else if (preservedFromMonth && preservedToMonth) {
+        const fromIdx = findMonthIndex(preservedFromMonth);
+        const toIdx = findMonthIndex(preservedToMonth);
+        minRange.value = fromIdx >= 0 ? fromIdx : 0;
+        maxRange.value = toIdx >= 0 ? toIdx : maxIdx;
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+      } else {
+        minRange.value = Math.min(parseInt(minRange.value, 10) || 0, maxIdx);
+        maxRange.value = Math.min(parseInt(maxRange.value, 10) || maxIdx, maxIdx);
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+      }
+      updateDateLabels();
+    }
+
+    function currentDateRangeParams() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      let lo = Number.isNaN(minIdx) ? 0 : minIdx;
+      let hi = Number.isNaN(maxIdx) ? Math.max(0, monthList.length - 1) : maxIdx;
+      if (lo > hi) [lo, hi] = [hi, lo];
+      const startMonth = monthList[lo];
+      const endMonth = monthList[hi];
+      return {
+        event_from: toIsoDate(startMonth),
+        event_to: toIsoDate(lastDayOfMonth(endMonth)),
+      };
+    }
+
+    function appendDateParams(params) {
+      if (!monthList.length) return params;
+      const { event_from, event_to } = currentDateRangeParams();
+      params.set("event_from", event_from);
+      params.set("event_to", event_to);
+      return params;
+    }
+
+    function bindDateInputs() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+
+      function clampAndLoad() {
+        let minVal = parseInt(minRange.value, 10);
+        let maxVal = parseInt(maxRange.value, 10);
+        if (Number.isNaN(minVal)) minVal = 0;
+        if (Number.isNaN(maxVal)) maxVal = Math.max(0, monthList.length - 1);
+        if (minVal > maxVal) maxVal = minVal;
+        minRange.value = minVal;
+        maxRange.value = maxVal;
+        updateDateLabels();
+        loadReport();
+      }
+
+      minRange.addEventListener("input", () => {
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+        updateDateLabels();
+        loadReport();
+      });
+      maxRange.addEventListener("input", () => {
+        if (parseInt(maxRange.value, 10) < parseInt(minRange.value, 10)) {
+          minRange.value = maxRange.value;
+        }
+        updateDateLabels();
+        loadReport();
+      });
+      minRange.addEventListener("change", clampAndLoad);
+      maxRange.addEventListener("change", clampAndLoad);
+    }
+
+    function selectedFiscalYear() {
+      const value = document.getElementById("fiscal-year-select").value;
+      return value ? parseInt(value, 10) : null;
+    }
+
+    function renderFiscalYearOptions(options) {
+      const select = document.getElementById("fiscal-year-select");
+      const current = select.value;
+      select.innerHTML = '<option value="">Any</option>';
+      (options || []).forEach(fy => {
+        const opt = document.createElement("option");
+        opt.value = String(fy);
+        opt.textContent = String(fy);
+        select.appendChild(opt);
+      });
+      if (current && [...select.options].some(o => o.value === current)) {
+        select.value = current;
+      }
+    }
+
+    function appendCategoryParams(params) {
+      selectedCategories().forEach(category => params.append("category", category));
+      return params;
+    }
+
+    function appendFarmParams(params) {
+      selectedFarms().forEach(farm => params.append("farm", farm));
+      return params;
+    }
+
+    function appendFiscalYearParam(params) {
+      const fy = selectedFiscalYear();
+      if (fy) params.set("fiscal_year", String(fy));
+      return params;
+    }
+
+    function viewMode() {
+      return document.querySelector('input[name="view-mode"]:checked')?.value || "graph";
+    }
+
+    function updateViewVisibility() {
+      const mode = viewMode();
+      document.getElementById("graph-view").style.display = mode === "graph" ? "" : "none";
+      document.getElementById("table-view").style.display = mode === "table" ? "" : "none";
+    }
+
+    function summaryAverage(total, monthCount) {
+      if (!monthCount) return 0;
+      return Math.round((total / monthCount) * 10) / 10;
+    }
+
+    function summaryLine(label, total, monthCount, isTotalLine = false) {
+      const avg = summaryAverage(total, monthCount);
+      const lineClass = isTotalLine ? "summary-breed-line summary-breed-total" : "summary-breed-line";
+      return `<div class="${lineClass}">${label} ${total.toLocaleString("en-GB")} (avg ${avg.toLocaleString("en-GB")})</div>`;
+    }
+
+    function renderSummaryFarmBlock(title, counts, categories, monthCount, extraClass = "") {
+      let html = `<div class="summary-farm-block${extraClass ? ` ${extraClass}` : ""}">`;
+      html += `<div class="summary-row-header">${title}</div>`;
+      categories.forEach(category => {
+        html += summaryLine(category, counts[category] ?? 0, monthCount);
+      });
+      html += summaryLine("Total", counts.total ?? counts.combined_total ?? 0, monthCount, true);
+      html += `</div>`;
+      return html;
+    }
+
+    function renderSummary(data) {
+      const panel = document.getElementById("summary-panel");
+      const container = document.getElementById("summary-rows");
+      const gt = data.table_grand_total || {};
+      const farms = selectedFarms();
+      const categories = selectedCategories();
+      const monthCount = data.range_summary?.month_count ?? 0;
+
+      if (!data.date_bounds || !farms.length || !categories.length) {
+        panel.style.display = "none";
+        container.innerHTML = "";
+        return;
+      }
+
+      let html = farms.map(farm =>
+        renderSummaryFarmBlock(
+          farm,
+          gt.farms?.[farm] || {},
+          categories,
+          monthCount
+        )
+      ).join("");
+
+      html += renderSummaryFarmBlock(
+        "Total",
+        {
+          ...(gt.combined || {}),
+          total: gt.combined_total ?? 0,
+        },
+        categories,
+        monthCount,
+        "summary-farm-total"
+      );
+
+      container.innerHTML = html;
+      panel.style.display = "flex";
+    }
+
+    function renderChart(data) {
+      const canvas = document.getElementById("births-chart");
+      const rows = data.rows || [];
+      const farms = selectedFarms().length ? selectedFarms() : HERD_FARMS;
+
+      if (birthsChart) {
+        birthsChart.destroy();
+        birthsChart = null;
+      }
+      if (!rows.length) return;
+
+      const labels = rows.map(r => r.event_month);
+      const datasets = farms.map(farm => ({
+        label: farm,
+        data: rows.map(r => r[farm] ?? 0),
+        backgroundColor: FARM_COLORS[farm] || "#888",
+        stack: "farm",
+      }));
+
+      birthsChart = new Chart(canvas, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: "Births by Month — Stacked by Farm",
+            },
+            legend: { position: "bottom" },
+          },
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+          },
+        },
+      });
+    }
+
+    function birthsFarmClass(farm) {
+      return `farm-${String(farm).toLowerCase()}`;
+      if (farm === "Total") return "farm-combined";
+      return "";
+    }
+
+    function renderBirthsTableHeader(farms, categories, showCombinedTotal) {
+      const head = document.getElementById("births-table-head");
+      const displayFarms = showCombinedTotal ? [...farms, "Total"] : farms;
+      const colsPerFarm = categories.length + 1;
+      const farmHeader = displayFarms.map(farm => {
+        const farmClass = birthsFarmClass(farm);
+        return `<th colspan="${colsPerFarm}" class="${farmClass}">${farm}</th>`;
+      }).join("");
+      const breedHeader = displayFarms.map(farm => {
+        const farmClass = birthsFarmClass(farm);
+        const breedCells = categories.map(category =>
+          `<th class="breed-sub ${farmClass}">${category}</th>`
+        ).join("");
+        return `${breedCells}<th class="breed-sub ${farmClass}">Total</th>`;
+      }).join("");
+      head.innerHTML = `
+        <tr>
+          <th rowspan="2">Month</th>
+          ${farmHeader}
+        </tr>
+        <tr>${breedHeader}</tr>
+      `;
+    }
+
+    function birthsCellsForFarm(row, farm, categories) {
+      let farmTotal = 0;
+      const breedCells = categories.map(category => {
+        const value = row[farm]?.[category] ?? 0;
+        farmTotal += value;
+        return `<td>${value.toLocaleString("en-GB")}</td>`;
+      }).join("");
+      return `${breedCells}<td class="farm-total">${farmTotal.toLocaleString("en-GB")}</td>`;
+    }
+
+    function birthsCombinedCells(row, farms, categories) {
+      const combined = Object.fromEntries(categories.map(category => [category, 0]));
+      farms.forEach(farm => {
+        categories.forEach(category => {
+          combined[category] += row[farm]?.[category] ?? 0;
+        });
+      });
+      let lineTotal = 0;
+      const breedCells = categories.map(category => {
+        const value = combined[category];
+        lineTotal += value;
+        return `<td>${value.toLocaleString("en-GB")}</td>`;
+      }).join("");
+      return `${breedCells}<td class="farm-total">${lineTotal.toLocaleString("en-GB")}</td>`;
+    }
+
+    function renderDetailTable(data) {
+      const body = document.getElementById("births-table-body");
+      const rows = data.detail_table_rows || [];
+      const gt = data.table_grand_total || {};
+      const farms = selectedFarms();
+      const categories = selectedCategories();
+      const showCombinedTotal = farms.length > 1;
+
+      if (!rows.length || !farms.length || !categories.length) {
+        body.innerHTML = "";
+        return;
+      }
+
+      renderBirthsTableHeader(farms, categories, showCombinedTotal);
+
+      let html = rows.map(row => {
+        const cells = farms.map(farm => birthsCellsForFarm(row, farm, categories)).join("");
+        const combinedCells = showCombinedTotal
+          ? birthsCombinedCells(row, farms, categories)
+          : "";
+        return `
+          <tr>
+            <td>${row.event_month}</td>
+            ${cells}${combinedCells}
+          </tr>
+        `;
+      }).join("");
+
+      const farmTotalCells = farms.map(farm => {
+        const farmData = gt.farms?.[farm] || {};
+        const breedCells = categories.map(category =>
+          `<td>${(farmData[category] ?? 0).toLocaleString("en-GB")}</td>`
+        ).join("");
+        return `${breedCells}<td class="farm-total">${(farmData.total ?? 0).toLocaleString("en-GB")}</td>`;
+      }).join("");
+
+      const combinedTotalCells = showCombinedTotal
+        ? `${categories.map(category =>
+            `<td>${(gt.combined?.[category] ?? 0).toLocaleString("en-GB")}</td>`
+          ).join("")}<td class="farm-total">${(gt.combined_total ?? 0).toLocaleString("en-GB")}</td>`
+        : "";
+
+      html += `
+        <tr class="grand-total">
+          <td>Grand Total</td>
+          ${farmTotalCells}${combinedTotalCells}
+        </tr>
+      `;
+
+      body.innerHTML = html;
+    }
+
+    function renderReport(data) {
+      renderSummary(data);
+      renderChart(data);
+      renderDetailTable(data);
+      updateViewVisibility();
+    }
+
+    async function loadReport() {
+      const farms = selectedFarms();
+      const categories = selectedCategories();
+      const empty = document.getElementById("empty-state");
+      const stack = document.getElementById("content-stack");
+      const meta = document.getElementById("meta-line");
+
+      if (!farms.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one farm.";
+        stack.classList.add("hidden");
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (birthsChart) { birthsChart.destroy(); birthsChart = null; }
+        return;
+      }
+
+      if (!categories.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one breed (Dairy or Beef).";
+        stack.classList.add("hidden");
+        meta.textContent = "";
+        document.getElementById("summary-panel").style.display = "none";
+        if (birthsChart) { birthsChart.destroy(); birthsChart = null; }
+        return;
+      }
+
+      const fiscalYear = selectedFiscalYear();
+      if (fiscalYear !== lastFiscalYear) {
+        if (fiscalYear) {
+          syncDateControls(fiscalYearBounds(fiscalYear), true);
+        } else if (storedFullDateBounds) {
+          syncDateControls(storedFullDateBounds, true, true);
+        }
+        lastFiscalYear = fiscalYear;
+      }
+
+      const params = appendFiscalYearParam(
+        appendDateParams(
+          appendCategoryParams(appendFarmParams(new URLSearchParams()))
+        )
+      );
+
+      const res = await fetch(`/events/api/births?${params}`);
+      if (!res.ok) {
+        empty.style.display = "";
+        empty.textContent = "Failed to load births data.";
+        stack.classList.add("hidden");
+        meta.textContent = "";
+        if (birthsChart) { birthsChart.destroy(); birthsChart = null; }
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.fiscal_year_options) {
+        renderFiscalYearOptions(data.fiscal_year_options);
+      }
+
+      if (data.date_bounds) {
+        storedDateBounds = data.date_bounds;
+        if (!fiscalYear && !dateBoundsInitialized) {
+          storedFullDateBounds = data.date_bounds;
+        }
+        if (!dateBoundsInitialized) {
+          syncDateControls(data.date_bounds, true, !fiscalYear);
+          dateBoundsInitialized = true;
+          if (!fiscalYear) {
+            loadReport();
+            return;
+          }
+        } else {
+          syncDateControls(data.date_bounds, false);
+        }
+      }
+
+      const importNote = data.latest_import
+        ? `Latest import: ${new Date(data.latest_import).toLocaleString("en-GB")}`
+        : "No birth import found — run the herd import cron job.";
+      meta.textContent = importNote;
+
+      if (!data.date_bounds || !(data.grand_total?.total > 0)) {
+        empty.style.display = "";
+        empty.textContent = data.latest_import
+          ? "No births in the selected filters."
+          : "No birth data available — run the herd import (python scripts/import_herd_events.py).";
+        stack.classList.add("hidden");
+        document.getElementById("summary-panel").style.display = "none";
+        if (birthsChart) { birthsChart.destroy(); birthsChart = null; }
+        return;
+      }
+
+      empty.style.display = "none";
+      stack.classList.remove("hidden");
+      lastReportData = data;
+      renderReport(data);
+    }
+
+    document.querySelectorAll('input[name="view-mode"]').forEach(input => {
+      input.addEventListener("change", () => {
+        updateViewVisibility();
+        if (lastReportData && viewMode() === "graph") {
+          renderChart(lastReportData);
+        }
+      });
+    });
+    document.getElementById("fiscal-year-select").addEventListener("change", loadReport);
+    document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
+    bindFarmSlicers();
+    bindBreedSlicers();
+    bindDateInputs();
+    loadReport();
+  </script>
+{% endblock %}

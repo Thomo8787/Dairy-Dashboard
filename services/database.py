@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     func,
+    inspect,
     text,
 )
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
@@ -84,6 +85,7 @@ class User(Base):
     perm_office = Column(Boolean, nullable=False, default=False)
     perm_parlours = Column(Boolean, nullable=False, default=False)
     perm_stock = Column(Boolean, nullable=False, default=False)
+    perm_events = Column(Boolean, nullable=False, default=False)
     perm_sync_outlook = Column(Boolean, nullable=False, default=False)
     perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
     perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
@@ -199,6 +201,107 @@ class MilkingEfficiencyDayCache(Base):
     computed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class AppSetting(Base):
+    """Simple key-value settings, used for herd import fingerprints."""
+
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(128), unique=True, nullable=False, index=True)
+    value = Column(Text)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CowEvent(Base):
+    """Cow events from DairyComp DCEXPORT *EVENTS.CSV files."""
+
+    __tablename__ = "cow_events"
+
+    id = Column(Integer, primary_key=True)
+    cow_id = Column(String(64), index=True)
+    etag = Column(String(64), index=True)
+    bdat = Column(Date)
+    fdat = Column(Date)
+    lact = Column(Integer)
+    gndr = Column(String(8))
+    edat = Column(Date)
+    event = Column(String(64), index=True)
+    dim = Column(Float)
+    event_date = Column(Date, index=True)
+    remark = Column(String(255))
+    r = Column(String(64))
+    t = Column(String(64))
+    b = Column(String(64))
+    protocols = Column(String(255))
+    technician = Column(String(128))
+    dest = Column(String(128))
+    farm = Column(String(8), nullable=False, index=True)
+    month_label = Column(String(16))
+    fiscal_year = Column(Integer, index=True)
+    sort_key = Column(Integer)
+    parity = Column(String(32))
+    cbrd = Column(Integer)
+    import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class HerdBirth(Base):
+    """Birth records from DairyComp DCEXPORT *BORN.CSV files."""
+
+    __tablename__ = "herd_births"
+
+    id = Column(Integer, primary_key=True)
+    cow_id = Column(String(64), index=True)
+    etag = Column(String(64), index=True)
+    bdat = Column(Date, index=True)
+    cbrd = Column(Integer)
+    gndr = Column(String(8))
+    category = Column(String(16), index=True)
+    event = Column(String(64))
+    farm = Column(String(8), nullable=False, index=True)
+    fiscal_year = Column(Integer, index=True)
+    import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class HerdInventory(Base):
+    """Current herd snapshot from DairyComp DCEXPORT *INV.CSV files."""
+
+    __tablename__ = "herd_inventory"
+
+    id = Column(Integer, primary_key=True)
+    cow_id = Column(String(64), index=True)
+    etag = Column(String(64), index=True)
+    bdat = Column(Date)
+    edat = Column(Date)
+    cbrd = Column(Float)
+    sbrd = Column(String(16))
+    fdat = Column(Date)
+    dim = Column(Float)
+    lact = Column(Float)
+    pen = Column(String(32))
+    remark = Column(String(255))
+    farm = Column(String(8), nullable=False, index=True)
+    category = Column(String(32), index=True)
+    gender = Column(String(8), index=True)
+    import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class BreedingSireClassification(Base):
+    """Manual beef/dairy classification for breeding sires without .b/.s suffix."""
+
+    __tablename__ = "breeding_sire_classifications"
+
+    id = Column(Integer, primary_key=True)
+    sire_code = Column(String(255), unique=True, nullable=False, index=True)
+    semen_type = Column(String(16), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "sire_code": self.sire_code,
+            "semen_type": self.semen_type,
+        }
+
+
 def _normalize_database_url(url: str) -> str:
     """Normalize DB URLs for SQLAlchemy. Add SSL for remote Postgres only."""
     if url.startswith("sqlite:"):
@@ -242,9 +345,25 @@ def get_engine():
     return _engine
 
 
+def _ensure_user_permission_columns(engine) -> None:
+    """create_all will not add new columns to an existing users table."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("users")}
+    needed = {
+        "perm_events": "ALTER TABLE users ADD COLUMN perm_events BOOLEAN NOT NULL DEFAULT FALSE",
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _ensure_user_permission_columns(engine)
     return engine
 
 

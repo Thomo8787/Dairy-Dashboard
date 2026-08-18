@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
   <div class="app-shell">
@@ -114,6 +115,8 @@
       toggle.addEventListener("click", () => sidebar.classList.toggle("is-open"));
     }
 
+    const SYNC_POLL_KEY = "dairyDashboard.syncPollUrl";
+
     function setSyncingUI(form, message) {
       const banner = document.getElementById("syncBanner");
       const bannerText = document.getElementById("syncBannerText");
@@ -131,14 +134,87 @@
       }
       if (status) {
         status.classList.add("is-visible");
+        status.classList.remove("is-complete", "is-error");
         if (statusText) statusText.textContent = message;
       }
       if (banner && bannerText) {
         bannerText.textContent = message;
         banner.hidden = false;
         banner.classList.add("is-visible");
+        banner.classList.remove("is-complete", "is-error");
       }
       document.body.classList.add("is-syncing");
+    }
+
+    function setSyncFinishedUI(form, message, isError) {
+      const banner = document.getElementById("syncBanner");
+      const bannerText = document.getElementById("syncBannerText");
+      const button = form && form.querySelector('button[type="submit"]');
+      const status = form && form.querySelector("[data-sync-status]");
+      const statusText = form && form.querySelector("[data-sync-status-text]");
+
+      if (button) {
+        button.classList.remove("is-syncing");
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
+      if (status) {
+        status.classList.add("is-visible");
+        status.classList.toggle("is-complete", !isError);
+        status.classList.toggle("is-error", !!isError);
+        if (statusText) statusText.textContent = message;
+      }
+      if (banner && bannerText) {
+        bannerText.textContent = message;
+        banner.hidden = false;
+        banner.classList.add("is-visible");
+        banner.classList.toggle("is-complete", !isError);
+        banner.classList.toggle("is-error", !!isError);
+      }
+      document.body.classList.remove("is-syncing");
+    }
+
+    function startSyncStatusPoll(form) {
+      const url = form.getAttribute("data-sync-poll-url");
+      if (!url || form.dataset.syncPollStarted === "1") return;
+      form.dataset.syncPollStarted = "1";
+      sessionStorage.setItem(SYNC_POLL_KEY, url);
+
+      const completeMessage =
+        form.getAttribute("data-sync-complete-message") || "Sync complete";
+      const shouldReload = form.getAttribute("data-sync-reload") === "true";
+      let tries = 0;
+
+      const timer = window.setInterval(async () => {
+        tries += 1;
+        try {
+          const response = await fetch(url, {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) return;
+          const data = await response.json();
+          if (data.running) return;
+
+          window.clearInterval(timer);
+          sessionStorage.removeItem(SYNC_POLL_KEY);
+          if (data.error) {
+            setSyncFinishedUI(form, `Sync failed: ${data.error}`, true);
+            return;
+          }
+          if (!data.complete && !data.ok) return;
+          setSyncFinishedUI(form, completeMessage, false);
+          if (shouldReload) {
+            window.setTimeout(() => window.location.reload(), 1500);
+          }
+        } catch (_err) {
+          /* Keep polling through brief network blips. */
+        }
+        if (tries >= 450) {
+          window.clearInterval(timer);
+          sessionStorage.removeItem(SYNC_POLL_KEY);
+          setSyncFinishedUI(form, "Still importing — reload the page in a minute.", true);
+        }
+      }, 2000);
     }
 
     document.querySelectorAll("form.js-sync-form").forEach((form) => {
@@ -146,7 +222,21 @@
         const message =
           form.getAttribute("data-sync-message") || "Synchronising…";
         setSyncingUI(form, message);
+        if (form.getAttribute("data-sync-poll-url")) {
+          sessionStorage.setItem(SYNC_POLL_KEY, form.getAttribute("data-sync-poll-url"));
+        }
       });
+
+      const pollUrl = form.getAttribute("data-sync-poll-url");
+      const waiting =
+        form.hasAttribute("data-sync-polling") ||
+        (pollUrl && sessionStorage.getItem(SYNC_POLL_KEY) === pollUrl);
+      if (waiting) {
+        const message =
+          form.getAttribute("data-sync-message") || "Synchronising…";
+        setSyncingUI(form, message);
+        startSyncStatusPoll(form);
+      }
     });
 
     const settingsMenu = document.getElementById("settingsMenu");

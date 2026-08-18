@@ -18,6 +18,7 @@ PERMISSION_KEYS = (
     "perm_home",
     "perm_office",
     "perm_parlours",
+    "perm_events",
     "perm_stock",
     "perm_sync_outlook",
     "perm_sync_onedrive",
@@ -28,6 +29,7 @@ PERMISSION_LABELS = {
     "perm_home": "Home",
     "perm_office": "Office",
     "perm_parlours": "Parlours",
+    "perm_events": "Events",
     "perm_stock": "Stock Inventory",
     "perm_sync_outlook": "Sync Outlook",
     "perm_sync_onedrive": "Sync OneDrive",
@@ -288,6 +290,7 @@ def first_allowed_endpoint(user: User) -> str:
         ("perm_home", "home"),
         ("perm_office", "office"),
         ("perm_parlours", "parlours"),
+        ("perm_events", "events"),
         ("perm_stock", "stock_inventory"),
     )
     for perm, endpoint in mapping:

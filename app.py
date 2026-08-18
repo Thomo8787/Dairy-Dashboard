@@ -27,14 +27,31 @@ from services.auth import (
     user_has_permission,
     user_to_template,
 )
+from services.events_common import build_events_page_report
+from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
+from services.births_report import build_births_report
+from services.stp_report import build_stp_report
+from services.breeding_sires import (
+    delete_sire_classification,
+    list_all_sires,
+    set_sire_classification,
+)
 from services.database import (
     ensure_auth_ready,
     get_dashboard_summary,
     get_recent_records,
+    get_session,
     health_check,
     save_dataframe,
 )
 from services.excel_parser import parse_excel_file
+from services.graph_onedrive import GraphOneDriveService
+from services.herd_sync import (
+    consume_herd_import_result,
+    get_herd_import_status,
+    herd_import_status_payload,
+    start_herd_import_job,
+)
 from services.farms import FARMS, active_farms
 from services.graph_client import (
     auth_mode,
@@ -147,6 +164,7 @@ def _page_context(active_nav: str = "home", **extra):
         "can_sync_outlook": user_has_permission(user, "perm_sync_outlook"),
         "can_sync_onedrive": user_has_permission(user, "perm_sync_onedrive"),
         "can_sync_dataflow": user_has_permission(user, "perm_sync_dataflow"),
+        "herd_import_status": get_herd_import_status(),
     }
     ctx.update(extra)
     return ctx
@@ -165,7 +183,10 @@ def require_login():
         return None
     user = current_user()
     if user is None:
-        if request.endpoint and request.endpoint.startswith("milking_efficiency"):
+        if request.endpoint and (
+            request.endpoint.startswith("milking_efficiency")
+            or request.endpoint.startswith("events_api")
+        ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
     return None
@@ -580,6 +601,203 @@ def sync_milk_flow():
     flash(message, "info" if started else "error")
 
     return redirect(url_for("milking_efficiency", farm=farm_code, shift=shift_id))
+
+
+def _events_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_events"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+def _render_events_page(slug: str):
+    user = current_user()
+    status = get_herd_import_status()
+    if not status.get("running"):
+        finished = consume_herd_import_result()
+        if finished and finished.get("error"):
+            flash(f"Last herd import failed: {finished['error']}", "error")
+        elif finished and finished.get("summary"):
+            flash(finished["summary"], "success")
+
+    page = EVENT_PAGES[slug]
+    extras = events_template_extras(slug, is_admin=bool(user and user.is_admin))
+    return render_template(
+        page["template"],
+        **_page_context(active_nav=page["nav"]),
+        **extras,
+    )
+
+
+@app.route("/events")
+@permission_required("perm_events")
+def events():
+    return redirect(url_for("events_calvings"))
+
+
+@app.route("/events/calvings")
+@permission_required("perm_events")
+def events_calvings():
+    return _render_events_page("calvings")
+
+
+@app.route("/events/births")
+@permission_required("perm_events")
+def events_births():
+    return _render_events_page("births")
+
+
+@app.route("/events/sales")
+@permission_required("perm_events")
+def events_sales():
+    return _render_events_page("sales")
+
+
+@app.route("/events/deaths")
+@permission_required("perm_events")
+def events_deaths():
+    return _render_events_page("deaths")
+
+
+@app.route("/events/disease")
+@permission_required("perm_events")
+def events_disease():
+    return _render_events_page("disease")
+
+
+@app.route("/events/hooftrimming")
+@permission_required("perm_events")
+def events_hooftrimming():
+    return _render_events_page("hooftrimming")
+
+
+@app.route("/events/breedings")
+@permission_required("perm_events")
+def events_breedings():
+    return _render_events_page("breedings")
+
+
+@app.route("/events/total-protein")
+@permission_required("perm_events")
+def events_total_protein():
+    return _render_events_page("total-protein")
+
+
+@app.route("/events/api/<slug>")
+def events_api_report(slug: str):
+    user, error = _events_json_user()
+    if error:
+        return error
+    if slug not in EVENT_PAGES:
+        return jsonify({"error": "Unknown events page."}), 404
+
+    farms = request.args.getlist("farm") or None
+    lact = request.args.getlist("lact") or None
+    parity = request.args.getlist("parity") or None
+    semen = request.args.getlist("semen") or None
+    protocol = request.args.getlist("protocol") or None
+    category = request.args.getlist("category") or None
+    breed = request.args.getlist("breed") or None
+    fiscal_year = _parse_int_arg("fiscal_year")
+    event_from = _parse_date_arg("event_from")
+    event_to = _parse_date_arg("event_to")
+    disease = request.args.get("disease") or None
+    y_min = _parse_int_arg("y_min")
+    y_max = _parse_int_arg("y_max")
+
+    with get_session() as session:
+        if slug == "births":
+            payload = build_births_report(
+                session,
+                farms=farms,
+                categories=category,
+                event_from=event_from,
+                event_to=event_to,
+                fiscal_year=fiscal_year,
+            )
+        elif slug == "total-protein":
+            payload = build_stp_report(
+                session,
+                farms=farms,
+                breed_types=breed,
+                birth_from=_parse_date_arg("birth_from"),
+                birth_to=_parse_date_arg("birth_to"),
+            )
+        else:
+            payload = build_events_page_report(
+                session,
+                page_slug=slug,
+                farms=farms,
+                event_from=event_from,
+                event_to=event_to,
+                lact_groups=lact,
+                parity_groups=parity,
+                fiscal_year=fiscal_year,
+                disease=disease,
+                semen_types=semen,
+                lame_protocols=protocol,
+                y_min=y_min,
+                y_max=y_max,
+            )
+    return jsonify(payload)
+
+
+@app.route("/events/api/breedings/sires")
+def events_api_breedings_sires():
+    user, error = _events_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(list_all_sires(session))
+
+
+@app.route("/events/api/breedings/sires/<sire_code>", methods=["PUT"])
+def events_api_set_sire(sire_code: str):
+    user, error = _events_json_user()
+    if error:
+        return error
+    if not user.is_admin:
+        return jsonify({"error": "Admin access required."}), 403
+    body = request.get_json(silent=True) or {}
+    semen_type = str(body.get("semen_type") or "")
+    try:
+        with get_session() as session:
+            row = set_sire_classification(session, sire_code, semen_type)
+            return jsonify(row.to_dict())
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/events/api/breedings/sires/<sire_code>", methods=["DELETE"])
+def events_api_delete_sire(sire_code: str):
+    user, error = _events_json_user()
+    if error:
+        return error
+    if not user.is_admin:
+        return jsonify({"error": "Admin access required."}), 403
+    with get_session() as session:
+        if not delete_sire_classification(session, sire_code):
+            return jsonify({"error": "Sire classification not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/events/api/herd-import-status")
+@permission_required("perm_events")
+def events_herd_import_status():
+    return jsonify(herd_import_status_payload())
+
+
+@app.route("/sync-herd-exports", methods=["POST"])
+@permission_required("perm_sync_onedrive")
+def sync_herd_exports():
+    next_path = request.form.get("next") or url_for("events_calvings")
+    if not next_path.startswith("/events"):
+        next_path = url_for("events_calvings")
+    started, message = start_herd_import_job(force=False)
+    flash(message, "info" if started else "error")
+    return redirect(next_path)
 
 
 @app.route("/health")

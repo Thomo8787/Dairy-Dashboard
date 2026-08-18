@@ -347,6 +347,19 @@ html, body {
 
 .btn:hover { filter: brightness(1.05); }
 .btn.secondary { background: #355f7a; }
+button.secondary {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+}
+button.secondary.small { font-size: 0.85rem; }
+button.secondary:hover { background: var(--accent-soft); }
 .btn.ghost {
   background: transparent;
   color: var(--accent);
@@ -410,6 +423,19 @@ html, body {
   display: inline-flex;
 }
 
+.sync-status.is-complete {
+  color: #1f7a4c;
+}
+
+.sync-status.is-complete .sync-spinner,
+.sync-status.is-error .sync-spinner {
+  display: none;
+}
+
+.sync-status.is-error {
+  color: #b42318;
+}
+
 .sync-banner {
   display: none;
   position: sticky;
@@ -433,6 +459,32 @@ html, body {
 .sync-banner .sync-spinner {
   border-color: rgba(31, 90, 58, 0.25);
   border-top-color: #1f7a4c;
+}
+
+.sync-banner.is-complete {
+  background: #1f7a4c;
+  border-color: #166b40;
+  color: #fff;
+}
+
+.sync-banner.is-complete .sync-spinner {
+  display: none;
+}
+
+.sync-banner.is-complete::before {
+  content: "✓";
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.sync-banner.is-error {
+  background: #fdeceb;
+  border-color: #f3c1bc;
+  color: #b42318;
+}
+
+.sync-banner.is-error .sync-spinner {
+  display: none;
 }
 
 table {

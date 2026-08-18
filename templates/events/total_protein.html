@@ -1,0 +1,768 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(200px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+    }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn[data-value="CM"].selected {
+      background: #dceaf7;
+      border-color: #5a9fd4;
+      color: #1e3a5f;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .slicer-btn[data-value="CM"].selected .slicer-icon {
+      background: #9ec5e8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="GAD"].selected {
+      background: #ffecd9;
+      border-color: #ffb366;
+      color: #b45309;
+    }
+    .slicer-btn[data-value="GAD"].selected .slicer-icon {
+      background: #ffc285;
+      color: #b45309;
+    }
+    .slicer-btn[data-value="beef"].selected {
+      background: #f5e6d3;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="beef"].selected .slicer-icon {
+      background: #c9a66b;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="dairy"].selected {
+      background: #e8f5e9;
+      border-color: #2ca02c;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="dairy"].selected .slicer-icon {
+      background: #a5d6a7;
+      color: #1b5e20;
+    }
+    .breed-slicer {
+      grid-template-columns: 1fr 1fr;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .date-inputs label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+    .date-inputs input[type="range"] {
+      width: 100%;
+      margin: 0 0 0.75rem;
+    }
+    .month-label {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .filter-actions {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+    .filter-actions button { width: 100%; margin: 0; }
+    .content-panel { min-width: 0; }
+    .meta-line {
+      font-size: 0.8125rem;
+      color: var(--muted);
+      margin: 0 0 1rem;
+    }
+    .stp-charts-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .stp-row {
+      display: grid;
+      grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+      gap: 1.5rem;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+    }
+    @media (max-width: 768px) {
+      .stp-row {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+    }
+    .stp-row h3 {
+      margin: 0 0 0.75rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1e3a5f;
+    }
+    .chart-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 240px;
+      margin: 0 auto;
+    }
+    .chart-wrap canvas {
+      max-height: 220px;
+    }
+    .chart-center-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.3;
+    }
+    .chart-center-label strong {
+      font-size: 1.35rem;
+      color: var(--text);
+      font-weight: 700;
+    }
+    .stp-summary h3 {
+      margin: 0 0 0.75rem;
+    }
+    .stp-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.8125rem;
+    }
+    .stp-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .stp-legend-swatch {
+      width: 0.85rem;
+      height: 0.85rem;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .stp-summary-section {
+      margin-bottom: 0.85rem;
+    }
+    .stp-summary-section:last-child {
+      margin-bottom: 0;
+    }
+    .stp-summary-section h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    .stp-targets {
+      margin: 0;
+      padding-left: 1.1rem;
+      font-size: 0.8125rem;
+      color: var(--text);
+    }
+    .stp-targets li { margin-bottom: 0.15rem; }
+    .stp-performance {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-size: 0.8125rem;
+    }
+    .stp-performance li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.4rem;
+      margin-bottom: 0.3rem;
+      line-height: 1.35;
+    }
+    .stp-status {
+      flex-shrink: 0;
+      width: 1rem;
+      text-align: center;
+      font-weight: 700;
+    }
+    .stp-status.pass { color: #1a6b3c; }
+    .stp-status.fail { color: #e74c3c; }
+    .stp-unknown-note {
+      margin-top: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .empty-state {
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="{{ farm }}"
+              aria-pressed="true"
+            >
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Breed</span>
+          <div class="slicer-group breed-slicer" role="group" aria-label="Breed">
+            <button type="button" class="slicer-btn" data-value="beef" aria-pressed="false">
+              <span class="slicer-icon" aria-hidden="true">B</span>
+              Beef
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="dairy" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">D</span>
+              Dairy
+            </button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Birth date range</span>
+          <div class="date-inputs">
+            <label>
+              From
+              <span class="month-label" id="min-date-label">—</span>
+            </label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0">
+            <label>
+              To
+              <span class="month-label" id="max-date-label">—</span>
+            </label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0">
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
+        </div>
+        {% include "events/_refresh.html" %}
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line"></p>
+      <div id="empty-state" class="empty-state" style="display:none;"></div>
+      <div class="stp-charts-stack" id="charts-stack" style="display:none;">
+        {% for farm in farms %}
+        <div class="stp-row" id="stp-row-{{ farm.code|lower }}" style="display:none;">
+          <div class="stp-chart-side">
+            <h3>{{ farm.name }} ({{ farm.code }})</h3>
+            <div class="chart-wrap">
+              <canvas id="chart-{{ farm.code|lower }}"></canvas>
+              <div class="chart-center-label" id="chart-center-{{ farm.code|lower }}"></div>
+            </div>
+          </div>
+          <div class="stp-summary" id="summary-{{ farm.code|lower }}"></div>
+        </div>
+        {% endfor %}
+        <div class="stp-row" id="stp-row-total">
+          <div class="stp-chart-side">
+            <h3>Combined (All Farms)</h3>
+            <div class="chart-wrap">
+              <canvas id="chart-total"></canvas>
+              <div class="chart-center-label" id="chart-center-total"></div>
+            </div>
+          </div>
+          <div class="stp-summary" id="summary-total"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    const CATEGORY_COLORS = {
+      excellent: "#5dade2",
+      good: "#1a5276",
+      fair: "#e74c3c",
+      poor: "#f5b7b1",
+    };
+    const CATEGORY_ORDER = ["excellent", "good", "fair", "poor"];
+    const HERD_FARMS = {{ farm_options | tojson }};
+    const FARM_TITLES = {{ farm_titles | tojson }};
+    const DEFAULT_MONTH_SPAN = 12;
+
+    let charts = Object.fromEntries([...HERD_FARMS, "total"].map((key) => [key, null]));
+    let monthList = [];
+    let storedBirthBounds = null;
+    let dateBoundsInitialized = false;
+    let lastTargets = null;
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function selectedBreeds() {
+      return [...document.querySelectorAll(".breed-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+
+    function bindFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+          if (selected && count <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          loadReport();
+        });
+      });
+    }
+
+    function resetFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function bindBreedSlicers() {
+      document.querySelectorAll(".breed-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(".breed-slicer .slicer-btn.selected").length;
+          if (selected && count <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          loadReport();
+        });
+      });
+    }
+
+    function resetBreedSlicers() {
+      document.querySelectorAll(".breed-slicer .slicer-btn").forEach(btn => {
+        const isDairy = btn.dataset.value === "dairy";
+        btn.classList.toggle("selected", isDairy);
+        btn.setAttribute("aria-pressed", isDairy ? "true" : "false");
+      });
+    }
+
+    function parseIsoDate(iso) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function buildMonthList(minIso, maxIso) {
+      const months = [];
+      let d = parseIsoDate(minIso);
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = parseIsoDate(maxIso);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(new Date(d));
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      return months;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      const yr = String(date.getFullYear()).slice(-2);
+      return `${mon}-${yr}`;
+    }
+
+    function toIsoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function lastDayOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function updateDateLabels() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      document.getElementById("min-date-label").textContent =
+        monthList[minIdx] ? formatMonthLabel(monthList[minIdx]) : "—";
+      document.getElementById("max-date-label").textContent =
+        monthList[maxIdx] ? formatMonthLabel(monthList[maxIdx]) : "—";
+    }
+
+    function defaultSliderIndices(maxIdx) {
+      return { minIdx: Math.max(0, maxIdx - (DEFAULT_MONTH_SPAN - 1)), maxIdx };
+    }
+
+    function syncDateControls(bounds, resetValues, useLastTwelveMonths = false) {
+      if (!bounds?.min || !bounds?.max) return;
+      monthList = buildMonthList(bounds.min, bounds.max);
+      const maxIdx = Math.max(0, monthList.length - 1);
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      minRange.min = 0;
+      minRange.max = maxIdx;
+      maxRange.min = 0;
+      maxRange.max = maxIdx;
+      if (resetValues) {
+        if (useLastTwelveMonths) {
+          const { minIdx, maxIdx: hi } = defaultSliderIndices(maxIdx);
+          minRange.value = minIdx;
+          maxRange.value = hi;
+        } else {
+          minRange.value = 0;
+          maxRange.value = maxIdx;
+        }
+      }
+      updateDateLabels();
+    }
+
+    function currentBirthRangeParams() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      let lo = Number.isNaN(minIdx) ? 0 : minIdx;
+      let hi = Number.isNaN(maxIdx) ? Math.max(0, monthList.length - 1) : maxIdx;
+      if (lo > hi) [lo, hi] = [hi, lo];
+      const startMonth = monthList[lo];
+      const endMonth = monthList[hi];
+      if (!startMonth || !endMonth) return {};
+      return {
+        birth_from: toIsoDate(startMonth),
+        birth_to: toIsoDate(lastDayOfMonth(endMonth)),
+      };
+    }
+
+    function bindDateInputs() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      function onInput() {
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) {
+          maxRange.value = minRange.value;
+        }
+        updateDateLabels();
+        loadReport();
+      }
+      minRange.addEventListener("input", onInput);
+      maxRange.addEventListener("input", onInput);
+    }
+
+    function destroyChart(key) {
+      if (charts[key]) {
+        charts[key].destroy();
+        charts[key] = null;
+      }
+    }
+
+    function statusIcon(met) {
+      return met
+        ? `<span class="stp-status pass" aria-hidden="true">✓</span>`
+        : `<span class="stp-status fail" aria-hidden="true">✗</span>`;
+    }
+
+    function renderSummaryPanel(containerId, title, block, targets) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      const perf = block.performance || {};
+      const total = perf.total || 0;
+      if (!total) {
+        el.innerHTML = `<h3>${title}</h3><p class="stp-unknown-note">No STP results for this selection.</p>`;
+        return;
+      }
+
+      const legend = CATEGORY_ORDER.map(id => {
+        const label = id.charAt(0).toUpperCase() + id.slice(1);
+        return `<span class="stp-legend-item"><span class="stp-legend-swatch" style="background:${CATEGORY_COLORS[id]}"></span>${label}</span>`;
+      }).join("");
+
+      const unknownNote = block.unknown
+        ? `<p class="stp-unknown-note">${block.unknown} result(s) excluded (unknown value).</p>`
+        : "";
+
+      el.innerHTML = `
+        <h3>${title}</h3>
+        <div class="stp-legend">${legend}</div>
+        <div class="stp-summary-section">
+          <h4>Target Goals:</h4>
+          <ul class="stp-targets">
+            <li>≥ ${targets.excellent_min_pct}% Excellent</li>
+            <li>≥ ${targets.good_or_better_min_pct}% Good (or better)</li>
+            <li>≥ ${targets.fair_or_better_min_pct}% Fair (or better)</li>
+            <li>&lt; ${targets.poor_max_pct}% Poor</li>
+          </ul>
+        </div>
+        <div class="stp-summary-section">
+          <h4>Current Performance:</h4>
+          <ul class="stp-performance">
+            <li>${statusIcon(perf.targets_met?.excellent)}<span><strong>Excellent:</strong> ${perf.excellent.pct}% (${perf.excellent.count}/${total})</span></li>
+            <li>${statusIcon(perf.targets_met?.good_or_better)}<span><strong>Good (or better):</strong> ${perf.good_or_better.pct}% (${perf.good_or_better.count}/${total})</span></li>
+            <li>${statusIcon(perf.targets_met?.fair_or_better)}<span><strong>Fair (or better):</strong> ${perf.fair_or_better.pct}% (${perf.fair_or_better.count}/${total})</span></li>
+            <li>${statusIcon(perf.targets_met?.poor)}<span><strong>Poor:</strong> ${perf.poor.pct}% (${perf.poor.count}/${total})</span></li>
+          </ul>
+        </div>
+        ${unknownNote}
+      `;
+    }
+
+    function renderDoughnut(canvasId, centerId, block, categories) {
+      const canvas = document.getElementById(canvasId);
+      const centerEl = document.getElementById(centerId);
+      if (!canvas) return;
+
+      const key = canvasId.replace("chart-", "");
+      const chartKey = key === "total" ? "total" : key.toUpperCase();
+      destroyChart(chartKey);
+
+      const counts = block.counts || {};
+      const data = CATEGORY_ORDER.map(id => counts[id] || 0);
+      const labels = CATEGORY_ORDER.map(id => {
+        const meta = categories.find(c => c.id === id);
+        return meta ? meta.label : id;
+      });
+      const total = data.reduce((a, b) => a + b, 0);
+
+      if (centerEl) {
+        centerEl.innerHTML = total
+          ? `<strong>${total}</strong><span>tests</span>`
+          : `<span>No data</span>`;
+      }
+
+      if (!total) {
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      charts[chartKey] = new Chart(canvas, {
+        type: "doughnut",
+        data: {
+          labels,
+          datasets: [{
+            data,
+            backgroundColor: CATEGORY_ORDER.map(id => CATEGORY_COLORS[id]),
+            borderColor: "#fff",
+            borderWidth: 2,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          cutout: "68%",
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const value = ctx.parsed || 0;
+                  const pct = total ? ((value / total) * 100).toFixed(1) : 0;
+                  return `${ctx.label}: ${value} (${pct}%)`;
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    function renderFarmRow(rowId, chartPrefix, farmKey, title, block, categories, targets, visible) {
+      const row = document.getElementById(rowId);
+      row.style.display = visible ? "" : "none";
+      if (!visible) {
+        destroyChart(farmKey === "total" ? "total" : farmKey);
+        return;
+      }
+      renderDoughnut(`chart-${chartPrefix}`, `chart-center-${chartPrefix}`, block, categories);
+      renderSummaryPanel(`summary-${chartPrefix}`, title, block, targets);
+    }
+
+    async function loadReport() {
+      const farms = selectedFarms();
+      const breeds = selectedBreeds();
+      const empty = document.getElementById("empty-state");
+      const stack = document.getElementById("charts-stack");
+      const meta = document.getElementById("meta-line");
+
+      if (!farms.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one farm.";
+        stack.style.display = "none";
+        return;
+      }
+
+      if (!breeds.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one breed (Beef or Dairy).";
+        stack.style.display = "none";
+        return;
+      }
+
+      const params = new URLSearchParams();
+      farms.forEach(f => params.append("farm", f));
+      breeds.forEach(b => params.append("breed", b));
+      const birthRange = currentBirthRangeParams();
+      if (birthRange.birth_from) params.set("birth_from", birthRange.birth_from);
+      if (birthRange.birth_to) params.set("birth_to", birthRange.birth_to);
+
+      const res = await fetch(`/events/api/total-protein?${params}`);
+      if (!res.ok) {
+        empty.style.display = "";
+        empty.textContent = "Failed to load Total Protein data.";
+        stack.style.display = "none";
+        return;
+      }
+
+      const data = await res.json();
+      lastTargets = data.targets;
+
+      if (data.birth_bounds) {
+        storedBirthBounds = data.birth_bounds;
+        if (!dateBoundsInitialized) {
+          syncDateControls(data.birth_bounds, true, true);
+          dateBoundsInitialized = true;
+          loadReport();
+          return;
+        }
+      }
+
+      const note = data.latest_import
+        ? `Latest import: ${new Date(data.latest_import).toLocaleString("en-GB")}`
+        : "No events import found — run the herd import cron job.";
+      meta.textContent = `${note} · Calves only (lact=0), STP at age 0–${data.max_age_days} days · Dairy CBRD < 102 · Beef CBRD > 101 · Excellent ≥6.2 · Good ≥5.8 · Fair ≥5.1`;
+
+      const hasData = (data.total?.total || 0) > 0;
+      if (!hasData) {
+        empty.style.display = "";
+        empty.textContent = data.latest_import
+          ? "No STP results in the selected filters."
+          : "No STP data available.";
+        stack.style.display = "none";
+        HERD_FARMS.forEach((farm) => destroyChart(farm));
+        destroyChart("total");
+        return;
+      }
+
+      empty.style.display = "none";
+      stack.style.display = "";
+
+      const combinedTitle = farms.length === HERD_FARMS.length
+        ? "Combined (All Farms)"
+        : `Combined (${farms.join(", ")})`;
+
+      HERD_FARMS.forEach((farm) => {
+        const key = String(farm).toLowerCase();
+        renderFarmRow(
+          `stp-row-${key}`,
+          key,
+          farm,
+          FARM_TITLES[farm] || farm,
+          (data.farms || {})[farm],
+          data.categories,
+          data.targets,
+          farms.includes(farm)
+        );
+      });
+
+      document.querySelector("#stp-row-total .stp-chart-side h3").textContent = combinedTitle;
+      renderFarmRow("stp-row-total", "total", "total", combinedTitle, data.total, data.categories, data.targets, true);
+    }
+
+    function clearFilters() {
+      resetFarmSlicers();
+      resetBreedSlicers();
+      if (storedBirthBounds) {
+        syncDateControls(storedBirthBounds, true, true);
+      }
+      loadReport();
+    }
+
+    document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
+    bindFarmSlicers();
+    bindBreedSlicers();
+    bindDateInputs();
+    loadReport();
+  </script>
+{% endblock %}
