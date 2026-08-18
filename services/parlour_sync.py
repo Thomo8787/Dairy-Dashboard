@@ -182,6 +182,55 @@ def _batch_meta(item: dict, farm_code: str, report_type: str) -> dict:
     }
 
 
+def _date_span(start: date, end: date) -> list[date]:
+    days: list[date] = []
+    current = start
+    while current <= end:
+        days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _refresh_efficiency_cache_after_sync(result: dict[str, Any]) -> None:
+    """Fill the summary-page cache after import so the UI does not recompute."""
+    try:
+        from services.milking_efficiency_summary import refresh_efficiency_cache
+    except Exception:
+        logger.exception("Could not import efficiency cache refresh")
+        return
+
+    try:
+        if result.get("skipped"):
+            summary = refresh_efficiency_cache()
+            if summary.get("farms"):
+                logger.info("Efficiency cache warmed: %s", summary)
+            return
+
+        farm_label = (result.get("farm_code") or "ALL").upper()
+        dates: list[date] | None = None
+        farm_codes: list[str] | None
+
+        if result.get("overwrite") and result.get("start_date") and result.get("end_date"):
+            dates = _date_span(result["start_date"], result["end_date"])
+            farm_codes = None if farm_label in {"ALL", "*"} else [farm_label]
+        else:
+            farm_codes = list(result.get("farms") or []) or None
+            milking_dates = result.get("milking_dates") or []
+            if milking_dates:
+                date_set = set(milking_dates)
+                date_set.update(day - timedelta(days=1) for day in milking_dates)
+                dates = sorted(date_set)
+
+        summary = refresh_efficiency_cache(
+            farm_codes=farm_codes,
+            dates=dates,
+            force=True,
+        )
+        logger.info("Efficiency cache refreshed: %s", summary)
+    except Exception:
+        logger.exception("Efficiency cache refresh failed")
+
+
 def sync_parlour_emails(
     *,
     farm_code: str | None = None,
@@ -259,7 +308,7 @@ def sync_parlour_emails(
     )
 
     if not milk_downloads and not entry_downloads:
-        return {
+        result = {
             "skipped": True,
             "reason": "no_new_emails",
             "farm_code": scoped_farm or "ALL",
@@ -275,6 +324,8 @@ def sync_parlour_emails(
             "entry_rows": 0,
             "skipped_files": 0,
         }
+        _refresh_efficiency_cache_after_sync(result)
+        return result
 
     if overwrite and start_date and end_date:
         deleted = delete_parlour_records_in_date_range(scoped_farm, start_date, end_date)
@@ -381,7 +432,7 @@ def sync_parlour_emails(
                 item.get("filename"),
             )
 
-    return {
+    result = {
         "skipped": False,
         "farm_code": scoped_farm or "ALL",
         "farms": sorted(farms_seen),
@@ -398,6 +449,8 @@ def sync_parlour_emails(
         "latest_milking_date": max(milking_dates_seen) if milking_dates_seen else None,
         "milking_dates": sorted(milking_dates_seen),
     }
+    _refresh_efficiency_cache_after_sync(result)
+    return result
 
 
 def format_sync_summary(result: dict[str, Any]) -> str:

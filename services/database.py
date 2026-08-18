@@ -178,6 +178,27 @@ class RotaryEntryIdRecord(Base):
     batch = relationship("ParlourImportBatch")
 
 
+class MilkingEfficiencyDayCache(Base):
+    """Precomputed day-level parlour metrics, refreshed after import/cron."""
+
+    __tablename__ = "milking_efficiency_day_cache"
+    __table_args__ = (
+        UniqueConstraint(
+            "farm_code",
+            "milking_date",
+            "shift_id",
+            name="uq_eff_cache_farm_date_shift",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm_code = Column(String(16), nullable=False, index=True)
+    milking_date = Column(Date, nullable=False, index=True)
+    shift_id = Column(String(32), nullable=False, index=True)
+    metrics_json = Column(Text, nullable=False)
+    computed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 def _normalize_database_url(url: str) -> str:
     """Normalize DB URLs for SQLAlchemy. Add SSL for remote Postgres only."""
     if url.startswith("sqlite:"):

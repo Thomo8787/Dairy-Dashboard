@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
-from services.database import MilkFlowRecord, ParlourImportBatch, RotaryEntryIdRecord, get_session
-from services.farms import FARMS_BY_CODE
+from services.database import (
+    MilkFlowRecord,
+    MilkingEfficiencyDayCache,
+    ParlourImportBatch,
+    RotaryEntryIdRecord,
+    get_session,
+    init_db,
+)
+from services.farms import FARMS, FARMS_BY_CODE
 from services.parlour_link import (
     OVERNIGHT_NEXT_DAY_ID_BEFORE_S,
     match_milk_flow_to_entry_ids,
     parse_hms as _parse_hms,
 )
 
+logger = logging.getLogger(__name__)
+
 DAY_SECONDS = 24 * 3600
+CACHE_LOOKBACK_DATES = 21
 
 # UI shift labels -> possible values stored from DataFlow CSVs
 SHIFT_OPTIONS = (
@@ -744,126 +756,311 @@ def _shift_view_payload(
     }
 
 
-def build_farm_summaries(farm_code: str) -> dict[str, Any]:
-    """One payload for a farm: last 7 days of metrics for every shift.
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
-    Walks milking dates newest-first in chunks so each date's rows are loaded
-    once and split across Morning / Day / Night. The UI caches this and filters
-    shift in the browser.
-    """
-    farm = FARMS_BY_CODE.get(farm_code) or FARMS_BY_CODE["ALH"]
-    stall_count = _resolve_stall_count(farm)
-    shift_specs: list[dict[str, Any]] = []
+
+def _shift_specs_for_farm(farm: Any) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
     for option in SHIFT_OPTIONS:
         shift_id, db_values = resolve_shift_filter(option["id"])
-        shift_specs.append(
+        specs.append(
             {
                 "id": shift_id,
                 "label": option["label"],
                 "db_values": {_normalize_shift(v).lower() for v in db_values},
                 "overnight": uses_overnight_shift_window(farm.code, shift_id),
-                "dates": [],
-                "metrics": {},
             }
         )
+    return specs
+
+
+def _latest_import_text(session: Any, farm_code: str) -> str | None:
+    latest_import = (
+        session.query(ParlourImportBatch)
+        .filter_by(farm_code=farm_code, report_type="milk_flow")
+        .order_by(ParlourImportBatch.imported_at.desc())
+        .first()
+    )
+    if latest_import is None or latest_import.imported_at is None:
+        return None
+    return latest_import.imported_at.strftime("%Y-%m-%d %H:%M")
+
+
+def _empty_farm_payload(farm: Any, latest_import_text: str | None = None) -> dict[str, Any]:
+    return {
+        "farm_code": farm.code,
+        "farm_name": farm.name,
+        "latest_import_at": latest_import_text,
+        "shifts": {
+            option["id"]: _shift_view_payload(
+                farm,
+                shift_id=option["id"],
+                shift_label=option["label"],
+                dates_newest_first=[],
+                metrics_by_date={},
+            )
+            for option in SHIFT_OPTIONS
+        },
+    }
+
+
+def _compute_metrics_for_dates(
+    session: Any,
+    farm: Any,
+    dates: list[date],
+) -> dict[str, dict[date, dict[str, Any]]]:
+    """One-pass chunked compute: each milking date loaded once, split by shift."""
+    stall_count = _resolve_stall_count(farm)
+    shift_specs = _shift_specs_for_farm(farm)
+    result: dict[str, dict[date, dict[str, Any]]] = {spec["id"]: {} for spec in shift_specs}
+    if not dates:
+        return result
+
     any_overnight = any(spec["overnight"] for spec in shift_specs)
-
-    with get_session() as session:
-        latest_import = (
-            session.query(ParlourImportBatch)
-            .filter_by(farm_code=farm.code, report_type="milk_flow")
-            .order_by(ParlourImportBatch.imported_at.desc())
-            .first()
-        )
-        latest_import_at = latest_import.imported_at if latest_import else None
-
-        date_rows = (
-            session.query(MilkFlowRecord.milking_date)
-            .filter(MilkFlowRecord.farm_code == farm.code)
-            .distinct()
-            .order_by(MilkFlowRecord.milking_date.desc())
+    for offset in range(0, len(dates), SUMMARY_DATE_CHUNK):
+        chunk = dates[offset : offset + SUMMARY_DATE_CHUNK]
+        milk_rows = (
+            session.query(MilkFlowRecord)
+            .filter(
+                MilkFlowRecord.farm_code == farm.code,
+                MilkFlowRecord.milking_date.in_(chunk),
+            )
             .all()
         )
-        all_dates = [row[0] for row in date_rows if row[0] is not None]
+        milk_by_date: dict[date, list[MilkFlowRecord]] = defaultdict(list)
+        for row in milk_rows:
+            if row.milking_date is not None:
+                milk_by_date[row.milking_date].append(row)
 
-        for offset in range(0, len(all_dates), SUMMARY_DATE_CHUNK):
-            if all(len(spec["dates"]) >= SUMMARY_DAYS_PER_SHIFT for spec in shift_specs):
-                break
-            chunk = all_dates[offset : offset + SUMMARY_DATE_CHUNK]
-            milk_rows = (
-                session.query(MilkFlowRecord)
-                .filter(
-                    MilkFlowRecord.farm_code == farm.code,
-                    MilkFlowRecord.milking_date.in_(chunk),
-                )
-                .all()
+        entry_dates = set(chunk)
+        if any_overnight:
+            entry_dates.update(day + timedelta(days=1) for day in chunk)
+        entry_rows = (
+            session.query(RotaryEntryIdRecord)
+            .filter(
+                RotaryEntryIdRecord.farm_code == farm.code,
+                RotaryEntryIdRecord.milking_date.in_(entry_dates),
             )
-            milk_by_date: dict[date, list[MilkFlowRecord]] = defaultdict(list)
-            for row in milk_rows:
-                if row.milking_date is not None:
-                    milk_by_date[row.milking_date].append(row)
+            .all()
+        )
+        entry_by_date: dict[date, list[RotaryEntryIdRecord]] = defaultdict(list)
+        for row in entry_rows:
+            if row.milking_date is not None:
+                entry_by_date[row.milking_date].append(row)
 
-            entry_dates = set(chunk)
-            if any_overnight:
-                entry_dates.update(day + timedelta(days=1) for day in chunk)
-            entry_rows = (
-                session.query(RotaryEntryIdRecord)
-                .filter(
-                    RotaryEntryIdRecord.farm_code == farm.code,
-                    RotaryEntryIdRecord.milking_date.in_(entry_dates),
-                )
-                .all()
-            )
-            entry_by_date: dict[date, list[RotaryEntryIdRecord]] = defaultdict(list)
-            for row in entry_rows:
-                if row.milking_date is not None:
-                    entry_by_date[row.milking_date].append(row)
-
-            for milking_date in chunk:
-                day_rows = milk_by_date.get(milking_date, [])
-                if not day_rows:
+        for milking_date in chunk:
+            day_rows = milk_by_date.get(milking_date, [])
+            if not day_rows:
+                continue
+            for spec in shift_specs:
+                filtered = _filter_shift_rows(day_rows, spec["db_values"])
+                if not filtered:
                     continue
-                for spec in shift_specs:
-                    if len(spec["dates"]) >= SUMMARY_DAYS_PER_SHIFT:
-                        continue
-                    filtered = _filter_shift_rows(day_rows, spec["db_values"])
-                    if not filtered:
-                        continue
-                    entries = _filter_entry_rows(
-                        entry_by_date.get(milking_date, []),
-                        spec["db_values"],
+                entries = _filter_entry_rows(
+                    entry_by_date.get(milking_date, []),
+                    spec["db_values"],
+                )
+                if spec["overnight"]:
+                    entries = list(entries) + _early_next_day_entry_rows(
+                        entry_by_date.get(milking_date + timedelta(days=1), [])
                     )
-                    if spec["overnight"]:
-                        entries = list(entries) + _early_next_day_entry_rows(
-                            entry_by_date.get(milking_date + timedelta(days=1), [])
+                result[spec["id"]][milking_date] = _day_metrics(
+                    filtered,
+                    entries,
+                    crosses_midnight=spec["overnight"],
+                    stall_count=stall_count,
+                )
+    return result
+
+
+def _cache_is_fresh(session: Any, farm_code: str) -> bool:
+    latest_import_at = (
+        session.query(ParlourImportBatch.imported_at)
+        .filter_by(farm_code=farm_code, report_type="milk_flow")
+        .order_by(ParlourImportBatch.imported_at.desc())
+        .limit(1)
+        .scalar()
+    )
+    latest_cache_at = (
+        session.query(MilkingEfficiencyDayCache.computed_at)
+        .filter_by(farm_code=farm_code)
+        .order_by(MilkingEfficiencyDayCache.computed_at.desc())
+        .limit(1)
+        .scalar()
+    )
+    if latest_cache_at is None:
+        return False
+    if latest_import_at is not None and _as_utc(latest_cache_at) < _as_utc(latest_import_at):
+        return False
+    return True
+
+
+def _farms_for_refresh(
+    farm_code: str | None,
+    farm_codes: list[str] | None,
+) -> list[Any]:
+    codes: list[str] = []
+    if farm_code:
+        codes = [farm_code.strip().upper()]
+    elif farm_codes:
+        codes = [code.strip().upper() for code in farm_codes if code]
+    if not codes:
+        return list(FARMS)
+    farms = []
+    for code in codes:
+        farm = FARMS_BY_CODE.get(code)
+        if farm:
+            farms.append(farm)
+    return farms
+
+
+def refresh_efficiency_cache(
+    *,
+    farm_code: str | None = None,
+    farm_codes: list[str] | None = None,
+    dates: list[date] | None = None,
+    days: int = CACHE_LOOKBACK_DATES,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Recompute day-level metrics and upsert the cache used by the summary page.
+
+    Called after email import/cron so the UI is a cheap read. When `dates` is
+    omitted, keeps the newest `days` milking dates per farm.
+    """
+    init_db()
+    written: dict[str, int] = {}
+    skipped_fresh: list[str] = []
+    now = datetime.now(timezone.utc)
+
+    for farm in _farms_for_refresh(farm_code, farm_codes):
+        with get_session() as session:
+            has_milk = (
+                session.query(MilkFlowRecord.id)
+                .filter_by(farm_code=farm.code)
+                .first()
+            )
+            if not has_milk:
+                continue
+            if not force and dates is None and _cache_is_fresh(session, farm.code):
+                skipped_fresh.append(farm.code)
+                continue
+
+            if dates is not None:
+                target_dates = list(dates)
+            else:
+                date_rows = (
+                    session.query(MilkFlowRecord.milking_date)
+                    .filter(MilkFlowRecord.farm_code == farm.code)
+                    .distinct()
+                    .order_by(MilkFlowRecord.milking_date.desc())
+                    .limit(max(1, int(days)))
+                    .all()
+                )
+                target_dates = [row[0] for row in date_rows if row[0] is not None]
+
+            if not target_dates:
+                continue
+
+            metrics_by_shift = _compute_metrics_for_dates(session, farm, target_dates)
+            session.query(MilkingEfficiencyDayCache).filter(
+                MilkingEfficiencyDayCache.farm_code == farm.code,
+                MilkingEfficiencyDayCache.milking_date.in_(target_dates),
+            ).delete(synchronize_session=False)
+
+            rows_written = 0
+            for shift_id, metrics_by_date in metrics_by_shift.items():
+                for milking_date, metrics in metrics_by_date.items():
+                    session.add(
+                        MilkingEfficiencyDayCache(
+                            farm_code=farm.code,
+                            milking_date=milking_date,
+                            shift_id=shift_id,
+                            metrics_json=json.dumps(metrics),
+                            computed_at=now,
                         )
-                    spec["dates"].append(milking_date)
-                    spec["metrics"][milking_date] = _day_metrics(
-                        filtered,
-                        entries,
-                        crosses_midnight=spec["overnight"],
-                        stall_count=stall_count,
                     )
+                    rows_written += 1
+            written[farm.code] = rows_written
+            logger.info(
+                "Cached milking efficiency for %s: %s date(s), %s row(s)",
+                farm.code,
+                len(target_dates),
+                rows_written,
+            )
 
-        latest_import_text = None
-        if latest_import_at is not None:
-            latest_import_text = latest_import_at.strftime("%Y-%m-%d %H:%M")
+    return {"farms": written, "skipped_fresh": skipped_fresh}
 
+
+def _payload_from_cache(farm: Any, *, allow_stale: bool) -> dict[str, Any] | None:
+    with get_session() as session:
+        latest_import_text = _latest_import_text(session, farm.code)
+        has_milk = (
+            session.query(MilkFlowRecord.id)
+            .filter_by(farm_code=farm.code)
+            .first()
+        )
+        cache_rows = (
+            session.query(MilkingEfficiencyDayCache)
+            .filter(MilkingEfficiencyDayCache.farm_code == farm.code)
+            .order_by(MilkingEfficiencyDayCache.milking_date.desc())
+            .all()
+        )
+        if not cache_rows:
+            return None if has_milk else _empty_farm_payload(farm, latest_import_text)
+        if not allow_stale and not _cache_is_fresh(session, farm.code):
+            return None
+
+        by_shift: dict[str, list[MilkingEfficiencyDayCache]] = defaultdict(list)
+        for row in cache_rows:
+            by_shift[row.shift_id].append(row)
+
+        shifts = {}
+        for option in SHIFT_OPTIONS:
+            rows = by_shift.get(option["id"], [])[:SUMMARY_DAYS_PER_SHIFT]
+            metrics_by_date: dict[date, dict[str, Any]] = {}
+            dates_newest_first: list[date] = []
+            for row in rows:
+                try:
+                    metrics_by_date[row.milking_date] = json.loads(row.metrics_json)
+                except json.JSONDecodeError:
+                    continue
+                dates_newest_first.append(row.milking_date)
+            shifts[option["id"]] = _shift_view_payload(
+                farm,
+                shift_id=option["id"],
+                shift_label=option["label"],
+                dates_newest_first=dates_newest_first,
+                metrics_by_date=metrics_by_date,
+            )
         return {
             "farm_code": farm.code,
             "farm_name": farm.name,
             "latest_import_at": latest_import_text,
-            "shifts": {
-                spec["id"]: _shift_view_payload(
-                    farm,
-                    shift_id=spec["id"],
-                    shift_label=spec["label"],
-                    dates_newest_first=spec["dates"],
-                    metrics_by_date=spec["metrics"],
-                )
-                for spec in shift_specs
-            },
+            "shifts": shifts,
         }
+
+
+def build_farm_summaries(farm_code: str) -> dict[str, Any]:
+    """One payload for a farm: last 7 days of metrics for every shift.
+
+    Reads precomputed cache (filled by cron/import). Computes once on a cache
+    miss so the first hit after deploy still works.
+    """
+    farm = FARMS_BY_CODE.get(farm_code) or FARMS_BY_CODE["ALH"]
+    payload = _payload_from_cache(farm, allow_stale=False)
+    if payload is not None:
+        return payload
+
+    refresh_efficiency_cache(farm_code=farm.code, days=CACHE_LOOKBACK_DATES, force=True)
+    payload = _payload_from_cache(farm, allow_stale=True)
+    if payload is not None:
+        return payload
+    return _empty_farm_payload(farm)
 
 
 def build_seven_day_summary(farm_code: str, shift_id: str) -> dict[str, Any]:
