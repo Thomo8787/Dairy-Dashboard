@@ -8,6 +8,17 @@ from urllib.parse import quote
 
 from services.graph_client import EXCEL_EXTENSIONS, GRAPH_BASE, auth_mode, graph_get, graph_get_bytes
 
+DEFAULT_ONEDRIVE_USER = "parlours@alhfarm.com"
+
+
+def resolved_onedrive_user() -> str:
+    """OneDrive account: explicit user, then mailbox, then Parlours default."""
+    return (
+        os.environ.get("ONEDRIVE_USER", "").strip()
+        or os.environ.get("OUTLOOK_MAILBOX", "").strip()
+        or DEFAULT_ONEDRIVE_USER
+    )
+
 
 def encode_sharing_url(sharing_url: str) -> str:
     """Convert a OneDrive/SharePoint sharing link into a Graph share ID (u!...)."""
@@ -18,7 +29,7 @@ def encode_sharing_url(sharing_url: str) -> str:
 
 class GraphOneDriveService:
     def __init__(self, download_dir: str | Path | None = None):
-        self.user = os.environ.get("ONEDRIVE_USER", "").strip()
+        self.user = resolved_onedrive_user()
         self.folder_path = os.environ.get("ONEDRIVE_FOLDER_PATH", "").strip().strip("/")
         self.share_url = os.environ.get("ONEDRIVE_SHARE_URL", "").strip()
         # Optional comma-separated filename fragments, e.g. "dairy,yield,weekly"

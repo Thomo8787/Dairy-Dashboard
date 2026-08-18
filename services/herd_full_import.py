@@ -10,17 +10,15 @@ from sqlalchemy.orm import Session
 from services.herd_birth_import import import_herd_births
 from services.herd_events_import import import_cow_events
 from services.herd_inventory_import import import_herd_inventory
-from services.herd_onedrive import discover_dcexport_files, herd_import_configured
+from services.herd_onedrive import discover_dcexport_files, herd_import_config_error
 
 logger = logging.getLogger(__name__)
 
 
 def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
-    if not herd_import_configured():
-        raise ValueError(
-            "Herd import is not configured. Set ONEDRIVE_SHARE_URL / ONEDRIVE_USER "
-            "or LOCAL_HERD_EXPORT_DIR."
-        )
+    config_error = herd_import_config_error()
+    if config_error:
+        raise ValueError(config_error)
 
     discovered = discover_dcexport_files()
     farms_found = sorted({item["farm"] for item in discovered})

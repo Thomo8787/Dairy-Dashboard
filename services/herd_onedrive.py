@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from services.farms import FARMS_BY_CODE
 from services.graph_client import GRAPH_BASE, auth_mode, graph_get_bytes, require_azure_config
-from services.graph_onedrive import GraphOneDriveService
+from services.graph_onedrive import GraphOneDriveService, resolved_onedrive_user
 
 DCEXPORT_FOLDER_RE = re.compile(r"^DCEXPORT([A-Z]{3})$", re.IGNORECASE)
 CSV_SUFFIXES = {".csv"}
@@ -32,9 +32,26 @@ def local_herd_export_dir() -> Path | None:
 def herd_import_configured() -> bool:
     if local_herd_export_dir() is not None:
         return True
-    if os.environ.get("ONEDRIVE_SHARE_URL", "").strip() or os.environ.get("ONEDRIVE_USER", "").strip():
+    if os.environ.get("ONEDRIVE_SHARE_URL", "").strip() or resolved_onedrive_user():
         return not require_azure_config()
     return False
+
+
+def herd_import_config_error() -> str | None:
+    """Human-readable reason the cron/web import cannot start, or None if ready."""
+    if herd_import_configured():
+        return None
+    missing_azure = require_azure_config()
+    if missing_azure:
+        return (
+            "Herd import is not configured. Missing "
+            + ", ".join(missing_azure)
+            + " on this service (copy them from dairy-dashboard)."
+        )
+    return (
+        "Herd import is not configured. Set ONEDRIVE_SHARE_URL / ONEDRIVE_USER "
+        "or LOCAL_HERD_EXPORT_DIR."
+    )
 
 
 def classify_csv_kind(name: str) -> str | None:

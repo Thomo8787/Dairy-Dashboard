@@ -101,17 +101,35 @@ services:
       - key: GRAPH_AUTH_MODE
         value: "application"
       - key: AZURE_CLIENT_ID
-        sync: false
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_CLIENT_ID
       - key: AZURE_CLIENT_SECRET
-        sync: false
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_CLIENT_SECRET
       - key: AZURE_TENANT_ID
-        sync: false
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_TENANT_ID
       - key: ONEDRIVE_USER
-        sync: false
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: ONEDRIVE_USER
       - key: ONEDRIVE_SHARE_URL
-        sync: false
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: ONEDRIVE_SHARE_URL
       - key: ONEDRIVE_FOLDER_PATH
-        value: ""
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: ONEDRIVE_FOLDER_PATH
 
 databases:
   - name: dairy-dashboard-db
