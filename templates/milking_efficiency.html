@@ -4,28 +4,40 @@
 {% block page_title %}Milking Efficiency{% endblock %}
 
 {% block content %}
-  <div class="me-layout">
+  <div
+    class="me-layout"
+    data-me-page
+    data-farm="{{ selected_farm }}"
+    data-shift="{{ selected_shift }}"
+    data-summary-url="{{ url_for('milking_efficiency_summary') }}"
+    data-pens-url="{{ url_for('milking_efficiency_pens') }}"
+    data-trend-url="{{ url_for('milking_efficiency_trend') }}"
+  >
     <aside class="me-filters panel">
       <div class="me-filter-block">
         <h3>Farm</h3>
-        <div class="me-chip-row">
+        <div class="me-chip-row" data-farm-chips>
           {% for farm in farms %}
-            <a
+            <button
+              type="button"
               class="me-chip {% if selected_farm == farm.code %}is-active{% endif %}"
-              href="{{ url_for('milking_efficiency', farm=farm.code, shift=selected_shift) }}"
-            >{{ farm.code }}</a>
+              data-farm="{{ farm.code }}"
+              aria-pressed="{{ 'true' if selected_farm == farm.code else 'false' }}"
+            >{{ farm.code }}</button>
           {% endfor %}
         </div>
       </div>
 
       <div class="me-filter-block">
         <h3>Shift</h3>
-        <div class="me-chip-row">
+        <div class="me-chip-row" data-shift-chips>
           {% for shift in shift_options %}
-            <a
+            <button
+              type="button"
               class="me-chip {% if selected_shift == shift.id %}is-active{% endif %}"
-              href="{{ url_for('milking_efficiency', farm=selected_farm, shift=shift.id) }}"
-            >{{ shift.label }}</a>
+              data-shift="{{ shift.id }}"
+              aria-pressed="{{ 'true' if selected_shift == shift.id else 'false' }}"
+            >{{ shift.label }}</button>
           {% endfor %}
         </div>
       </div>
@@ -52,8 +64,8 @@
             action="{{ url_for('sync_milk_flow') }}"
             data-sync-message="Checking DataFlow emails for new reports…"
           >
-            <input type="hidden" name="farm" value="{{ selected_farm }}">
-            <input type="hidden" name="shift" value="{{ selected_shift }}">
+            <input type="hidden" name="farm" value="{{ selected_farm }}" data-sync-farm>
+            <input type="hidden" name="shift" value="{{ selected_shift }}" data-sync-shift>
             <label class="me-label" for="days_back">Days back</label>
             <select id="days_back" name="days_back" class="me-select">
               {% for days in import_day_options %}
@@ -88,88 +100,50 @@
 
     <section class="me-main panel">
       <div class="me-main-head">
-        <h2>{{ summary.farm_code }} — {{ summary.shift_label }}</h2>
-        <p>
-          up to {{ summary.day_count }} most recent milking days
-          {% if summary.latest_import_at %}
-            · last import {{ summary.latest_import_at.strftime('%Y-%m-%d %H:%M') }}
-          {% endif %}
-        </p>
+        <h2 data-me-title>{{ selected_farm }} — {{ selected_shift }}</h2>
+        <p data-me-meta>Loading milking days…</p>
       </div>
 
-      {% if summary.has_data %}
-        <p class="me-hint">
-          Click a metric for a farm-wide 45-day trend · click a date for pens ·
-          click a pen cell for that pen’s 45-day trend.
-        </p>
-        <div
-          class="me-table-wrap"
-          data-me-table
-          data-farm="{{ selected_farm }}"
-          data-shift="{{ selected_shift }}"
-          data-pens-url="{{ url_for('milking_efficiency_pens') }}"
-          data-trend-url="{{ url_for('milking_efficiency_trend') }}"
-        >
-          <table class="me-summary-table">
+      <p class="me-hint" data-me-hint hidden>
+        Click a metric for a farm-wide 45-day trend · click a date for pens ·
+        click a pen cell for that pen’s 45-day trend.
+      </p>
+      <p class="empty" data-me-empty hidden>
+        No milking data for this farm / shift yet.
+        Use <strong>Import new emails</strong> to pull reports for all farms and shifts.
+      </p>
+      <div
+        class="me-table-wrap"
+        data-me-table
+        hidden
+      >
+        <table class="me-summary-table">
+          <thead>
+            <tr data-me-thead-row>
+              <th>Metric</th>
+            </tr>
+          </thead>
+          <tbody data-me-tbody></tbody>
+        </table>
+      </div>
+
+      <div class="me-pen-panel" data-pen-panel hidden>
+        <div class="me-pen-head">
+          <h3 data-pen-title>Pen breakdown</h3>
+          <button type="button" class="btn ghost me-pen-close" data-pen-close>Close</button>
+        </div>
+        <p class="me-pen-status" data-pen-status role="status" aria-live="polite"></p>
+        <div class="me-table-wrap" data-pen-table-wrap hidden>
+          <table class="me-summary-table me-pen-table">
             <thead>
-              <tr>
+              <tr data-pen-thead-row>
                 <th>Metric</th>
-                {% for day in summary.date_headers %}
-                  <th>
-                    <button
-                      type="button"
-                      class="me-date-btn"
-                      data-date="{{ day.date }}"
-                      data-date-label="{{ day.label }}"
-                      aria-pressed="false"
-                    >{{ day.label }}</button>
-                  </th>
-                {% endfor %}
               </tr>
             </thead>
-            <tbody>
-              {% for row in summary.table_rows %}
-                <tr>
-                  <th scope="row">
-                    <button
-                      type="button"
-                      class="me-metric-btn"
-                      data-metric="{{ row.key }}"
-                      data-metric-label="{{ row.label }}"
-                    >{{ row.label }}</button>
-                  </th>
-                  {% for cell in row.cells %}
-                    <td class="{% if cell.highlight %}is-hot{% endif %}">{{ cell.text }}</td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
+            <tbody data-pen-tbody></tbody>
           </table>
         </div>
-
-        <div class="me-pen-panel" data-pen-panel hidden>
-          <div class="me-pen-head">
-            <h3 data-pen-title>Pen breakdown</h3>
-            <button type="button" class="btn ghost me-pen-close" data-pen-close>Close</button>
-          </div>
-          <p class="me-pen-status" data-pen-status role="status" aria-live="polite"></p>
-          <div class="me-table-wrap" data-pen-table-wrap hidden>
-            <table class="me-summary-table me-pen-table">
-              <thead>
-                <tr data-pen-thead-row>
-                  <th>Metric</th>
-                </tr>
-              </thead>
-              <tbody data-pen-tbody></tbody>
-            </table>
-          </div>
-        </div>
-      {% else %}
-        <p class="empty">
-          No milking data for {{ selected_farm }} / {{ selected_shift }} yet.
-          Use <strong>Import new emails</strong> to pull reports for all farms and shifts.
-        </p>
-      {% endif %}
+      </div>
     </section>
   </div>
 
@@ -208,13 +182,29 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   <script>
     (() => {
-      const root = document.querySelector("[data-me-table]");
-      if (!root) return;
+      const page = document.querySelector("[data-me-page]");
+      if (!page) return;
 
-      const farm = root.dataset.farm;
-      const shift = root.dataset.shift;
-      const pensUrl = root.dataset.pensUrl;
-      const trendUrl = root.dataset.trendUrl;
+      let farm = page.dataset.farm;
+      let shift = page.dataset.shift;
+      const summaryUrl = page.dataset.summaryUrl;
+      const pensUrl = page.dataset.pensUrl;
+      const trendUrl = page.dataset.trendUrl;
+
+      const titleElMain = document.querySelector("[data-me-title]");
+      const metaEl = document.querySelector("[data-me-meta]");
+      const hintEl = document.querySelector("[data-me-hint]");
+      const emptyEl = document.querySelector("[data-me-empty]");
+      const tableWrapMain = document.querySelector("[data-me-table]");
+      const theadMain = document.querySelector("[data-me-thead-row]");
+      const tbodyMain = document.querySelector("[data-me-tbody]");
+      const farmChips = Array.from(document.querySelectorAll("[data-farm-chips] .me-chip"));
+      const shiftChips = Array.from(document.querySelectorAll("[data-shift-chips] .me-chip"));
+      const syncFarmInput = document.querySelector("[data-sync-farm]");
+      const syncShiftInput = document.querySelector("[data-sync-shift]");
+
+      const cacheByFarm = {};
+      let summaryToken = 0;
 
       // --- Pen breakdown ---
       const panel = document.querySelector("[data-pen-panel]");
@@ -224,14 +214,17 @@
       const theadRow = document.querySelector("[data-pen-thead-row]");
       const tbody = document.querySelector("[data-pen-tbody]");
       const closeBtn = document.querySelector("[data-pen-close]");
-      const dateButtons = Array.from(root.querySelectorAll(".me-date-btn"));
 
       let activeDate = null;
       let penRequestToken = 0;
 
+      function currentDateButtons() {
+        return Array.from(tableWrapMain.querySelectorAll(".me-date-btn"));
+      }
+
       function setActiveDate(date) {
         activeDate = date;
-        dateButtons.forEach((btn) => {
+        currentDateButtons().forEach((btn) => {
           const isActive = btn.dataset.date === date;
           btn.classList.toggle("is-active", isActive);
           btn.setAttribute("aria-pressed", isActive ? "true" : "false");
@@ -348,9 +341,6 @@
         }
       }
 
-      dateButtons.forEach((btn) => {
-        btn.addEventListener("click", () => loadPenBreakdown(btn));
-      });
       if (closeBtn) closeBtn.addEventListener("click", closePenPanel);
 
       // --- Metric trend modal ---
@@ -361,9 +351,12 @@
       const trendChartWrap = document.querySelector("[data-trend-chart-wrap]");
       const trendCanvas = document.querySelector("[data-trend-canvas]");
       const trendResetBtn = document.querySelector("[data-trend-reset]");
-      const metricButtons = Array.from(root.querySelectorAll(".me-metric-btn"));
       let trendChart = null;
       let trendRequestToken = 0;
+
+      function currentMetricButtons() {
+        return Array.from(tableWrapMain.querySelectorAll(".me-metric-btn"));
+      }
 
       function formatDurationSeconds(seconds) {
         if (seconds == null || Number.isNaN(seconds)) return "—";
@@ -407,7 +400,7 @@
         trendStatus.textContent = "";
         trendChartWrap.hidden = true;
         if (trendResetBtn) trendResetBtn.hidden = true;
-        metricButtons.forEach((btn) => btn.classList.remove("is-active"));
+        currentMetricButtons().forEach((btn) => btn.classList.remove("is-active"));
         document
           .querySelectorAll(".me-pen-cell-btn.is-active")
           .forEach((btn) => btn.classList.remove("is-active"));
@@ -505,7 +498,6 @@
           },
         });
 
-        // Double-click resets zoom/pan.
         trendCanvas.ondblclick = () => resetTrendZoom();
         if (trendResetBtn) trendResetBtn.hidden = false;
       }
@@ -524,7 +516,7 @@
 
         const token = ++trendRequestToken;
 
-        metricButtons.forEach((item) => item.classList.remove("is-active"));
+        currentMetricButtons().forEach((item) => item.classList.remove("is-active"));
         document
           .querySelectorAll(".me-pen-cell-btn.is-active")
           .forEach((btn) => btn.classList.remove("is-active"));
@@ -576,18 +568,11 @@
         }
       }
 
-      metricButtons.forEach((btn) => {
-        btn.addEventListener("click", () =>
-          loadMetricTrend({
-            metric: btn.dataset.metric,
-            metricLabel: btn.dataset.metricLabel || btn.dataset.metric,
-            activeEl: btn,
-          })
-        );
-      });
-      modal.querySelectorAll("[data-trend-close]").forEach((el) => {
-        el.addEventListener("click", closeTrendModal);
-      });
+      if (modal) {
+        modal.querySelectorAll("[data-trend-close]").forEach((el) => {
+          el.addEventListener("click", closeTrendModal);
+        });
+      }
       if (trendResetBtn) {
         trendResetBtn.addEventListener("click", resetTrendZoom);
       }
@@ -596,6 +581,174 @@
           closeTrendModal();
         }
       });
+
+      // --- Farm / shift filters ---
+      function syncChipState() {
+        farmChips.forEach((btn) => {
+          const isActive = btn.dataset.farm === farm;
+          btn.classList.toggle("is-active", isActive);
+          btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+        });
+        shiftChips.forEach((btn) => {
+          const isActive = btn.dataset.shift === shift;
+          btn.classList.toggle("is-active", isActive);
+          btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+        });
+        if (syncFarmInput) syncFarmInput.value = farm;
+        if (syncShiftInput) syncShiftInput.value = shift;
+      }
+
+      function syncUrl() {
+        const url = new URL(window.location.href);
+        url.searchParams.set("farm", farm);
+        url.searchParams.set("shift", shift);
+        history.replaceState({ farm, shift }, "", url);
+      }
+
+      function clearMainTable() {
+        while (theadMain.children.length > 1) {
+          theadMain.removeChild(theadMain.lastChild);
+        }
+        tbodyMain.innerHTML = "";
+      }
+
+      function renderShiftView() {
+        const payload = cacheByFarm[farm];
+        const view = payload && payload.shifts && payload.shifts[shift];
+        closePenPanel();
+        closeTrendModal();
+        syncChipState();
+
+        const shiftLabel = (view && view.shift_label) || shift;
+        titleElMain.textContent = `${farm} — ${shiftLabel}`;
+
+        if (!view || !view.has_data) {
+          tableWrapMain.hidden = true;
+          hintEl.hidden = true;
+          emptyEl.hidden = false;
+          metaEl.textContent = payload
+            ? "No milking days for this shift yet"
+            : "Loading milking days…";
+          clearMainTable();
+          return;
+        }
+
+        emptyEl.hidden = true;
+        hintEl.hidden = false;
+        tableWrapMain.hidden = false;
+        const importBit = payload.latest_import_at
+          ? ` · last import ${payload.latest_import_at}`
+          : "";
+        metaEl.textContent = `up to ${view.day_count} most recent milking days${importBit}`;
+
+        clearMainTable();
+        (view.date_headers || []).forEach((day) => {
+          const th = document.createElement("th");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "me-date-btn";
+          btn.dataset.date = day.date;
+          btn.dataset.dateLabel = day.label;
+          btn.setAttribute("aria-pressed", "false");
+          btn.textContent = day.label;
+          btn.addEventListener("click", () => loadPenBreakdown(btn));
+          th.appendChild(btn);
+          theadMain.appendChild(th);
+        });
+
+        (view.table_rows || []).forEach((row) => {
+          const tr = document.createElement("tr");
+          const th = document.createElement("th");
+          th.scope = "row";
+          const metricBtn = document.createElement("button");
+          metricBtn.type = "button";
+          metricBtn.className = "me-metric-btn";
+          metricBtn.dataset.metric = row.key;
+          metricBtn.dataset.metricLabel = row.label;
+          metricBtn.textContent = row.label;
+          metricBtn.addEventListener("click", () =>
+            loadMetricTrend({
+              metric: row.key,
+              metricLabel: row.label,
+              activeEl: metricBtn,
+            })
+          );
+          th.appendChild(metricBtn);
+          tr.appendChild(th);
+          (row.cells || []).forEach((cell) => {
+            const td = document.createElement("td");
+            if (cell.highlight) td.classList.add("is-hot");
+            td.textContent = cell.text;
+            tr.appendChild(td);
+          });
+          tbodyMain.appendChild(tr);
+        });
+      }
+
+      async function loadFarmSummary() {
+        if (cacheByFarm[farm]) {
+          renderShiftView();
+          return;
+        }
+
+        const token = ++summaryToken;
+        const requestedFarm = farm;
+        closePenPanel();
+        tableWrapMain.hidden = true;
+        hintEl.hidden = true;
+        emptyEl.hidden = true;
+        clearMainTable();
+        titleElMain.textContent = `${farm} — ${shift}`;
+        metaEl.textContent = "Loading milking days…";
+        syncChipState();
+
+        const url = new URL(summaryUrl, window.location.origin);
+        url.searchParams.set("farm", requestedFarm);
+
+        try {
+          const response = await fetch(url.toString(), {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) throw new Error(`Request failed (${response.status})`);
+          const payload = await response.json();
+          if (token !== summaryToken || farm !== requestedFarm) return;
+          cacheByFarm[requestedFarm] = payload;
+          renderShiftView();
+        } catch (err) {
+          if (token !== summaryToken) return;
+          metaEl.textContent = "Could not load milking days. Try again.";
+          emptyEl.hidden = false;
+        }
+      }
+
+      farmChips.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const next = btn.dataset.farm;
+          if (!next || next === farm) return;
+          farm = next;
+          syncUrl();
+          loadFarmSummary();
+        });
+      });
+      shiftChips.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const next = btn.dataset.shift;
+          if (!next || next === shift) return;
+          shift = next;
+          syncUrl();
+          if (cacheByFarm[farm]) renderShiftView();
+          else loadFarmSummary();
+        });
+      });
+
+      window.addEventListener("popstate", () => {
+        const params = new URLSearchParams(window.location.search);
+        farm = (params.get("farm") || farm).toUpperCase();
+        shift = params.get("shift") || shift;
+        loadFarmSummary();
+      });
+
+      loadFarmSummary();
     })();
   </script>
 {% endblock %}

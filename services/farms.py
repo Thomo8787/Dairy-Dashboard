@@ -20,6 +20,8 @@ class Farm:
     active_for_imports: bool = False
     # DataFlow night/evening milkings keep one milking_date across midnight.
     night_shift_crosses_midnight: bool = True
+    # Rotary stall count. Used for parlour efficiency (potential cows/hour).
+    stall_count: int | None = None
 
 
 FARMS: tuple[Farm, ...] = (
@@ -31,6 +33,7 @@ FARMS: tuple[Farm, ...] = (
         has_dairycomp=True,
         active_for_imports=True,
         night_shift_crosses_midnight=True,
+        stall_count=60,
     ),
     Farm(
         code="BNK",

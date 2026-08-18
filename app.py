@@ -50,9 +50,9 @@ from services.milking_efficiency_summary import (
     METRIC_BY_KEY,
     SHIFT_OPTIONS,
     TREND_DAY_COUNT,
+    build_farm_summaries,
     build_metric_trend,
     build_pen_breakdown,
-    build_seven_day_summary,
 )
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
@@ -332,7 +332,6 @@ def milking_efficiency():
     if shift_id not in {item["id"] for item in SHIFT_OPTIONS}:
         shift_id = "Morning"
 
-    summary = build_seven_day_summary(farm_code=farm_code, shift_id=shift_id)
     sync_status = get_manual_sync_status()
     if not sync_status.get("running"):
         finished = consume_manual_sync_result()
@@ -343,7 +342,6 @@ def milking_efficiency():
 
     return render_template(
         "milking_efficiency.html",
-        summary=summary,
         shift_options=SHIFT_OPTIONS,
         import_day_options=IMPORT_DAY_OPTIONS,
         selected_farm=farm_code,
@@ -351,6 +349,20 @@ def milking_efficiency():
         manual_sync_status=sync_status,
         **_page_context(active_nav="milking_efficiency"),
     )
+
+
+@app.route("/parlours/milking-efficiency/summary")
+def milking_efficiency_summary():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not user_has_permission(user, "perm_parlours"):
+        return jsonify({"error": "Permission denied."}), 403
+
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    if farm_code not in {farm.code for farm in FARMS}:
+        farm_code = "ALH"
+    return jsonify(build_farm_summaries(farm_code=farm_code))
 
 
 @app.route("/parlours/milking-efficiency/pens")

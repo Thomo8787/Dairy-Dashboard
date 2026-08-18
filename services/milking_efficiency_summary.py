@@ -143,6 +143,25 @@ def _spans_midnight(starts: list[float]) -> bool:
 PEN_CLUSTER_MAX_GAP_S = 15 * 60
 
 
+def _normalize_milking_point(raw: str | None) -> str | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+        if number.is_integer():
+            return str(int(number))
+        return str(number)
+    except ValueError:
+        return text
+
+
+def _resolve_stall_count(farm: Any) -> int | None:
+    """Rotary stall count. Only ALH has a rotary; other farms return None."""
+    configured = getattr(farm, "stall_count", None)
+    return int(configured) if configured else None
+
+
 def _row_start_seconds(row: MilkFlowRecord) -> float | None:
     return _timedelta_to_seconds(_parse_hms(row.cow_milking_start_time))
 
@@ -365,6 +384,7 @@ def _day_metrics(
     *,
     trim_shift_outliers: bool = False,
     crosses_midnight: bool = False,
+    stall_count: int | None = None,
 ) -> dict[str, Any]:
     if not rows:
         return {}
@@ -396,8 +416,9 @@ def _day_metrics(
         if start_sec is not None:
             end_sec = start_sec + unit_sec if unit_sec is not None else None
             milking_events.append((start_sec, end_sec))
-            if row.milking_point:
-                by_point[str(row.milking_point)].append(start_sec)
+            point = _normalize_milking_point(row.milking_point)
+            if point:
+                by_point[point].append(start_sec)
 
         if row.flow_rate_at_removal_ml_per_min is not None:
             takeoffs.append(row.flow_rate_at_removal_ml_per_min)
@@ -482,6 +503,18 @@ def _day_metrics(
         revisit_gaps.extend(gaps)
     rotation = _median(revisit_gaps)
 
+    # Potential cows/hour = stalls × rotations/hour (no empty stalls, same speed).
+    parlour_efficiency_pct = None
+    if (
+        cows_per_hour is not None
+        and rotation is not None
+        and rotation > 0
+        and stall_count
+    ):
+        potential_cows_per_hour = stall_count * (3600.0 / rotation)
+        if potential_cows_per_hour > 0:
+            parlour_efficiency_pct = 100.0 * cows_per_hour / potential_cows_per_hour
+
     high_takeoff_pct = None
     if takeoffs:
         high_takeoff_pct = 100.0 * sum(1 for v in takeoffs if v > 1800) / len(takeoffs)
@@ -498,6 +531,7 @@ def _day_metrics(
         "rotation_min": (rotation / 60) if rotation is not None else None,
         "lag_phase_s": _mean(lag_secs),
         "shift_length_s": shift_length,
+        "parlour_efficiency_pct": parlour_efficiency_pct,
         "median_unit_on_s": _median(unit_on_secs),
         "avg_unit_on_s": _mean(unit_on_secs),
         "high_flow_takeoff_pct": high_takeoff_pct,
@@ -525,6 +559,7 @@ METRIC_ROWS = (
     ("rotation_min", "Rotation (min)", "number1_highlight"),
     ("lag_phase_s", "Lag phase (s)", "number0"),
     ("shift_length_s", "Shift length", "hm"),
+    ("parlour_efficiency_pct", "Parlour Efficiency", "pct1"),
     ("median_unit_on_s", "Median Unit On Time", "ms"),
     ("avg_unit_on_s", "Average Unit On Time", "ms"),
     ("high_flow_takeoff_pct", "High flow takeoffs % (>1800)", "pct1"),
@@ -543,7 +578,18 @@ METRIC_ROWS = (
 )
 
 METRIC_BY_KEY = {key: {"label": label, "kind": kind} for key, label, kind in METRIC_ROWS}
+ROTARY_ONLY_METRIC_KEYS = frozenset({"parlour_efficiency_pct"})
+
+
+def _metric_rows_for_farm(farm: Any) -> tuple[tuple[str, str, str], ...]:
+    if _resolve_stall_count(farm):
+        return METRIC_ROWS
+    return tuple(row for row in METRIC_ROWS if row[0] not in ROTARY_ONLY_METRIC_KEYS)
+
+
 TREND_DAY_COUNT = 45
+SUMMARY_DAYS_PER_SHIFT = 7
+SUMMARY_DATE_CHUNK = 14
 SHIFT_TREND_COLORS = {
     "Morning": "#1f7a4c",
     "Day": "#c47a12",
@@ -586,9 +632,11 @@ def _pen_sort_key(pen: str) -> tuple[int, int | str]:
 def _build_metric_table_rows(
     column_keys: list[Any],
     metrics_by_key: dict[Any, dict[str, Any]],
+    *,
+    farm: Any | None = None,
 ) -> list[dict[str, Any]]:
     table_rows = []
-    for key, label, kind in METRIC_ROWS:
+    for key, label, kind in _metric_rows_for_farm(farm):
         cells = []
         for column_key in column_keys:
             raw = metrics_by_key.get(column_key, {}).get(key)
@@ -674,11 +722,51 @@ def _load_lag_entry_rows(
     return list(filtered) + overnight_tail
 
 
-def build_seven_day_summary(farm_code: str, shift_id: str) -> dict[str, Any]:
+def _shift_view_payload(
+    farm: Any,
+    *,
+    shift_id: str,
+    shift_label: str,
+    dates_newest_first: list[date],
+    metrics_by_date: dict[date, dict[str, Any]],
+) -> dict[str, Any]:
+    selected_dates = list(reversed(dates_newest_first[:SUMMARY_DAYS_PER_SHIFT]))
+    return {
+        "shift_id": shift_id,
+        "shift_label": shift_label,
+        "date_headers": [
+            {"date": d.isoformat(), "label": d.strftime("%a, %b %d")}
+            for d in selected_dates
+        ],
+        "table_rows": _build_metric_table_rows(selected_dates, metrics_by_date, farm=farm),
+        "has_data": bool(selected_dates),
+        "day_count": len(selected_dates),
+    }
+
+
+def build_farm_summaries(farm_code: str) -> dict[str, Any]:
+    """One payload for a farm: last 7 days of metrics for every shift.
+
+    Walks milking dates newest-first in chunks so each date's rows are loaded
+    once and split across Morning / Day / Night. The UI caches this and filters
+    shift in the browser.
+    """
     farm = FARMS_BY_CODE.get(farm_code) or FARMS_BY_CODE["ALH"]
-    shift_label, db_values = resolve_shift_filter(shift_id)
-    db_values_normalized = {_normalize_shift(v).lower() for v in db_values}
-    overnight = uses_overnight_shift_window(farm.code, shift_id)
+    stall_count = _resolve_stall_count(farm)
+    shift_specs: list[dict[str, Any]] = []
+    for option in SHIFT_OPTIONS:
+        shift_id, db_values = resolve_shift_filter(option["id"])
+        shift_specs.append(
+            {
+                "id": shift_id,
+                "label": option["label"],
+                "db_values": {_normalize_shift(v).lower() for v in db_values},
+                "overnight": uses_overnight_shift_window(farm.code, shift_id),
+                "dates": [],
+                "metrics": {},
+            }
+        )
+    any_overnight = any(spec["overnight"] for spec in shift_specs)
 
     with get_session() as session:
         latest_import = (
@@ -689,7 +777,6 @@ def build_seven_day_summary(farm_code: str, shift_id: str) -> dict[str, Any]:
         )
         latest_import_at = latest_import.imported_at if latest_import else None
 
-        # Candidate dates for this farm/shift (most recent first)
         date_rows = (
             session.query(MilkFlowRecord.milking_date)
             .filter(MilkFlowRecord.farm_code == farm.code)
@@ -699,63 +786,96 @@ def build_seven_day_summary(farm_code: str, shift_id: str) -> dict[str, Any]:
         )
         all_dates = [row[0] for row in date_rows if row[0] is not None]
 
-        selected_dates: list[date] = []
-        metrics_by_date: dict[date, dict[str, Any]] = {}
-
-        for milking_date in all_dates:
-            day_rows = (
+        for offset in range(0, len(all_dates), SUMMARY_DATE_CHUNK):
+            if all(len(spec["dates"]) >= SUMMARY_DAYS_PER_SHIFT for spec in shift_specs):
+                break
+            chunk = all_dates[offset : offset + SUMMARY_DATE_CHUNK]
+            milk_rows = (
                 session.query(MilkFlowRecord)
                 .filter(
                     MilkFlowRecord.farm_code == farm.code,
-                    MilkFlowRecord.milking_date == milking_date,
+                    MilkFlowRecord.milking_date.in_(chunk),
                 )
                 .all()
             )
-            filtered = _filter_shift_rows(day_rows, db_values_normalized)
-            if not filtered:
-                continue
+            milk_by_date: dict[date, list[MilkFlowRecord]] = defaultdict(list)
+            for row in milk_rows:
+                if row.milking_date is not None:
+                    milk_by_date[row.milking_date].append(row)
 
-            entry_filtered = _load_lag_entry_rows(
-                session,
-                farm_code=farm.code,
-                milking_date=milking_date,
-                db_values_normalized=db_values_normalized,
-                crosses_midnight=overnight,
+            entry_dates = set(chunk)
+            if any_overnight:
+                entry_dates.update(day + timedelta(days=1) for day in chunk)
+            entry_rows = (
+                session.query(RotaryEntryIdRecord)
+                .filter(
+                    RotaryEntryIdRecord.farm_code == farm.code,
+                    RotaryEntryIdRecord.milking_date.in_(entry_dates),
+                )
+                .all()
             )
+            entry_by_date: dict[date, list[RotaryEntryIdRecord]] = defaultdict(list)
+            for row in entry_rows:
+                if row.milking_date is not None:
+                    entry_by_date[row.milking_date].append(row)
 
-            selected_dates.append(milking_date)
-            metrics_by_date[milking_date] = _day_metrics(
-                filtered,
-                entry_filtered,
-                crosses_midnight=overnight,
-            )
-            if len(selected_dates) >= 7:
-                break
+            for milking_date in chunk:
+                day_rows = milk_by_date.get(milking_date, [])
+                if not day_rows:
+                    continue
+                for spec in shift_specs:
+                    if len(spec["dates"]) >= SUMMARY_DAYS_PER_SHIFT:
+                        continue
+                    filtered = _filter_shift_rows(day_rows, spec["db_values"])
+                    if not filtered:
+                        continue
+                    entries = _filter_entry_rows(
+                        entry_by_date.get(milking_date, []),
+                        spec["db_values"],
+                    )
+                    if spec["overnight"]:
+                        entries = list(entries) + _early_next_day_entry_rows(
+                            entry_by_date.get(milking_date + timedelta(days=1), [])
+                        )
+                    spec["dates"].append(milking_date)
+                    spec["metrics"][milking_date] = _day_metrics(
+                        filtered,
+                        entries,
+                        crosses_midnight=spec["overnight"],
+                        stall_count=stall_count,
+                    )
 
-        # Display oldest -> newest across columns (like the screenshot)
-        selected_dates = list(reversed(selected_dates))
-
-        table_rows = _build_metric_table_rows(selected_dates, metrics_by_date)
-
-        date_headers = [
-            {
-                "date": d.isoformat(),
-                "label": d.strftime("%a, %b %d"),
-            }
-            for d in selected_dates
-        ]
+        latest_import_text = None
+        if latest_import_at is not None:
+            latest_import_text = latest_import_at.strftime("%Y-%m-%d %H:%M")
 
         return {
             "farm_code": farm.code,
             "farm_name": farm.name,
-            "shift_id": shift_label,
-            "shift_label": shift_label,
-            "date_headers": date_headers,
-            "table_rows": table_rows,
-            "has_data": bool(selected_dates),
-            "latest_import_at": latest_import_at,
-            "day_count": len(selected_dates),
+            "latest_import_at": latest_import_text,
+            "shifts": {
+                spec["id"]: _shift_view_payload(
+                    farm,
+                    shift_id=spec["id"],
+                    shift_label=spec["label"],
+                    dates_newest_first=spec["dates"],
+                    metrics_by_date=spec["metrics"],
+                )
+                for spec in shift_specs
+            },
         }
+
+
+def build_seven_day_summary(farm_code: str, shift_id: str) -> dict[str, Any]:
+    farm_payload = build_farm_summaries(farm_code)
+    shifts = farm_payload["shifts"]
+    shift_payload = shifts.get(shift_id) or next(iter(shifts.values()))
+    return {
+        "farm_code": farm_payload["farm_code"],
+        "farm_name": farm_payload["farm_name"],
+        "latest_import_at": farm_payload["latest_import_at"],
+        **shift_payload,
+    }
 
 
 def build_pen_breakdown(farm_code: str, shift_id: str, milking_date: date) -> dict[str, Any]:
@@ -798,16 +918,18 @@ def build_pen_breakdown(farm_code: str, shift_id: str, milking_date: date) -> di
         by_pen, corrections = correct_misassigned_pen_cows(filtered)
 
         pen_keys = sorted(by_pen.keys(), key=_pen_sort_key)
+        stall_count = _resolve_stall_count(farm)
         metrics_by_pen = {
             pen: _day_metrics(
                 by_pen[pen],
                 entry_filtered,
                 trim_shift_outliers=True,
                 crosses_midnight=overnight,
+                stall_count=stall_count,
             )
             for pen in pen_keys
         }
-        table_rows = _build_metric_table_rows(pen_keys, metrics_by_pen)
+        table_rows = _build_metric_table_rows(pen_keys, metrics_by_pen, farm=farm)
         pen_headers = [{"id": pen, "label": f"Pen {pen}"} for pen in pen_keys]
 
         return {
@@ -889,6 +1011,9 @@ def build_metric_trend(
         "has_data": False,
     }
 
+    if metric_key in ROTARY_ONLY_METRIC_KEYS and not _resolve_stall_count(farm):
+        return empty
+
     with get_session() as session:
         latest = (
             session.query(MilkFlowRecord.milking_date)
@@ -957,6 +1082,7 @@ def build_metric_trend(
                 db_values_normalized,
                 crosses_midnight=overnight,
             )
+            stall_count = _resolve_stall_count(farm)
 
             if pen_id is not None:
                 by_pen, _ = correct_misassigned_pen_cows(day_milk)
@@ -969,12 +1095,14 @@ def build_metric_trend(
                     day_entries,
                     trim_shift_outliers=True,
                     crosses_midnight=overnight,
+                    stall_count=stall_count,
                 )
             else:
                 metrics = _day_metrics(
                     day_milk,
                     day_entries,
                     crosses_midnight=overnight,
+                    stall_count=stall_count,
                 )
 
             raw = metrics.get(metric_key)
