@@ -2052,7 +2052,11 @@
       if (!rows.length) return;
 
       const labels = rows.map(r => r.event_month);
-      const datasets = ["dairy", "beef"].map(semenType => ({
+      const selected = new Set(selectedSemenTypes());
+      const semenTypes = BREEDINGS_TABLE_SEMEN_ORDER.filter((semenType) =>
+        selected.size ? selected.has(semenType) : true
+      );
+      const datasets = semenTypes.map(semenType => ({
         label: capitalizeSemenLabel(semenType),
         data: rows.map(r => r[semenType] ?? 0),
         backgroundColor: SEMEN_COLORS[semenType] || "#888",
