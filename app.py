@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
 
 from services.auth import (
     PERMISSION_KEYS,
@@ -52,7 +52,21 @@ from services.herd_sync import (
     herd_import_status_payload,
     start_herd_import_job,
 )
-from services.farms import FARMS, active_farms
+from services.stock_pages import STOCK_PAGES, stock_template_extras
+from services.heifer_inventory import (
+    build_heifer_inventory_csv,
+    build_heifer_inventory_pdf,
+    get_heifer_inventory_report,
+)
+from services.beef_inventory import (
+    build_beef_inventory_csv,
+    build_beef_inventory_pdf,
+    get_beef_inventory_report,
+)
+from services.calves_due import get_calves_due_report
+from services.heifers_due import get_heifers_due_report
+from services.stock_inventory_export import PDF_CONTENT_TYPE
+from services.farms import FARMS, HERD_FARM_OPTIONS, active_farms
 from services.graph_client import (
     auth_mode,
     build_auth_url,
@@ -452,10 +466,223 @@ def milking_efficiency_trend():
 @app.route("/stock-inventory")
 @permission_required("perm_stock")
 def stock_inventory():
+    return redirect(url_for("stock_heifer_inventory"))
+
+
+def _stock_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_stock"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+def _render_stock_page(slug: str):
+    status = get_herd_import_status()
+    if not status.get("running"):
+        finished = consume_herd_import_result()
+        if finished and finished.get("error"):
+            flash(f"Last herd import failed: {finished['error']}", "error")
+        elif finished and finished.get("summary"):
+            flash(finished["summary"], "success")
+
+    page = STOCK_PAGES[slug]
     return render_template(
-        "stock_inventory.html",
-        **_page_context(active_nav="stock_inventory"),
+        page["template"],
+        **_page_context(active_nav=page["nav"]),
+        **stock_template_extras(),
     )
+
+
+@app.route("/stock-inventory/heifer-inventory")
+@permission_required("perm_stock")
+def stock_heifer_inventory():
+    return _render_stock_page("heifer-inventory")
+
+
+@app.route("/stock-inventory/beef-inventory")
+@permission_required("perm_stock")
+def stock_beef_inventory():
+    return _render_stock_page("beef-inventory")
+
+
+@app.route("/stock-inventory/calves-due")
+@permission_required("perm_stock")
+def stock_calves_due():
+    return _render_stock_page("calves-due")
+
+
+@app.route("/stock-inventory/heifers-due")
+@permission_required("perm_stock")
+def stock_heifers_due():
+    return _render_stock_page("heifers-due")
+
+
+def _selected_stock_farms() -> list[str]:
+    farms = request.args.getlist("farm")
+    return [f for f in farms if f in HERD_FARM_OPTIONS]
+
+
+@app.route("/stock-inventory/api/heifer-inventory")
+def stock_api_heifer_inventory():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(
+            get_heifer_inventory_report(
+                session,
+                farms=_selected_stock_farms() or None,
+                min_age=_parse_int_arg("min_age"),
+                max_age=_parse_int_arg("max_age"),
+            )
+        )
+
+
+@app.route("/stock-inventory/api/heifer-inventory/export.csv")
+def stock_api_heifer_inventory_csv():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    farms = _selected_stock_farms()
+    with get_session() as session:
+        report = get_heifer_inventory_report(
+            session,
+            farms=farms or None,
+            min_age=_parse_int_arg("min_age"),
+            max_age=_parse_int_arg("max_age"),
+        )
+    content = build_heifer_inventory_csv(report, farms or list(HERD_FARM_OPTIONS))
+    return Response(
+        content,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="heifer_inventory.csv"'},
+    )
+
+
+@app.route("/stock-inventory/api/heifer-inventory/export.pdf")
+def stock_api_heifer_inventory_pdf():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    farms = _selected_stock_farms()
+    with get_session() as session:
+        report = get_heifer_inventory_report(
+            session,
+            farms=farms or None,
+            min_age=_parse_int_arg("min_age"),
+            max_age=_parse_int_arg("max_age"),
+        )
+    content = build_heifer_inventory_pdf(report, farms or list(HERD_FARM_OPTIONS))
+    return Response(
+        content,
+        mimetype=PDF_CONTENT_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="heifer_inventory.pdf"'},
+    )
+
+
+@app.route("/stock-inventory/api/beef-inventory")
+def stock_api_beef_inventory():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    try:
+        with get_session() as session:
+            return jsonify(
+                get_beef_inventory_report(
+                    session,
+                    farms=_selected_stock_farms() or None,
+                    min_age=_parse_int_arg("min_age"),
+                    max_age=_parse_int_arg("max_age"),
+                    jv_mode=request.args.get("jv_mode") or "all",
+                )
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/stock-inventory/api/beef-inventory/export.csv")
+def stock_api_beef_inventory_csv():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    farms = _selected_stock_farms()
+    try:
+        with get_session() as session:
+            report = get_beef_inventory_report(
+                session,
+                farms=farms or None,
+                min_age=_parse_int_arg("min_age"),
+                max_age=_parse_int_arg("max_age"),
+                jv_mode=request.args.get("jv_mode") or "all",
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    content = build_beef_inventory_csv(report, farms or list(HERD_FARM_OPTIONS))
+    return Response(
+        content,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="beef_inventory.csv"'},
+    )
+
+
+@app.route("/stock-inventory/api/beef-inventory/export.pdf")
+def stock_api_beef_inventory_pdf():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    farms = _selected_stock_farms()
+    try:
+        with get_session() as session:
+            report = get_beef_inventory_report(
+                session,
+                farms=farms or None,
+                min_age=_parse_int_arg("min_age"),
+                max_age=_parse_int_arg("max_age"),
+                jv_mode=request.args.get("jv_mode") or "all",
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    content = build_beef_inventory_pdf(report, farms or list(HERD_FARM_OPTIONS))
+    return Response(
+        content,
+        mimetype=PDF_CONTENT_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="beef_inventory.pdf"'},
+    )
+
+
+@app.route("/stock-inventory/api/calves-due")
+def stock_api_calves_due():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(
+            get_calves_due_report(
+                session,
+                farms=_selected_stock_farms() or None,
+                breeds=request.args.getlist("breed") or None,
+                due_from=_parse_date_arg("due_from"),
+                due_to=_parse_date_arg("due_to"),
+            )
+        )
+
+
+@app.route("/stock-inventory/api/heifers-due")
+def stock_api_heifers_due():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(
+            get_heifers_due_report(
+                session,
+                farms=_selected_stock_farms() or None,
+                due_from=_parse_date_arg("due_from"),
+                due_to=_parse_date_arg("due_to"),
+            )
+        )
 
 
 # Keep old URL working
@@ -784,8 +1011,15 @@ def events_api_delete_sire(sire_code: str):
 
 
 @app.route("/events/api/herd-import-status")
-@permission_required("perm_events")
 def events_herd_import_status():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not (
+        user_has_permission(user, "perm_events")
+        or user_has_permission(user, "perm_stock")
+    ):
+        return jsonify({"error": "Permission denied."}), 403
     return jsonify(herd_import_status_payload())
 
 
@@ -793,7 +1027,7 @@ def events_herd_import_status():
 @permission_required("perm_sync_onedrive")
 def sync_herd_exports():
     next_path = request.form.get("next") or url_for("events_calvings")
-    if not next_path.startswith("/events"):
+    if not next_path.startswith("/events") and not next_path.startswith("/stock-inventory"):
         next_path = url_for("events_calvings")
     started, message = start_herd_import_job(force=False)
     flash(message, "info" if started else "error")

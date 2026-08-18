@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import gc
-import io
 import logging
 from typing import Any
 
@@ -15,15 +14,11 @@ from sqlalchemy.orm import Session
 from services.database import HerdInventory
 from services.herd_import_utils import (
     FP_INVENTORY,
-    birth_category_series,
     bulk_insert_dataframe,
-    drop_unnamed_columns,
     load_source_fingerprint,
     parse_date_series,
-    remove_invalid_id_rows,
     source_fingerprint,
     store_source_fingerprint,
-    strip_string_columns,
 )
 from services.herd_onedrive import (
     KIND_INVENTORY,
@@ -31,39 +26,14 @@ from services.herd_onedrive import (
     files_for_kind,
     herd_import_configured,
 )
+from services.inventory_processor import load_inventory_csv, process_inventory_file
 
 logger = logging.getLogger(__name__)
 
-_INVENTORY_ENCODING = "windows-1252"
-
-
-def _clean_inventory_dataframe(df: pd.DataFrame, farm: str) -> pd.DataFrame:
-    df = drop_unnamed_columns(df)
-    df = strip_string_columns(df)
-    if "ID" in df.columns:
-        df = remove_invalid_id_rows(df)
-    df["Farm"] = farm
-    if "BDAT" in df.columns:
-        df["BDAT"] = parse_date_series(df["BDAT"])
-    if "FDAT" in df.columns:
-        df["FDAT"] = parse_date_series(df["FDAT"])
-    if "EDAT" in df.columns:
-        df["EDAT"] = parse_date_series(df["EDAT"])
-    if "CBRD" in df.columns:
-        df["CBRD"] = pd.to_numeric(df["CBRD"], errors="coerce")
-    if "CBRD" in df.columns and "GNDR" in df.columns:
-        df["Category"] = birth_category_series(df["CBRD"], df["GNDR"])
-        df["Gender"] = df["GNDR"]
-    elif "GNDR" in df.columns:
-        df["Category"] = None
-        df["Gender"] = df["GNDR"]
-    else:
-        df["Category"] = None
-        df["Gender"] = None
-    return df
-
 
 def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[dict[str, Any]]:
+    df = df.reset_index(drop=True)
+
     def _empty() -> pd.Series:
         return pd.Series([None] * len(df), index=df.index, dtype="object")
 
@@ -78,7 +48,12 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
             return _empty()
         return parse_date_series(df[col]).dt.date.replace({pd.NaT: None})
 
-    def series_num(col: str) -> pd.Series:
+    def series_int(col: str) -> pd.Series:
+        if col not in df.columns:
+            return _empty()
+        return pd.to_numeric(df[col], errors="coerce").astype("Int64")
+
+    def series_float(col: str) -> pd.Series:
         if col not in df.columns:
             return _empty()
         return pd.to_numeric(df[col], errors="coerce")
@@ -89,16 +64,36 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
             "etag": series_str("ETAG"),
             "bdat": series_date("BDAT"),
             "edat": series_date("EDAT"),
-            "cbrd": series_num("CBRD"),
+            "cbrd": series_float("CBRD"),
             "sbrd": series_str("SBRD"),
             "fdat": series_date("FDAT"),
-            "dim": series_num("DIM"),
-            "lact": series_num("LACT"),
+            "dim": series_float("DIM"),
+            "lact": series_float("LACT"),
+            "hdat": series_date("HDAT"),
+            "dslh": series_float("DSLH"),
+            "rc": series_float("RC"),
+            "rpro": series_str("RPRO"),
             "pen": series_str("PEN"),
+            "tbrd": series_int("TBRD"),
             "remark": series_str("REMARK"),
+            "ewgt": series_float("EWGT"),
+            "httag": series_str("HTTAG"),
+            "rum": series_float("RUM"),
+            "dcc": series_float("DCC"),
+            "due": series_date("DUE"),
+            "lsir": series_str("LSIR"),
+            "sirc": series_str("SIRC"),
+            "lsbrd": series_str("LSBRD"),
             "farm": series_str("Farm"),
             "category": series_str("Category"),
             "gender": series_str("Gender"),
+            "aged": series_int("AGED"),
+            "months_old": series_int("Months Old"),
+            "expected_due": series_date("Expected Due"),
+            "fiscal_year_due": series_int("Fiscal Year Due"),
+            "sort_key": series_int("Sort Key"),
+            "expected_month": series_str("Expected Month"),
+            "value": series_float("Value"),
             "import_timestamp": import_time,
         }
     )
@@ -107,14 +102,9 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
 
 def _import_farm_file(db: Session, entry: dict[str, Any], farm: str, import_time: dt.datetime) -> int:
     file_bytes = download_dcexport_file(entry)
-    df = pd.read_csv(
-        io.BytesIO(file_bytes),
-        encoding=_INVENTORY_ENCODING,
-        dayfirst=True,
-        on_bad_lines="skip",
-    )
+    df = load_inventory_csv(file_bytes)
     del file_bytes
-    df = _clean_inventory_dataframe(df, farm)
+    df = process_inventory_file(df, farm)
     rows = len(df)
     if rows == 0:
         del df

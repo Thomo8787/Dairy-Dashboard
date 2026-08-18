@@ -56,7 +56,12 @@ NAV_ITEMS = [
         "label": "Stock Inventory",
         "endpoint": "stock_inventory",
         "permission": "perm_stock",
-        "children": [],
+        "children": [
+            {"id": "stock_heifer_inventory", "label": "Heifer Inventory", "endpoint": "stock_heifer_inventory", "permission": "perm_stock"},
+            {"id": "stock_beef_inventory", "label": "Beef Inventory", "endpoint": "stock_beef_inventory", "permission": "perm_stock"},
+            {"id": "stock_calves_due", "label": "Calves Due", "endpoint": "stock_calves_due", "permission": "perm_stock"},
+            {"id": "stock_heifers_due", "label": "Heifers Due", "endpoint": "stock_heifers_due", "permission": "perm_stock"},
+        ],
     },
 ]
 

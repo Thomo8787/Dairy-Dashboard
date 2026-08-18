@@ -277,11 +277,31 @@ class HerdInventory(Base):
     fdat = Column(Date)
     dim = Column(Float)
     lact = Column(Float)
+    hdat = Column(Date)
+    dslh = Column(Float)
+    rc = Column(Float)
+    rpro = Column(String(32))
     pen = Column(String(32))
+    tbrd = Column(Integer)
     remark = Column(String(255))
+    ewgt = Column(Float)
+    httag = Column(String(32))
+    rum = Column(Float)
+    dcc = Column(Float)
+    due = Column(Date)
+    lsir = Column(String(64))
+    sirc = Column(String(64))
+    lsbrd = Column(String(32), index=True)
     farm = Column(String(8), nullable=False, index=True)
     category = Column(String(32), index=True)
     gender = Column(String(8), index=True)
+    aged = Column(Integer)
+    months_old = Column(Integer, index=True)
+    expected_due = Column(Date, index=True)
+    fiscal_year_due = Column(Integer)
+    sort_key = Column(Integer, index=True)
+    expected_month = Column(String(16))
+    value = Column(Float)
     import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
@@ -360,10 +380,45 @@ def _ensure_user_permission_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_herd_inventory_columns(engine) -> None:
+    """create_all will not add new columns to an existing herd_inventory table."""
+    inspector = inspect(engine)
+    if "herd_inventory" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("herd_inventory")}
+    needed = {
+        "hdat": "ALTER TABLE herd_inventory ADD COLUMN hdat DATE",
+        "dslh": "ALTER TABLE herd_inventory ADD COLUMN dslh FLOAT",
+        "rc": "ALTER TABLE herd_inventory ADD COLUMN rc FLOAT",
+        "rpro": "ALTER TABLE herd_inventory ADD COLUMN rpro VARCHAR(32)",
+        "tbrd": "ALTER TABLE herd_inventory ADD COLUMN tbrd INTEGER",
+        "ewgt": "ALTER TABLE herd_inventory ADD COLUMN ewgt FLOAT",
+        "httag": "ALTER TABLE herd_inventory ADD COLUMN httag VARCHAR(32)",
+        "rum": "ALTER TABLE herd_inventory ADD COLUMN rum FLOAT",
+        "dcc": "ALTER TABLE herd_inventory ADD COLUMN dcc FLOAT",
+        "due": "ALTER TABLE herd_inventory ADD COLUMN due DATE",
+        "lsir": "ALTER TABLE herd_inventory ADD COLUMN lsir VARCHAR(64)",
+        "sirc": "ALTER TABLE herd_inventory ADD COLUMN sirc VARCHAR(64)",
+        "lsbrd": "ALTER TABLE herd_inventory ADD COLUMN lsbrd VARCHAR(32)",
+        "aged": "ALTER TABLE herd_inventory ADD COLUMN aged INTEGER",
+        "months_old": "ALTER TABLE herd_inventory ADD COLUMN months_old INTEGER",
+        "expected_due": "ALTER TABLE herd_inventory ADD COLUMN expected_due DATE",
+        "fiscal_year_due": "ALTER TABLE herd_inventory ADD COLUMN fiscal_year_due INTEGER",
+        "sort_key": "ALTER TABLE herd_inventory ADD COLUMN sort_key INTEGER",
+        "expected_month": "ALTER TABLE herd_inventory ADD COLUMN expected_month VARCHAR(16)",
+        "value": "ALTER TABLE herd_inventory ADD COLUMN value FLOAT",
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_user_permission_columns(engine)
+    _ensure_herd_inventory_columns(engine)
     return engine
 
 
