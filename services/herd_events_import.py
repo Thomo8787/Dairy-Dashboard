@@ -78,8 +78,8 @@ def _clean_events_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         df["Parity"] = None
 
     event = df["Event"] if "Event" in df.columns else pd.Series([""] * len(df), index=df.index)
-    # Keep original DairyComp SOLD/DIED. Sales reporting treats DIED+TB/OFS as
-    # sales via sales_classified_event_clause(); BCMS needs the true DIED type.
+    # Keep original DairyComp SOLD/DIED. Sales reporting treats DIED+TB/OFS
+    # (remark or DEST Cneild/CSarg) as sales; BCMS needs the true DIED type.
 
     if {"FDAT", "Date", "LACT"}.issubset(df.columns):
         fresh_mask = (

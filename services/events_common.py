@@ -94,18 +94,46 @@ SALES_MAPPED_REMARKS: tuple[str, ...] = ("OFS", *SALES_TB_REMARKS, "CAR16", *SAL
 # reporting. We now keep the original DIED event for BCMS, and still treat them as
 # sales in reporting via sales_classified_event_clause().
 DIED_AS_SALES_REMARKS: tuple[str, ...] = ("TB", "OFS")
+# Fallen-stock collectors recorded on DEST (DairyComp item codes).
+OFS_DEST_PREFIXES: tuple[str, ...] = ("OFS", "CNEILD", "CSARG")
 BREEDINGS_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
 BREEDINGS_CHART_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
+
+
+def _dest_upper():
+    return func.upper(func.trim(CowEvent.dest))
+
+
+def ofs_dest_clause():
+    """DEST is OFS or a fallen-stock collector (Cneild / CSarg…)."""
+    dest = _dest_upper()
+    return and_(
+        CowEvent.dest.isnot(None),
+        or_(*[dest.like(f"{prefix}%") for prefix in OFS_DEST_PREFIXES]),
+    )
+
+
+def ofs_sales_clause():
+    """Remark OFS, or DEST is a fallen-stock collector / OFS."""
+    return or_(CowEvent.remark == "OFS", ofs_dest_clause())
+
+
+def died_as_sales_clause():
+    """DIED rows that Sales treats as TB/OFS (not fallen-stock Deaths)."""
+    return and_(
+        CowEvent.event == "DIED",
+        or_(
+            CowEvent.remark.in_(list(DIED_AS_SALES_REMARKS)),
+            ofs_dest_clause(),
+        ),
+    )
 
 
 def sales_classified_event_clause():
     """SOLD, plus DIED events that sales reporting treats as TB/OFS sales."""
     return or_(
         CowEvent.event == "SOLD",
-        and_(
-            CowEvent.event == "DIED",
-            CowEvent.remark.in_(list(DIED_AS_SALES_REMARKS)),
-        ),
+        died_as_sales_clause(),
     )
 
 
@@ -113,9 +141,12 @@ def death_report_event_clause():
     """True DIED events for deaths/fallen-stock reports (exclude TB/OFS sales-deaths)."""
     return and_(
         CowEvent.event == "DIED",
-        or_(
-            CowEvent.remark.is_(None),
-            CowEvent.remark.notin_(list(DIED_AS_SALES_REMARKS)),
+        ~or_(
+            and_(
+                CowEvent.remark.isnot(None),
+                CowEvent.remark.in_(list(DIED_AS_SALES_REMARKS)),
+            ),
+            ofs_dest_clause(),
         ),
     )
 
@@ -324,7 +355,7 @@ def _apply_fiscal_year(query, fiscal_year: int | None):
 
 def _sales_reason_expression():
     return case(
-        (CowEvent.remark == "OFS", literal("OFS")),
+        (ofs_sales_clause(), literal("OFS")),
         (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
         (CowEvent.remark == "CAR16", literal("Beef")),
         (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),
@@ -546,7 +577,7 @@ def _fetch_disease_event_records(
     db_event_types = disease_db_event_types(event_types)
     mastitis_abx_only = event_types == ("MAST_ABX",)
     if "DIED" in db_event_types:
-        # Match Deaths / fallen stock: DIED+TB/OFS are sales-deaths, not true deaths.
+        # Match Deaths / fallen stock: DIED+TB/OFS (remark or DEST) are sales, not true deaths.
         non_died = [event for event in db_event_types if event != "DIED"]
         event_clause = (
             or_(death_report_event_clause(), CowEvent.event.in_(non_died))
@@ -1794,7 +1825,7 @@ def build_events_page_report(
 ) -> dict[str, Any]:
     event_types = resolve_page_event_types(page_slug, disease)
     page_event_types = EVENT_PAGE_TYPES.get(page_slug, event_types)
-    # Sales slider/bounds also need DIED+TB/OFS rows now kept as DIED in cow_events.
+    # Sales slider/bounds also need DIED+TB/OFS (remark or DEST) rows kept as DIED.
     if page_slug == "sales":
         page_event_types = ("SOLD", "DIED")
     return build_events_report(
