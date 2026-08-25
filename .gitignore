@@ -28,6 +28,10 @@ data/*
 .vscode/
 .idea/
 
+# Local farm workbooks (not source)
+*.xlsx
+~$*
+
 # OS
 .DS_Store
 Thumbs.db

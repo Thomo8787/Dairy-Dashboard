@@ -82,6 +82,26 @@ NAV_ITEMS = [
         ],
     },
     {
+        "id": "milk_quality",
+        "label": "Milk Quality",
+        "endpoint": "milk_quality",
+        "permission": "perm_milk_quality",
+        "children": [
+            {
+                "id": "milk_quality_collections",
+                "label": "Collections",
+                "endpoint": "milk_quality_collections",
+                "permission": "perm_milk_quality",
+            },
+            {
+                "id": "milk_quality_statements",
+                "label": "Statements",
+                "endpoint": "milk_quality_statements",
+                "permission": "perm_milk_quality",
+            },
+        ],
+    },
+    {
         "id": "genetics",
         "label": "Genetics",
         "endpoint": "genetics",

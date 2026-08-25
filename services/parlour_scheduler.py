@@ -33,6 +33,15 @@ def _run_incremental_sync() -> None:
     except Exception:
         logger.exception("Hourly parlour sync failed")
 
+    try:
+        from services.nml_import import format_nml_summary, import_nml_results, nml_is_configured
+
+        if nml_is_configured():
+            nml = import_nml_results(days=2)
+            logger.info("Hourly NML import: %s", format_nml_summary(nml))
+    except Exception:
+        logger.exception("Hourly NML import failed")
+
 
 def start_parlour_hourly_sync(app: Flask) -> None:
     """Start an in-process hourly job while the dashboard is running."""

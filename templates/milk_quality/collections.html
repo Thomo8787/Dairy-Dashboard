@@ -1,0 +1,1053 @@
+{% extends "base.html" %}
+
+{% block title %}Collections · {{ app_name }}{% endblock %}
+{% block page_title %}Collections{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 2.5rem; padding: 0.45rem 0.4rem;
+      border: 2px solid var(--line); border-radius: 8px;
+      background: #f3f4f6; color: var(--muted);
+      font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+    }
+    .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .date-row label {
+      display: flex; flex-direction: column; gap: 0.2rem;
+      font-size: 0.8rem; font-weight: 600; color: var(--muted);
+    }
+    .date-row select { margin: 0; width: 100%; }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .summary-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    .summary-card .label {
+      font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .summary-card .value { font-size: 1.4rem; font-weight: 700; color: #1e3a5f; }
+    .summary-card .value.warn { color: #b91c1c; }
+    .chart-toolbar { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .smoothing-slicer, .outlier-slicer { display: inline-flex; gap: 0; }
+    .smoothing-slicer .slicer-btn, .outlier-slicer .slicer-btn {
+      min-height: 2.2rem; border-radius: 0; border-right-width: 1px;
+    }
+    .smoothing-slicer .slicer-btn:first-child, .outlier-slicer .slicer-btn:first-child { border-radius: 8px 0 0 8px; }
+    .smoothing-slicer .slicer-btn:last-child, .outlier-slicer .slicer-btn:last-child { border-radius: 0 8px 8px 0; }
+    .smoothing-slicer .slicer-btn.selected, .outlier-slicer .slicer-btn.selected {
+      background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f;
+    }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .chart-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    .chart-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.5rem; margin-bottom: 0.5rem;
+    }
+    .chart-card h3 { margin: 0; font-size: 0.95rem; }
+    .chart-wrap { position: relative; height: 240px; }
+    .chart-hint { font-size: 0.75rem; color: var(--muted); margin: -0.25rem 0 1rem; }
+    .action-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+    .import-scope { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
+    .import-scope select { margin: 0; padding: 0.25rem 0.4rem; font-size: 0.8rem; }
+    .table-wrap {
+      overflow: auto; max-height: calc(100vh - 14rem);
+      border: 1px solid var(--line); border-radius: 8px;
+    }
+    #coll-table { width: 100%; border-collapse: collapse; }
+    #coll-table th, #coll-table td {
+      padding: 0.4rem 0.55rem; text-align: left;
+      border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    #coll-table td.nml-status { text-align: center; }
+    .nml-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.35rem; height: 1.35rem;
+      font-size: 1.05rem; font-weight: 700; line-height: 1;
+    }
+    .nml-mark.ok { color: #15803d; }
+    .nml-mark.bad { color: #b91c1c; }
+    #coll-table thead th {
+      background: #1e3a5f; color: #fff; font-weight: 600;
+      position: sticky; top: 0; z-index: 1; cursor: pointer; user-select: none;
+    }
+    #coll-table tbody tr.fail td { background: #fff1f2; }
+    #coll-table tbody tr.missing-sample td { background: #fee2e2; }
+    .empty-state { padding: 1.5rem; color: var(--muted); }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .message { margin-bottom: 0.75rem; }
+    .message.ok { color: #047857; }
+    .message.err { color: #b91c1c; }
+    .pill { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .pill.pass { background: #dcfce7; color: #166534; }
+    .pill.fail { background: #fee2e2; color: #991b1b; }
+    .sidebar-add-btn { width: 100%; margin-top: 0.75rem; }
+    .add-modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .add-modal-backdrop.open { display: flex; }
+    .add-modal {
+      background: var(--panel);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      max-width: 560px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: auto;
+      padding: 1.25rem;
+    }
+    .add-modal h2 { margin: 0 0 0.85rem; font-size: 1.1rem; }
+    .add-form-grid { display: grid; gap: 0.75rem; }
+    .add-form-grid label {
+      display: flex; flex-direction: column; gap: 0.25rem;
+      font-size: 0.8rem; font-weight: 600; color: var(--muted);
+    }
+    .add-form-grid input {
+      margin: 0; width: 100%; padding: 0.4rem 0.5rem;
+      border: 1px solid var(--line); border-radius: 6px;
+      font-size: 0.875rem; font-weight: 500;
+    }
+    .load-row { display: grid; grid-template-columns: 1.1fr 0.9fr 0.9fr; gap: 0.5rem; }
+    .add-farm-grid { display: grid; grid-template-columns: 1fr; gap: 0.5rem; }
+    .add-farm-grid .slicer-btn { min-height: 2.6rem; font-size: 0.9rem; }
+    .add-date-input {
+      display: block;
+      width: 100%;
+      min-height: 2.8rem;
+      margin: 0.35rem 0 0.75rem;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 1.05rem;
+    }
+    .add-modal-actions {
+      display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; margin-top: 0.5rem;
+    }
+    .add-modal-error { color: #b91c1c; font-size: 0.8125rem; margin: 0; }
+    .add-step[hidden] { display: none; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button type="button" class="slicer-btn selected" data-value="{{ farm.code }}" aria-pressed="true">{{ farm.code }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Sample date range</span>
+          <div class="date-row">
+            <label>From <select id="date-from"></select></label>
+            <label>To <select id="date-to"></select></label>
+          </div>
+          <button type="button" class="btn sidebar-add-btn" id="add-collection-btn">Milk Collection</button>
+        </div>
+        <p class="help-text">
+          Each row is one tanker load. Quality comes from NML; litres and weighbridge
+          tickets are from the farm collection sheet. Rows with no sample number are highlighted.
+          Fetch NML emails matches the sample number exactly and links it when the lab date is
+          within one day of the date the milk was sold. A green tick means that match succeeded;
+          a red cross means it did not.
+        </p>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <p class="message" id="status-message"></p>
+      <div class="summary-cards" id="summary-cards"></div>
+
+      <div class="chart-toolbar">
+        <span class="section-label" style="margin:0">Trend</span>
+        <div class="smoothing-slicer" role="group" aria-label="Smoothing">
+          <button type="button" class="slicer-btn selected" data-value="avg" aria-pressed="true">Rolling average</button>
+          <button type="button" class="slicer-btn" data-value="avg30" aria-pressed="false">30-day average</button>
+          <button type="button" class="slicer-btn" data-value="raw" aria-pressed="false">Raw data</button>
+        </div>
+        <span class="section-label" style="margin:0">Outliers</span>
+        <div class="outlier-slicer" role="group" aria-label="Outliers">
+          <button type="button" class="slicer-btn" data-value="keep" aria-pressed="false">All data</button>
+          <button type="button" class="slicer-btn selected" data-value="exclude" aria-pressed="true">Cap (IQR)</button>
+        </div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-head"><h3>Butterfat (%)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-butterfat"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Protein (%)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-protein"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Urea</h3></div>
+          <div class="chart-wrap"><canvas id="chart-urea"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>SCC (x1000/ml)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-scc"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>BactoScan (x1000/ml)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-bactoscan"></canvas></div>
+        </div>
+      </div>
+      <p class="chart-hint">Scroll to zoom, drag to box-zoom, hold Ctrl and drag to pan, double-click to reset.</p>
+
+      <div class="action-bar">
+        <button type="button" class="btn ghost" id="download-csv-btn">Export CSV</button>
+        <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
+        <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="coll-table">
+          <thead>
+            <tr>
+              <th data-sort="farm">Farm</th>
+              <th data-sort="sample_date">Date</th>
+              <th data-sort="load_number">Load</th>
+              <th data-sort="sample_id">Sample</th>
+              <th data-sort="nml_status">NML</th>
+              <th data-sort="litres_load">Litres</th>
+              <th data-sort="litres_weighbridge">Weighbridge</th>
+              <th data-sort="temp_c">Temp °C</th>
+              <th data-sort="butterfat_pct">Butterfat %</th>
+              <th data-sort="protein_pct">Protein %</th>
+              <th data-sort="scc">SCC</th>
+              <th data-sort="bactoscan">BactoScan</th>
+              <th data-sort="urea_pct">Urea</th>
+              <th data-sort="fpd">FPD</th>
+              <th data-sort="antibiotic_pass">A/B</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td colspan="15" class="empty-state">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="add-modal-backdrop" id="add-collection-modal" aria-hidden="true">
+    <div class="add-modal" role="dialog" aria-labelledby="add-collection-title">
+      <div class="add-step" id="add-step-farm">
+        <h2 id="add-collection-title">Milk Collection</h2>
+        <p class="help-text">Which farm are you entering tickets for?</p>
+        <div class="add-farm-grid" id="add-farm-grid">
+          {% for farm in farms %}
+          <button type="button" class="slicer-btn" data-value="{{ farm.code }}" data-name="{{ farm.name }}">{{ farm.name }}</button>
+          {% endfor %}
+        </div>
+        <div class="add-modal-actions">
+          <button type="button" class="btn ghost" id="add-farm-cancel">Cancel</button>
+        </div>
+      </div>
+      <div class="add-step" id="add-step-date" hidden>
+        <h2 id="add-date-title">Collection date</h2>
+        <p class="help-text" id="add-date-help">Choose the collection date.</p>
+        <label class="section-label" for="add-date">Date</label>
+        <input type="date" class="add-date-input" id="add-date" required>
+        <div class="add-modal-actions">
+          <button type="button" class="btn ghost" id="add-date-back">Back</button>
+          <button type="button" class="btn ghost" id="add-date-cancel">Cancel</button>
+          <button type="button" class="btn" id="add-date-continue">Continue</button>
+        </div>
+      </div>
+      <form id="add-collection-form" class="add-form-grid add-step" hidden>
+        <h2 id="add-form-title">Add Collection</h2>
+        <input type="hidden" id="add-farm" value="">
+        {% for n in [1, 2, 3, 4, 5] %}
+        <div class="load-row">
+          <label>
+            Load {{ n }} (L)
+            <input type="number" id="add-load{{ n }}-vol" min="1" step="1" inputmode="numeric">
+          </label>
+          <label>
+            Temp (°C)
+            <input type="number" id="add-load{{ n }}-temp" step="0.01" min="0" inputmode="decimal">
+          </label>
+          <label>
+            Sample
+            <input type="text" id="add-load{{ n }}-sample" maxlength="16" autocomplete="off">
+          </label>
+        </div>
+        {% endfor %}
+        <p class="help-text">Leave unused loads blank. Zero volume is ignored.</p>
+        <p class="add-modal-error" id="add-collection-error" hidden></p>
+        <div class="add-modal-actions">
+          <button type="button" class="btn ghost" id="add-collection-back">Back</button>
+          <button type="button" class="btn ghost" id="add-collection-cancel">Cancel</button>
+          <button type="submit" class="btn" id="add-collection-save">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script>
+(function () {
+  const FARM_COLORS = {{ farm_chart_colors | tojson }};
+  const LOOKBACK = {{ nml_lookback_days | int }};
+  const EARLIEST = {{ (nml_earliest or '') | tojson }};
+  const LATEST = {{ (nml_latest or '') | tojson }};
+  let rows = [];
+  let trend = {};
+  let sortKey = "sample_date";
+  let sortDir = -1;
+  const charts = {};
+  let smoothingMode = "avg";
+  let excludeOutliers = true;
+  let baseSummary = {};
+  const IQR_FACTOR = 1.5;
+  const IQR_METRICS = new Set(["scc", "bactoscan"]);
+
+  function showMessage(text, isError) {
+    const el = document.getElementById("status-message");
+    el.textContent = text || "";
+    el.className = "message" + (isError ? " err" : text ? " ok" : "");
+  }
+
+  function selectedFarms() {
+    return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")].map((b) => b.dataset.value);
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? "" : str)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function parseIso(iso) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function formatDate(value) {
+    if (!value) return "";
+    return parseIso(String(value).split("T")[0]).toLocaleDateString(undefined, {
+      day: "numeric", month: "short", year: "numeric",
+    });
+  }
+
+  function num(value, digits) {
+    if (value == null || value === "") return "";
+    const n = Number(value);
+    return Number.isNaN(n) ? "" : n.toFixed(digits);
+  }
+
+  function intFmt(value) {
+    if (value == null || value === "") return "";
+    const n = Number(value);
+    return Number.isNaN(n) ? "" : Math.round(n).toLocaleString();
+  }
+
+  const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function monthKey(date) {
+    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
+  }
+  function monthLabel(m) {
+    const [y, mo] = m.split("-").map(Number);
+    return MONTH_ABBR[mo - 1] + "-" + String(y).slice(-2);
+  }
+  function monthToDateFrom(m) { return m + "-01"; }
+  function monthToDateTo(m) {
+    const [y, mo] = m.split("-").map(Number);
+    const last = new Date(y, mo, 0).getDate();
+    return m + "-" + String(last).padStart(2, "0");
+  }
+
+  function populateMonths() {
+    const now = new Date();
+    const current = new Date(now.getFullYear(), now.getMonth(), 1);
+    const boundStart = EARLIEST ? parseIso(EARLIEST) : new Date(2026, 3, 1);
+    const boundEnd = LATEST ? parseIso(LATEST) : current;
+    const start = new Date(Math.min(
+      new Date(boundStart.getFullYear(), boundStart.getMonth(), 1).getTime(),
+      new Date(current.getFullYear(), current.getMonth() - 35, 1).getTime()
+    ));
+    const end = new Date(Math.max(
+      new Date(boundEnd.getFullYear(), boundEnd.getMonth(), 1).getTime(),
+      current.getTime()
+    ));
+    const months = [];
+    for (let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+         cursor <= end;
+         cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
+      months.push(monthKey(cursor));
+    }
+    const opts = months.map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join("");
+    document.getElementById("date-from").innerHTML = opts;
+    document.getElementById("date-to").innerHTML = opts;
+    document.getElementById("date-from").value = monthKey(new Date(boundStart.getFullYear(), boundStart.getMonth(), 1));
+    document.getElementById("date-to").value = monthKey(new Date(boundEnd.getFullYear(), boundEnd.getMonth(), 1));
+  }
+
+  function buildQuery() {
+    const params = new URLSearchParams();
+    selectedFarms().forEach((f) => params.append("farm", f));
+    let from = document.getElementById("date-from").value;
+    let to = document.getElementById("date-to").value;
+    if (from && to && from > to) { const tmp = from; from = to; to = tmp; }
+    if (from) params.set("date_from", monthToDateFrom(from));
+    if (to) params.set("date_to", monthToDateTo(to));
+    return params.toString();
+  }
+
+  function renderSummary(summary) {
+    const cards = [
+      { label: "Loads", value: intFmt(summary.count) || "0" },
+      { label: "Litres", value: summary.total_litres != null ? intFmt(summary.total_litres) : "—" },
+      { label: "Weighbridge", value: summary.total_weighbridge != null ? intFmt(summary.total_weighbridge) : "—" },
+      { label: "Avg butterfat %", value: num(summary.avg_butterfat_pct, 2) || "—" },
+      { label: "Avg protein %", value: num(summary.avg_protein_pct, 2) || "—" },
+      { label: "Avg SCC", value: summary.avg_scc != null ? String(Math.round(summary.avg_scc)) : "—" },
+      { label: "Avg BactoScan", value: summary.avg_bactoscan != null ? String(Math.round(summary.avg_bactoscan)) : "—" },
+      { label: "Avg urea", value: num(summary.avg_urea_pct, 3) || "—" },
+      { label: "Avg temp °C", value: num(summary.avg_temp_c, 2) || "—" },
+      { label: "NML matched", value: (summary.matched_count || 0) + " / " + (summary.count || 0) },
+      { label: "NML unmatched", value: String(summary.nml_unmatched_count || 0), warn: (summary.nml_unmatched_count || 0) > 0 },
+      { label: "No sample no.", value: String(summary.missing_sample_count || 0), warn: (summary.missing_sample_count || 0) > 0 },
+      { label: "Antibiotic fails", value: String(summary.antibiotic_fails || 0), warn: (summary.antibiotic_fails || 0) > 0 },
+    ];
+    document.getElementById("summary-cards").innerHTML = cards.map((c) =>
+      `<div class="summary-card"><div class="label">${escapeHtml(c.label)}</div>` +
+      `<div class="value${c.warn ? " warn" : ""}">${escapeHtml(c.value)}</div></div>`
+    ).join("");
+  }
+
+  function quantile(sorted, q) {
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    return sorted[base + 1] !== undefined
+      ? sorted[base] + rest * (sorted[base + 1] - sorted[base])
+      : sorted[base];
+  }
+
+  function iqrFences(values) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    if (sorted.length < 4) return null;
+    const q1 = quantile(sorted, 0.25);
+    const q3 = quantile(sorted, 0.75);
+    const iqr = q3 - q1;
+    if (iqr === 0) return null;
+    return { lo: q1 - IQR_FACTOR * iqr, hi: q3 + IQR_FACTOR * iqr };
+  }
+
+  function cappedValues(sampleRows, metric) {
+    const raw = sampleRows
+      .map((r) => r[metric])
+      .filter((v) => v != null)
+      .map(Number)
+      .filter((v) => !Number.isNaN(v));
+    if (!excludeOutliers || !IQR_METRICS.has(metric)) return raw;
+    const fences = iqrFences(raw);
+    if (!fences) return raw;
+    return raw.map((v) => Math.min(fences.hi, Math.max(fences.lo, v)));
+  }
+
+  function summaryWithOutliers(summary) {
+    const mean = (arr) => {
+      if (!arr.length) return null;
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
+    };
+    return {
+      ...summary,
+      avg_scc: mean(cappedValues(rows, "scc")),
+      avg_bactoscan: mean(cappedValues(rows, "bactoscan")),
+    };
+  }
+
+  function refreshSummary() {
+    renderSummary(summaryWithOutliers(baseSummary));
+  }
+
+  function allDates() {
+    const set = new Set();
+    Object.values(trend).forEach((points) => points.forEach((p) => set.add(p.date)));
+    return [...set].sort();
+  }
+
+  function rollingMeanAt(points, dates, endIdx, windowDays, metric) {
+    const start = new Date(dates[endIdx]);
+    start.setDate(start.getDate() - (windowDays - 1));
+    let sum = 0, count = 0;
+    for (let j = 0; j <= endIdx; j++) {
+      if (dates[j] >= start && dates[j] <= dates[endIdx]) {
+        const v = points[j][metric];
+        if (v != null) { sum += v; count++; }
+      }
+    }
+    return count ? sum / count : null;
+  }
+
+  function rollingByDate(points, metric, windows) {
+    const result = {};
+    const dates = points.map((p) => new Date(p.date + "T00:00:00"));
+    for (let i = 0; i < points.length; i++) {
+      const parts = windows.map((days) => rollingMeanAt(points, dates, i, days, metric)).filter((v) => v != null);
+      result[points[i].date] = parts.length
+        ? Math.round((parts.reduce((a, b) => a + b, 0) / parts.length) * 1000) / 1000
+        : null;
+    }
+    return result;
+  }
+
+  function cleanedPoints(farm, metric) {
+    const points = trend[farm] || [];
+    if (!excludeOutliers || !IQR_METRICS.has(metric)) return points;
+    const vals = points.map((p) => p[metric]).filter((v) => v != null).map(Number);
+    const fences = iqrFences(vals);
+    if (!fences) return points;
+    return points.map((p) => {
+      const v = p[metric];
+      if (v == null) return p;
+      if (v < fences.lo || v > fences.hi) {
+        return Object.assign({}, p, { [metric]: Math.min(fences.hi, Math.max(fences.lo, v)) });
+      }
+      return p;
+    });
+  }
+
+  function seriesFor(farm, metric, labels, mode) {
+    const points = cleanedPoints(farm, metric);
+    let byDate;
+    if (mode === "avg") byDate = rollingByDate(points, metric, [6, 7]);
+    else if (mode === "avg30") byDate = rollingByDate(points, metric, [30]);
+    else byDate = points.reduce((acc, p) => { acc[p.date] = p[metric]; return acc; }, {});
+    return labels.map((d) => (byDate[d] === undefined ? null : byDate[d]));
+  }
+
+  function destroyChart(key) {
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+  }
+
+  function renderCharts() {
+    const labels = allDates();
+    const mode = smoothingMode;
+    const tag = mode === "avg" ? " (rolling avg)" : mode === "avg30" ? " (30-day avg)" : "";
+    const defs = [
+      ["chart-butterfat", "butterfat_pct", "Butterfat"],
+      ["chart-protein", "protein_pct", "Protein"],
+      ["chart-urea", "urea_pct", "Urea"],
+      ["chart-scc", "scc", "SCC"],
+      ["chart-bactoscan", "bactoscan", "BactoScan"],
+    ];
+    defs.forEach(([canvasId, metric, suffix]) => {
+      destroyChart(canvasId);
+      const datasets = selectedFarms().map((farm) => {
+        const color = FARM_COLORS[farm] || "#555";
+        return {
+          label: farm + " " + suffix + tag,
+          data: seriesFor(farm, metric, labels, mode),
+          borderColor: color,
+          backgroundColor: color,
+          tension: mode === "raw" ? 0.25 : 0.35,
+          spanGaps: true,
+          pointRadius: mode === "raw" ? 2 : 0,
+        };
+      });
+      charts[canvasId] = new Chart(document.getElementById(canvasId), {
+        type: "line",
+        data: { labels: labels.map(formatDate), datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
+            zoom: {
+              pan: { enabled: true, mode: "xy", modifierKey: "ctrl" },
+              zoom: {
+                wheel: { enabled: true },
+                pinch: { enabled: true },
+                drag: { enabled: true, backgroundColor: "rgba(30,58,95,0.15)", borderColor: "rgba(30,58,95,0.6)", borderWidth: 1 },
+                mode: "xy",
+              },
+            },
+          },
+          scales: { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
+        },
+      });
+    });
+  }
+
+  function abCell(value) {
+    if (value === true) return '<span class="pill pass">Pass</span>';
+    if (value === false) return '<span class="pill fail">Fail</span>';
+    return "";
+  }
+
+  function nmlCell(row) {
+    if (row.matched || row.nml_status === "matched") {
+      return '<span class="nml-mark ok" title="NML sample number matched this collection (±1 day)" aria-label="Matched to NML">✓</span>';
+    }
+    return '<span class="nml-mark bad" title="No matching NML sample number within ±1 day" aria-label="Not matched to NML">✕</span>';
+  }
+
+  function sortRows(data) {
+    return [...data].sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === "nml_status") {
+        av = a.matched ? 1 : 0;
+        bv = b.matched ? 1 : 0;
+      } else if (typeof av === "boolean" || typeof bv === "boolean") {
+        av = av === true ? 1 : av === false ? 0 : -1;
+        bv = bv === true ? 1 : bv === false ? 0 : -1;
+      } else if (typeof av === "string" || typeof bv === "string") {
+        av = av == null ? "" : String(av).toLowerCase();
+        bv = bv == null ? "" : String(bv).toLowerCase();
+      }
+      if (av == null || av === "") return 1;
+      if (bv == null || bv === "") return -1;
+      if (av < bv) return -1 * sortDir;
+      if (av > bv) return sortDir;
+      return 0;
+    });
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById("table-body");
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="15" class="empty-state">No collections match the current filters.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = sortRows(rows).map((row) => {
+      const classes = [];
+      if (row.sample_missing) classes.push("missing-sample");
+      if (row.antibiotic_pass === false) classes.push("fail");
+      const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
+      return `<tr${cls}>` +
+        `<td>${escapeHtml(row.farm)}</td>` +
+        `<td>${escapeHtml(formatDate(row.sample_date))}</td>` +
+        `<td class="num">${escapeHtml(row.load_number != null ? String(row.load_number) : "")}</td>` +
+        `<td>${escapeHtml(row.sample_id)}</td>` +
+        `<td class="nml-status">${nmlCell(row)}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.litres_load))}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.litres_weighbridge))}</td>` +
+        `<td class="num">${escapeHtml(num(row.temp_c, 2))}</td>` +
+        `<td class="num">${escapeHtml(num(row.butterfat_pct, 2))}</td>` +
+        `<td class="num">${escapeHtml(num(row.protein_pct, 2))}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.scc))}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.bactoscan))}</td>` +
+        `<td class="num">${escapeHtml(num(row.urea_pct, 3))}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.fpd))}</td>` +
+        `<td>${abCell(row.antibiotic_pass)}</td>` +
+        `</tr>`;
+    }).join("");
+  }
+
+  async function loadResults() {
+    showMessage("");
+    document.getElementById("meta-line").textContent = "Loading…";
+    try {
+      const res = await fetch("/milk-quality/api/results?" + buildQuery());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load collections");
+      rows = data.rows || [];
+      trend = data.trend || {};
+      baseSummary = data.summary || {};
+      document.getElementById("meta-line").textContent =
+        rows.length + " load" + (rows.length === 1 ? "" : "s") +
+        (baseSummary.latest_sample_date ? " · latest " + formatDate(baseSummary.latest_sample_date) : "");
+      refreshSummary();
+      renderTable();
+      renderCharts();
+    } catch (err) {
+      document.getElementById("meta-line").textContent = "";
+      document.getElementById("table-body").innerHTML =
+        '<tr><td colspan="15" class="empty-state">Could not load collections.</td></tr>';
+      showMessage(err.message || String(err), true);
+    }
+  }
+
+  document.querySelectorAll(".farm-slicer .slicer-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const selected = btn.classList.contains("selected");
+      const count = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+      if (selected && count <= 1) return;
+      btn.classList.toggle("selected", !selected);
+      btn.setAttribute("aria-pressed", btn.classList.contains("selected"));
+      loadResults();
+    });
+  });
+
+  document.querySelectorAll(".smoothing-slicer .slicer-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".smoothing-slicer .slicer-btn").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("selected", on);
+        b.setAttribute("aria-pressed", on);
+      });
+      smoothingMode = btn.dataset.value;
+      renderCharts();
+    });
+  });
+
+  document.querySelectorAll(".outlier-slicer .slicer-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.classList.contains("selected")) return;
+      document.querySelectorAll(".outlier-slicer .slicer-btn").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("selected", on);
+        b.setAttribute("aria-pressed", on);
+      });
+      excludeOutliers = btn.dataset.value === "exclude";
+      refreshSummary();
+      renderCharts();
+    });
+  });
+
+  document.querySelectorAll("#coll-table thead th[data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) sortDir *= -1;
+      else { sortKey = key; sortDir = 1; }
+      renderTable();
+    });
+  });
+
+  ["date-from", "date-to"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", loadResults);
+  });
+
+  document.getElementById("download-csv-btn").addEventListener("click", () => {
+    window.location.href = "/milk-quality/api/results/export.csv?" + buildQuery();
+  });
+  document.getElementById("download-xlsx-btn").addEventListener("click", () => {
+    window.location.href = "/milk-quality/api/results/export.xlsx?" + buildQuery();
+  });
+
+  document.getElementById("import-nml-btn").addEventListener("click", async function () {
+      const input = window.prompt(
+        "How many days back should I scan the mailbox for NML reports?",
+        String(LOOKBACK || 30)
+      );
+      if (input === null) return;
+      const days = parseInt(input, 10);
+      if (!Number.isFinite(days) || days <= 0) {
+        showMessage("Enter a positive whole number of days.", true);
+        return;
+      }
+      if (days > 400) {
+        showMessage("Choose 400 days or fewer.", true);
+        return;
+      }
+      const btn = this;
+      btn.disabled = true;
+      showMessage("Fetching NML emails from the last " + days + " day(s)…");
+      try {
+        const res = await fetch("/milk-quality/api/import?force=1&days=" + days, { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.detail || "NML import failed");
+        if (data.status === "started") {
+          showMessage(data.message || "Import started…");
+          let finished = false;
+          for (let i = 0; i < 180; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            const st = await fetch("/milk-quality/api/import/status");
+            const payload = await st.json().catch(() => ({}));
+            if (payload.running) continue;
+            if (payload.error) throw new Error(payload.error);
+            const summary = payload.summary || {};
+            showMessage(
+              "NML: " + (summary.files_processed || 0) + " report(s), " +
+              (summary.rows_linked || 0) + " sample(s) linked to collections, " +
+              (summary.rows_inserted || 0) + " unmatched" +
+              ((summary.orphans_merged || 0) ? (", " + summary.orphans_merged + " extra row(s) merged") : "") +
+              "."
+            );
+            finished = true;
+            break;
+          }
+          if (!finished) {
+            showMessage("NML fetch is still running. Refresh in a minute.", true);
+          }
+        } else {
+          showMessage(
+            "NML: " + (data.files_processed || 0) + " report(s), " +
+            (data.rows_linked || 0) + " sample(s) linked to collections."
+          );
+        }
+        loadResults();
+      } catch (err) {
+        showMessage(err.message || String(err), true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+  const LOAD_COUNT = 5;
+  const modal = document.getElementById("add-collection-modal");
+  const stepFarm = document.getElementById("add-step-farm");
+  const stepDate = document.getElementById("add-step-date");
+  const stepForm = document.getElementById("add-collection-form");
+  let selectedFarmName = "";
+
+  function todayIsoLocal() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function formatDisplayDate(iso) {
+    if (!iso) return "";
+    const parts = iso.split("-");
+    if (parts.length !== 3) return iso;
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function showAddError(text) {
+    const err = document.getElementById("add-collection-error");
+    err.hidden = !text;
+    err.textContent = text || "";
+  }
+
+  function formatTemp(value) {
+    if (value == null || value === "") return "";
+    const n = Number(value);
+    if (Number.isNaN(n)) return "";
+    return n.toFixed(2);
+  }
+
+  function openCollectionModal() {
+    stepFarm.hidden = false;
+    stepDate.hidden = true;
+    stepForm.hidden = true;
+    document.getElementById("add-farm").value = "";
+    selectedFarmName = "";
+    document.getElementById("add-date").value = todayIsoLocal();
+    document.getElementById("add-farm-grid").querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.remove("selected");
+    });
+    showAddError("");
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeCollectionModal() {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  function clearLoadInputs() {
+    for (let n = 1; n <= LOAD_COUNT; n++) {
+      document.getElementById("add-load" + n + "-vol").value = "";
+      document.getElementById("add-load" + n + "-temp").value = "";
+      document.getElementById("add-load" + n + "-sample").value = "";
+    }
+  }
+
+  function fillLoads(loads) {
+    clearLoadInputs();
+    (loads || []).forEach((load, idx) => {
+      const n = idx + 1;
+      if (n > LOAD_COUNT) return;
+      document.getElementById("add-load" + n + "-vol").value =
+        load.volume_litres != null ? load.volume_litres : "";
+      document.getElementById("add-load" + n + "-temp").value = formatTemp(load.temp_c);
+      document.getElementById("add-load" + n + "-sample").value = load.sample_id || "";
+    });
+  }
+
+  function showDateStep(farm, farmName) {
+    document.getElementById("add-farm").value = farm;
+    selectedFarmName = farmName || farm;
+    document.getElementById("add-date-title").textContent = "Collection date";
+    document.getElementById("add-date-help").textContent =
+      "Choose the collection date for " + selectedFarmName + ".";
+    const dateInput = document.getElementById("add-date");
+    if (!dateInput.value) dateInput.value = todayIsoLocal();
+    stepFarm.hidden = true;
+    stepDate.hidden = false;
+    stepForm.hidden = true;
+    dateInput.focus();
+    if (typeof dateInput.showPicker === "function") {
+      try { dateInput.showPicker(); } catch (err) { /* picker blocked if not from a user gesture */ }
+    }
+  }
+
+  async function showTicketForm() {
+    const farm = document.getElementById("add-farm").value;
+    const date = document.getElementById("add-date").value;
+    if (!farm || !date) return;
+    document.getElementById("add-form-title").textContent =
+      "Milk Collection · " + (selectedFarmName || farm) + " · " + formatDisplayDate(date);
+    clearLoadInputs();
+    showAddError("");
+    stepFarm.hidden = true;
+    stepDate.hidden = true;
+    stepForm.hidden = false;
+    await loadExistingDay();
+  }
+
+  async function loadExistingDay() {
+    const farm = document.getElementById("add-farm").value;
+    const date = document.getElementById("add-date").value;
+    if (!farm || !date) return;
+    try {
+      const res = await fetch("/milk-quality/api/collections/manual?farm=" + encodeURIComponent(farm) + "&date=" + encodeURIComponent(date));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      fillLoads(data.loads || []);
+    } catch (err) {
+      /* keep a blank form if nothing is saved yet */
+    }
+  }
+
+  document.getElementById("add-collection-btn").addEventListener("click", openCollectionModal);
+  document.getElementById("add-farm-cancel").addEventListener("click", closeCollectionModal);
+  document.getElementById("add-date-cancel").addEventListener("click", closeCollectionModal);
+  document.getElementById("add-collection-cancel").addEventListener("click", closeCollectionModal);
+  document.getElementById("add-date-back").addEventListener("click", () => {
+    stepDate.hidden = true;
+    stepFarm.hidden = false;
+    stepForm.hidden = true;
+  });
+  document.getElementById("add-collection-back").addEventListener("click", () => {
+    stepForm.hidden = true;
+    stepDate.hidden = false;
+    stepFarm.hidden = true;
+    showAddError("");
+  });
+  document.getElementById("add-date-continue").addEventListener("click", () => {
+    const date = document.getElementById("add-date").value;
+    if (!date) {
+      document.getElementById("add-date").reportValidity();
+      return;
+    }
+    showTicketForm();
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target.id === "add-collection-modal") closeCollectionModal();
+  });
+  document.getElementById("add-farm-grid").addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    document.getElementById("add-farm-grid").querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.toggle("selected", b === btn);
+    });
+    showDateStep(btn.dataset.value, btn.dataset.name);
+  });
+  document.getElementById("add-date").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("add-date-continue").click();
+    }
+  });
+
+  document.getElementById("add-collection-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    showAddError("");
+    const farm = document.getElementById("add-farm").value;
+    const date = document.getElementById("add-date").value;
+    const loads = [];
+    for (let n = 1; n <= LOAD_COUNT; n++) {
+      const volume = document.getElementById("add-load" + n + "-vol").value;
+      const temp = document.getElementById("add-load" + n + "-temp").value;
+      const sample = document.getElementById("add-load" + n + "-sample").value;
+      loads.push({
+        volume_litres: volume === "" ? null : Number(volume),
+        temp_c: temp === "" ? null : Math.round(Number(temp) * 100) / 100,
+        sample_id: sample,
+      });
+    }
+    if (loads.some((load) => Number.isNaN(load.volume_litres) || Number.isNaN(load.temp_c))) {
+      showAddError("Volumes and temperatures must be numbers.");
+      return;
+    }
+    const saveBtn = document.getElementById("add-collection-save");
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/milk-quality/api/collections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ farm, date, loads }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save collection");
+      closeCollectionModal();
+      showMessage(
+        "Saved " + (data.loads_saved || 0) + " load" + ((data.loads_saved || 0) === 1 ? "" : "s") +
+        " for " + (selectedFarmName || farm) + ".",
+        false
+      );
+      loadResults();
+    } catch (err) {
+      showAddError(err.message || String(err));
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  populateMonths();
+  loadResults();
+})();
+</script>
+{% endblock %}

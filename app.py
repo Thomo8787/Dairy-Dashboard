@@ -70,7 +70,7 @@ from services.genomic_progress import (
     genetics_template_extras,
     list_traits,
 )
-from services.farms import FARMS, HERD_FARM_OPTIONS, active_farms
+from services.farms import FARMS, FARM_CHART_COLORS, HERD_FARM_OPTIONS, active_farms
 from services.graph_client import (
     auth_mode,
     build_auth_url,
@@ -110,6 +110,17 @@ from services.parlour_efficiency import (
     list_rotation_series,
     rotation_date_bounds,
 )
+from services.nml_email import NML_LOOKBACK_DAYS
+from services.nml_results import (
+    XLSX_CONTENT_TYPE,
+    build_nml_results_csv,
+    build_nml_results_xlsx,
+    list_nml_results,
+    nml_status,
+)
+from services.nml_statements import list_nml_statements
+from services.nml_sync import get_nml_import_status, start_nml_import_job
+from services.nml_manual import get_collection_day, save_collection_day
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
@@ -160,6 +171,19 @@ def _ensure_database():
         logger.info("Database tables ready")
         if seed_error:
             logger.error("Admin seed: %s", seed_error)
+        try:
+            from services.collections_seed import load_collections_seed, should_load_collections_seed
+
+            if should_load_collections_seed() and not getattr(app, "_collections_seed_loaded", False):
+                result = load_collections_seed()
+                app._collections_seed_loaded = True
+                logger.info(
+                    "Collections seed loaded: %s inserted, %s updated",
+                    result.get("inserted", 0),
+                    result.get("updated", 0),
+                )
+        except Exception:
+            logger.exception("Collections seed import failed")
     except Exception:
         logger.exception("Database init failed; will retry on next request")
 
@@ -226,6 +250,7 @@ def require_login():
             request.endpoint.startswith("milking_efficiency")
             or request.endpoint.startswith("events_api")
             or request.endpoint.startswith("parlour_api")
+            or request.endpoint.startswith("milk_quality_api")
         ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
@@ -688,6 +713,203 @@ def parlour_api_efficiency():
                 ma_window=ma_window,
             )
         )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/milk-quality")
+@permission_required("perm_milk_quality")
+def milk_quality():
+    return redirect(url_for("milk_quality_collections"))
+
+
+def _milk_quality_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_milk_quality"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+def _milk_quality_farms_arg():
+    values = request.args.getlist("farm")
+    if not values:
+        raw = (request.args.get("farms") or "").strip()
+        if raw:
+            values = [part.strip() for part in raw.split(",") if part.strip()]
+    return values or None
+
+
+@app.route("/milk-quality/collections")
+@permission_required("perm_milk_quality")
+def milk_quality_collections():
+    user = current_user()
+    status = nml_status()
+    return render_template(
+        "milk_quality/collections.html",
+        farm_chart_colors=FARM_CHART_COLORS,
+        nml_lookback_days=NML_LOOKBACK_DAYS,
+        can_import_nml=True,
+        nml_earliest=status.get("earliest_sample_date") or "",
+        nml_latest=status.get("latest_sample_date") or "",
+        **_page_context(active_nav="milk_quality_collections"),
+    )
+
+
+@app.route("/milk-quality/statements")
+@permission_required("perm_milk_quality")
+def milk_quality_statements():
+    return render_template(
+        "milk_quality/statements.html",
+        **_page_context(active_nav="milk_quality_statements"),
+    )
+
+
+@app.route("/milk-quality/api/results")
+def milk_quality_api_results():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    return jsonify(
+        list_nml_results(farms=_milk_quality_farms_arg(), date_from=date_from, date_to=date_to)
+    )
+
+
+@app.route("/milk-quality/api/results/export.csv")
+def milk_quality_api_results_csv():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    payload = list_nml_results(
+        farms=_milk_quality_farms_arg(), date_from=date_from, date_to=date_to
+    )
+    return Response(
+        build_nml_results_csv(payload["rows"]),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="nml_milk_results.csv"'},
+    )
+
+
+@app.route("/milk-quality/api/results/export.xlsx")
+def milk_quality_api_results_xlsx():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    payload = list_nml_results(
+        farms=_milk_quality_farms_arg(), date_from=date_from, date_to=date_to
+    )
+    return Response(
+        build_nml_results_xlsx(payload["rows"]),
+        mimetype=XLSX_CONTENT_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="nml_milk_results.xlsx"'},
+    )
+
+
+@app.route("/milk-quality/api/status")
+def milk_quality_api_status():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    return jsonify(nml_status())
+
+
+@app.route("/milk-quality/api/statements")
+def milk_quality_api_statements():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    fiscal_raw = (request.args.get("fiscal_year") or "").strip()
+    fiscal_year = None
+    if fiscal_raw:
+        try:
+            fiscal_year = int(fiscal_raw)
+        except ValueError:
+            return jsonify({"error": "Invalid fiscal_year."}), 400
+    return jsonify(list_nml_statements(fiscal_year=fiscal_year, farms=_milk_quality_farms_arg()))
+
+
+@app.route("/milk-quality/api/import/status")
+def milk_quality_api_import_status():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    return jsonify(get_nml_import_status())
+
+
+@app.route("/milk-quality/api/import", methods=["POST"])
+def milk_quality_api_import():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    if not user_has_permission(user, "perm_milk_quality"):
+        return jsonify({"error": "Permission denied."}), 403
+    days_raw = (request.args.get("days") or "").strip()
+    days = None
+    if days_raw:
+        try:
+            days = int(days_raw)
+        except ValueError:
+            return jsonify({"error": "days must be a whole number."}), 400
+        if days < 1:
+            return jsonify({"error": "days must be at least 1."}), 400
+        if days > 400:
+            return jsonify({"error": "days must be 400 or fewer."}), 400
+    force = (request.args.get("force") or "").strip().lower() in {"1", "true", "yes"}
+    started, message = start_nml_import_job(days=days, force=force)
+    if not started:
+        return jsonify({"error": message}), 400
+    return jsonify({"status": "started", "message": message})
+
+
+@app.route("/milk-quality/api/collections/manual")
+def milk_quality_api_manual_get():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    farm = (request.args.get("farm") or "").strip()
+    sample_date = _parse_iso_date_arg("date")
+    if not farm:
+        return jsonify({"error": "farm is required."}), 400
+    if not sample_date:
+        return jsonify({"error": "date is required (YYYY-MM-DD)."}), 400
+    if sample_date is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    try:
+        return jsonify(get_collection_day(farm=farm, sample_date=sample_date))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/milk-quality/api/collections", methods=["POST"])
+def milk_quality_api_collections_save():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    farm = (payload.get("farm") or "").strip()
+    raw_date = (payload.get("date") or payload.get("sample_date") or "").strip()
+    try:
+        sample_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    loads = payload.get("loads") or []
+    if not isinstance(loads, list):
+        return jsonify({"error": "loads must be a list."}), 400
+    try:
+        return jsonify(save_collection_day(farm=farm, sample_date=sample_date, loads=loads))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

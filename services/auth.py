@@ -21,6 +21,7 @@ PERMISSION_KEYS = (
     "perm_events",
     "perm_stock",
     "perm_genetics",
+    "perm_milk_quality",
     "perm_sync_outlook",
     "perm_sync_onedrive",
     "perm_sync_dataflow",
@@ -33,6 +34,7 @@ PERMISSION_LABELS = {
     "perm_events": "Events",
     "perm_stock": "Stock Inventory",
     "perm_genetics": "Genetics",
+    "perm_milk_quality": "Milk Quality",
     "perm_sync_outlook": "Sync Outlook",
     "perm_sync_onedrive": "Sync OneDrive",
     "perm_sync_dataflow": "Sync DataFlow",
@@ -295,6 +297,7 @@ def first_allowed_endpoint(user: User) -> str:
         ("perm_events", "events"),
         ("perm_stock", "stock_inventory"),
         ("perm_genetics", "genetics"),
+        ("perm_milk_quality", "milk_quality"),
     )
     for perm, endpoint in mapping:
         if user_has_permission(user, perm):

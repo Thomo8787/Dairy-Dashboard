@@ -23,3 +23,6 @@ apscheduler==3.10.4
 
 # PDF exports for stock inventory tables
 reportlab==4.2.5
+
+# NML milk-quality report PDFs
+pdfplumber==0.11.5

@@ -87,6 +87,7 @@ class User(Base):
     perm_stock = Column(Boolean, nullable=False, default=False)
     perm_events = Column(Boolean, nullable=False, default=False)
     perm_genetics = Column(Boolean, nullable=False, default=False)
+    perm_milk_quality = Column(Boolean, nullable=False, default=False)
     perm_sync_outlook = Column(Boolean, nullable=False, default=False)
     perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
     perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
@@ -338,6 +339,48 @@ class GenomicResult(Base):
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class NmlMilkResult(Base):
+    """Per-collection milk quality from NML report PDFs (emailed daily)."""
+
+    __tablename__ = "nml_milk_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "producer_ref",
+            "sample_date",
+            "sample_id",
+            name="uq_nml_producer_sample",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), index=True)
+    producer_ref = Column(String(32), nullable=False, index=True)
+    milk_buyer = Column(String(64))
+    report_month = Column(String(16))
+    report_date = Column(Date)
+    sample_date = Column(Date, nullable=False, index=True)
+    sample_id = Column(String(32), nullable=False)
+    load_number = Column(Integer)
+    litres_load = Column(Float)
+    litres_weighbridge = Column(Float)
+    temp_c = Column(Float)
+    butterfat_pct = Column(Float)
+    protein_pct = Column(Float)
+    scc = Column(Integer)
+    bactoscan = Column(Integer)
+    fpd = Column(Integer)
+    antibiotic_pass = Column(Boolean)
+    urea_pct = Column(Float)
+    sample_missing = Column(Boolean, nullable=False, default=False)
+    nml_matched = Column(Boolean, nullable=False, default=False)
+    source = Column(String(32))
+    source_message_id = Column(String(256))
+    source_file = Column(String(256))
+    imported_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class BreedingSireClassification(Base):
     """Manual beef/dairy classification for breeding sires without .b/.s suffix."""
 
@@ -408,6 +451,7 @@ def _ensure_user_permission_columns(engine) -> None:
         "perm_events": "ALTER TABLE users ADD COLUMN perm_events BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_stock": "ALTER TABLE users ADD COLUMN perm_stock BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_genetics": "ALTER TABLE users ADD COLUMN perm_genetics BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_milk_quality": "ALTER TABLE users ADD COLUMN perm_milk_quality BOOLEAN NOT NULL DEFAULT FALSE",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():
@@ -449,11 +493,39 @@ def _ensure_herd_inventory_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_nml_milk_result_columns(engine) -> None:
+    """create_all will not add new columns to an existing nml_milk_results table."""
+    inspector = inspect(engine)
+    if "nml_milk_results" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("nml_milk_results")}
+    needed = {
+        "load_number": "ALTER TABLE nml_milk_results ADD COLUMN load_number INTEGER",
+        "litres_load": "ALTER TABLE nml_milk_results ADD COLUMN litres_load FLOAT",
+        "litres_weighbridge": "ALTER TABLE nml_milk_results ADD COLUMN litres_weighbridge FLOAT",
+        "sample_missing": (
+            "ALTER TABLE nml_milk_results ADD COLUMN sample_missing BOOLEAN "
+            "NOT NULL DEFAULT FALSE"
+        ),
+        "source": "ALTER TABLE nml_milk_results ADD COLUMN source VARCHAR(32)",
+        "temp_c": "ALTER TABLE nml_milk_results ADD COLUMN temp_c FLOAT",
+        "nml_matched": (
+            "ALTER TABLE nml_milk_results ADD COLUMN nml_matched BOOLEAN "
+            "NOT NULL DEFAULT FALSE"
+        ),
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_user_permission_columns(engine)
     _ensure_herd_inventory_columns(engine)
+    _ensure_nml_milk_result_columns(engine)
     return engine
 
 

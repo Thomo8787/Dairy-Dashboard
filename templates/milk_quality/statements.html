@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}Statements · {{ app_name }}{% endblock %}
+{% block page_title %}Statements{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 2.5rem; padding: 0.45rem 0.4rem;
+      border: 2px solid var(--line); border-radius: 8px;
+      background: #f3f4f6; color: var(--muted);
+      font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+    }
+    select#fiscal-year {
+      width: 100%; padding: 0.45rem 0.5rem;
+      border: 1px solid var(--line); border-radius: 6px; background: #fff;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    #stmt-table { width: 100%; border-collapse: collapse; }
+    #stmt-table th, #stmt-table td {
+      padding: 0.45rem 0.55rem; text-align: right;
+      border-bottom: 1px solid var(--line); white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    #stmt-table th:first-child, #stmt-table td:first-child { text-align: left; }
+    #stmt-table thead th { background: #1e3a5f; color: #fff; font-weight: 600; }
+    #stmt-table tbody tr.total td { font-weight: 700; background: #eef3f8; }
+    #stmt-table tbody tr.empty td { color: var(--muted); }
+    .empty-state { padding: 1.5rem; color: var(--muted); text-align: left; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button
+              type="button"
+              class="slicer-btn{% if farm.code == 'ALH' %} selected{% endif %}"
+              data-value="{{ farm.code }}"
+              aria-pressed="{{ 'true' if farm.code == 'ALH' else 'false' }}"
+            >{{ farm.code }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Fiscal year</span>
+          <select id="fiscal-year" aria-label="Fiscal year"></select>
+        </div>
+        <p class="help-text">
+          Monthly quality averages from NML samples (Apr–Mar). Buyer litres and milk price
+          will appear when payment statements are imported.
+        </p>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <div class="table-wrap">
+        <table id="stmt-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Samples</th>
+              <th>Butterfat %</th>
+              <th>Protein %</th>
+              <th>SCC</th>
+              <th>BactoScan</th>
+              <th>Urea</th>
+              <th>FPD</th>
+              <th>A/B fails</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td colspan="9" class="empty-state">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const farmSlicer = document.getElementById("farm-slicer");
+  const yearSelect = document.getElementById("fiscal-year");
+  const meta = document.getElementById("meta-line");
+  const tbody = document.getElementById("table-body");
+
+  function selectedFarms() {
+    return [...farmSlicer.querySelectorAll(".slicer-btn.selected")].map((b) => b.dataset.value);
+  }
+
+  function num(value, digits) {
+    if (value == null || value === "") return "—";
+    const n = Number(value);
+    return Number.isNaN(n) ? "—" : n.toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  }
+
+  function intFmt(value) {
+    if (value == null || value === "") return "—";
+    const n = Number(value);
+    return Number.isNaN(n) ? "—" : Math.round(n).toLocaleString();
+  }
+
+  function render(data) {
+    meta.textContent = (data.farm_label || "") + " · " + (data.fiscal_year_label || "") +
+      (data.months_with_data ? " · " + data.months_with_data + " month(s) with samples" : " · no NML samples yet");
+    const options = data.fiscal_year_options || [];
+    const current = String(data.fiscal_year || "");
+    if (yearSelect.options.length !== options.length) {
+      yearSelect.innerHTML = options.map((y) =>
+        `<option value="${y}">Apr ${y - 1} – Mar ${y}</option>`
+      ).join("");
+    }
+    if (current) yearSelect.value = current;
+
+    const rows = (data.rows || []).concat(data.total ? [data.total] : []);
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No NML samples for this year.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((row) => {
+      const cls = row.is_total ? "total" : row.has_data ? "" : "empty";
+      return `<tr class="${cls}">` +
+        `<td>${row.month_label || ""}</td>` +
+        `<td>${intFmt(row.sample_count)}</td>` +
+        `<td>${num(row.butterfat_pct, 2)}</td>` +
+        `<td>${num(row.protein_pct, 2)}</td>` +
+        `<td>${intFmt(row.scc)}</td>` +
+        `<td>${intFmt(row.bactoscan)}</td>` +
+        `<td>${num(row.urea_pct, 3)}</td>` +
+        `<td>${intFmt(row.fpd)}</td>` +
+        `<td>${intFmt(row.antibiotic_fails)}</td>` +
+        `</tr>`;
+    }).join("");
+  }
+
+  async function load() {
+    meta.textContent = "Loading…";
+    const params = new URLSearchParams();
+    selectedFarms().forEach((f) => params.append("farm", f));
+    if (yearSelect.value) params.set("fiscal_year", yearSelect.value);
+    try {
+      const res = await fetch("/milk-quality/api/statements?" + params.toString());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load statements");
+      render(data);
+    } catch (err) {
+      meta.textContent = err.message || "Failed to load statements";
+    }
+  }
+
+  farmSlicer.addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    const selected = btn.classList.contains("selected");
+    const count = farmSlicer.querySelectorAll(".slicer-btn.selected").length;
+    if (selected && count <= 1) return;
+    btn.classList.toggle("selected");
+    btn.setAttribute("aria-pressed", btn.classList.contains("selected"));
+    load();
+  });
+  yearSelect.addEventListener("change", load);
+  load();
+})();
+</script>
+{% endblock %}
