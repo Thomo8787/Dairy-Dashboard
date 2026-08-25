@@ -5,7 +5,7 @@ services:
   - type: web
     name: dairy-dashboard
     runtime: python
-    plan: free
+    plan: starter
     branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 180 --workers 1
@@ -17,7 +17,7 @@ services:
         value: "false"
       - key: FLASK_USE_RELOADER
         value: "false"
-      # Hourly fetch is handled by the cron service below (web free tier sleeps).
+      # In-process hourly fetch is off; Render cron jobs handle mailbox imports.
       - key: PARLOUR_HOURLY_SYNC
         value: "false"
       - key: SECRET_KEY
