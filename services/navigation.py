@@ -39,6 +39,18 @@ NAV_ITEMS = [
                 "endpoint": "stall_issues",
                 "permission": "perm_parlours",
             },
+            {
+                "id": "scatter_graphs",
+                "label": "Scatter Graphs",
+                "endpoint": "scatter_graphs",
+                "permission": "perm_parlours",
+            },
+            {
+                "id": "parlour_efficiency",
+                "label": "Efficiency",
+                "endpoint": "parlour_efficiency",
+                "permission": "perm_parlours",
+            },
         ],
     },
     {

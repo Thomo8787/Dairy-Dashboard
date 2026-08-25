@@ -1,0 +1,1077 @@
+{% extends "base.html" %}
+
+{% block title %}Scatter Graphs · {{ app_name }}{% endblock %}
+{% block page_title %}Scatter Graphs{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer,
+    .shift-slicer { display: grid; gap: 0.5rem; }
+    .farm-slicer { grid-template-columns: 1fr 1fr; }
+    .shift-slicer { grid-template-columns: 1fr; }
+    .slicer-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0.45rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .shift-slicer .slicer-btn.selected {
+      background: #1e3a5f;
+      border-color: #1e3a5f;
+      color: #fff;
+    }
+    select#metric-select {
+      width: 100%;
+      padding: 0.45rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      font-size: 0.875rem;
+    }
+    .dual-range {
+      position: relative;
+      height: 2rem;
+      margin: 0.35rem 0 0.5rem;
+    }
+    .dual-range input[type="range"] {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      margin: 0;
+      pointer-events: none;
+      appearance: none;
+      background: transparent;
+      height: 2rem;
+    }
+    .dual-range input[type="range"]::-webkit-slider-thumb {
+      pointer-events: auto;
+      appearance: none;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 50%;
+      background: #1e3a5f;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #1e3a5f;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+    .dual-range input[type="range"]::-moz-range-thumb {
+      pointer-events: auto;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 50%;
+      background: #1e3a5f;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #1e3a5f;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+    .dual-range input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: #d1d5db;
+      border-radius: 999px;
+    }
+    .dual-range input[type="range"]::-moz-range-track {
+      height: 4px;
+      background: #d1d5db;
+      border-radius: 999px;
+    }
+    .dual-range input[type="range"].range-max::-webkit-slider-thumb { z-index: 3; }
+    .date-range-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .chart-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .chart-toolbar .help-text { margin: 0; flex: 1; min-width: 12rem; }
+    .chart-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #1e3a5f;
+    }
+    .chart-btn:hover { background: #f3f4f6; }
+    .chart-wrap {
+      position: relative;
+      height: min(70vh, 640px);
+      width: 100%;
+    }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0.5rem 0 0; }
+    .shift-hint { font-size: 0.75rem; color: var(--muted); margin: 0.35rem 0 0; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button
+              type="button"
+              class="slicer-btn{% if farm.code == 'ALH' %} selected{% endif %}"
+              data-value="{{ farm.code }}"
+              aria-pressed="{{ 'true' if farm.code == 'ALH' else 'false' }}"
+            >{{ farm.code }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Metric</span>
+          <select id="metric-select" aria-label="Metric"></select>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Date range</span>
+          <div class="dual-range">
+            <input type="range" id="date-from-slider" min="0" max="0" value="0" aria-label="From date">
+            <input type="range" id="date-to-slider" class="range-max" min="0" max="0" value="0" aria-label="To date">
+          </div>
+          <div class="date-range-labels">
+            <span id="date-from-label">—</span>
+            <span id="date-to-label">—</span>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Shift</span>
+          <div class="shift-slicer" id="shift-slicer" role="group" aria-label="Shift">
+            <button type="button" class="slicer-btn selected" data-value="Morning" aria-pressed="true">Morning</button>
+            <button type="button" class="slicer-btn selected" data-value="Day" aria-pressed="true">Day</button>
+            <button type="button" class="slicer-btn selected" data-value="Night" aria-pressed="true">Night</button>
+          </div>
+          <p class="shift-hint">Click to toggle. All, none, or any combination.</p>
+        </div>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <div class="chart-card">
+        <div class="chart-toolbar">
+          <p class="help-text" id="chart-help">
+            Each point is one cow milking. Pink line = average of the selected metric for each date × shift.
+            Left-drag to zoom; right-drag to pan; Reset zoom to return.
+          </p>
+          <button type="button" class="chart-btn" id="reset-zoom-btn">Reset zoom</button>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="scatter-canvas"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script>
+(function () {
+  const farmSlicer = document.getElementById("farm-slicer");
+  const shiftSlicer = document.getElementById("shift-slicer");
+  const metricSelect = document.getElementById("metric-select");
+  const fromSlider = document.getElementById("date-from-slider");
+  const toSlider = document.getElementById("date-to-slider");
+  const fromLabel = document.getElementById("date-from-label");
+  const toLabel = document.getElementById("date-to-label");
+  const meta = document.getElementById("meta-line");
+  const help = document.getElementById("chart-help");
+  const canvas = document.getElementById("scatter-canvas");
+  const resetZoomBtn = document.getElementById("reset-zoom-btn");
+
+  const ATTACHMENT_METRIC = "attachments";
+  const SHIFT_COLORS = {
+    Morning: "#1e3a5f",
+    Day: "#c45c26",
+    Afternoon: "#c45c26",
+    Evening: "#5a9fd4",
+    Night: "#5a9fd4",
+  };
+  const SHIFT_ORDER = ["Morning", "Day", "Night"];
+  const BIN_MS = 5 * 60 * 1000;
+  const GAP_COLOR = "#b45309";
+  const REGRESSION_COLOR = "#ec4899";
+
+  let farm = "ALH";
+  let selectedShifts = new Set(["Morning", "Day", "Night"]);
+  let dateList = [];
+  let chart = null;
+  let loadTimer = null;
+  let metrics = [];
+  let rightPanCleanup = null;
+
+  function bindRightClickPan(chartInstance, mode) {
+    if (rightPanCleanup) {
+      rightPanCleanup();
+      rightPanCleanup = null;
+    }
+    if (!chartInstance || !chartInstance.canvas) return;
+
+    const canvasEl = chartInstance.canvas;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    function onContextMenu(e) { e.preventDefault(); }
+    function onPointerDown(e) {
+      if (e.button !== 2) return;
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      canvasEl.setPointerCapture?.(e.pointerId);
+      canvasEl.style.cursor = "grabbing";
+      e.preventDefault();
+    }
+    function onPointerMove(e) {
+      if (!dragging || typeof chartInstance.pan !== "function") return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      const delta = { x: 0, y: 0 };
+      if (mode === "x" || mode === "xy") delta.x = dx;
+      if (mode === "y" || mode === "xy") delta.y = dy;
+      if (delta.x || delta.y) chartInstance.pan(delta);
+    }
+    function endDrag(e) {
+      if (!dragging) return;
+      if (e && e.pointerId != null) {
+        try { canvasEl.releasePointerCapture?.(e.pointerId); } catch (_) { /* already released */ }
+      }
+      dragging = false;
+      canvasEl.style.cursor = "";
+    }
+
+    canvasEl.addEventListener("contextmenu", onContextMenu);
+    canvasEl.addEventListener("pointerdown", onPointerDown);
+    canvasEl.addEventListener("pointermove", onPointerMove);
+    canvasEl.addEventListener("pointerup", endDrag);
+    canvasEl.addEventListener("pointercancel", endDrag);
+
+    rightPanCleanup = () => {
+      endDrag();
+      canvasEl.removeEventListener("contextmenu", onContextMenu);
+      canvasEl.removeEventListener("pointerdown", onPointerDown);
+      canvasEl.removeEventListener("pointermove", onPointerMove);
+      canvasEl.removeEventListener("pointerup", endDrag);
+      canvasEl.removeEventListener("pointercancel", endDrag);
+      canvasEl.style.cursor = "";
+    };
+  }
+
+  const gapLabelPlugin = {
+    id: "gapLabels",
+    afterDatasetsDraw(chartInstance) {
+      const ctx = chartInstance.ctx;
+      chartInstance.data.datasets.forEach((ds, datasetIndex) => {
+        if (!ds.isGapDataset) return;
+        const metaDs = chartInstance.getDatasetMeta(datasetIndex);
+        if (!metaDs || metaDs.hidden) return;
+        metaDs.data.forEach((el, idx) => {
+          const raw = ds.data[idx];
+          if (!raw || raw.gap_minutes == null) return;
+          const props = el.getProps(["x", "y"], true);
+          const label = `${raw.gap_minutes}m`;
+          ctx.save();
+          ctx.font = "600 11px system-ui, Segoe UI, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          const textWidth = ctx.measureText(label).width;
+          const padX = 4;
+          const padY = 2;
+          const boxW = textWidth + padX * 2;
+          const boxH = 14;
+          const boxX = props.x - boxW / 2;
+          const boxY = props.y - 22;
+          ctx.fillStyle = "#fff7ed";
+          ctx.strokeStyle = GAP_COLOR;
+          ctx.lineWidth = 1.25;
+          ctx.fillRect(boxX, boxY, boxW, boxH);
+          ctx.strokeRect(boxX, boxY, boxW, boxH);
+          ctx.fillStyle = GAP_COLOR;
+          ctx.fillText(label, props.x, boxY + boxH - padY);
+          ctx.restore();
+        });
+      });
+    },
+  };
+
+  function normalizeShift(shift) {
+    if (shift === "Afternoon" || shift === "Noon") return "Day";
+    if (shift === "Evening") return "Night";
+    return shift;
+  }
+
+  function isoFromParts(y, m, d) {
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  function parseIso(iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function formatShortDate(iso) {
+    if (!iso) return "—";
+    return parseIso(iso).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function formatTick(ms) {
+    const d = new Date(ms);
+    const day = d.getUTCDate();
+    const mon = d.toLocaleString(undefined, { month: "short", timeZone: "UTC" });
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${day} ${mon} ${hh}:${mm}`;
+  }
+
+  function formatTooltipTime(ms) {
+    const d = new Date(ms);
+    const day = d.getUTCDate();
+    const mon = d.toLocaleString(undefined, { month: "short", timeZone: "UTC" });
+    const year = d.getUTCFullYear();
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    const ss = String(d.getUTCSeconds()).padStart(2, "0");
+    return `${day} ${mon} ${year} ${hh}:${mm}:${ss}`;
+  }
+
+  function formatBinRange(ms) {
+    const start = formatTooltipTime(ms).replace(/:\d{2}$/, "");
+    const endMs = ms + BIN_MS;
+    const d = new Date(endMs);
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${start} – ${hh}:${mm}`;
+  }
+
+  function buildDateList(dateMin, dateMax) {
+    if (!dateMin || !dateMax) return [];
+    const start = parseIso(dateMin);
+    const end = parseIso(dateMax);
+    const out = [];
+    for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+      const d = new Date(t);
+      out.push(isoFromParts(d.getFullYear(), d.getMonth() + 1, d.getDate()));
+    }
+    return out;
+  }
+
+  function syncDateLabels() {
+    if (!dateList.length) {
+      fromLabel.textContent = "—";
+      toLabel.textContent = "—";
+      return;
+    }
+    fromLabel.textContent = formatShortDate(dateList[Number(fromSlider.value)] || dateList[0]);
+    toLabel.textContent = formatShortDate(dateList[Number(toSlider.value)] || dateList[dateList.length - 1]);
+  }
+
+  function setupDateSliders(dateMin, dateMax, keepSelection) {
+    const prevFrom = keepSelection && dateList.length ? dateList[Number(fromSlider.value)] : null;
+    const prevTo = keepSelection && dateList.length ? dateList[Number(toSlider.value)] : null;
+    dateList = buildDateList(dateMin, dateMax);
+    const maxIdx = Math.max(0, dateList.length - 1);
+    fromSlider.min = "0";
+    fromSlider.max = String(maxIdx);
+    toSlider.min = "0";
+    toSlider.max = String(maxIdx);
+
+    let fromIdx = 0;
+    let toIdx = maxIdx;
+    if (keepSelection && prevFrom && prevTo) {
+      fromIdx = dateList.indexOf(prevFrom);
+      toIdx = dateList.indexOf(prevTo);
+      if (fromIdx < 0) fromIdx = 0;
+      if (toIdx < 0) toIdx = maxIdx;
+    } else if (dateList.length > 7) {
+      fromIdx = Math.max(0, maxIdx - 6);
+    }
+    if (fromIdx > toIdx) [fromIdx, toIdx] = [toIdx, fromIdx];
+    fromSlider.value = String(fromIdx);
+    toSlider.value = String(toIdx);
+    syncDateLabels();
+  }
+
+  function selectedDateFrom() {
+    if (!dateList.length) return null;
+    return dateList[Number(fromSlider.value)] || dateList[0];
+  }
+
+  function selectedDateTo() {
+    if (!dateList.length) return null;
+    return dateList[Number(toSlider.value)] || dateList[dateList.length - 1];
+  }
+
+  function destroyChart() {
+    if (rightPanCleanup) {
+      rightPanCleanup();
+      rightPanCleanup = null;
+    }
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+  }
+
+  function linearRegression(points) {
+    if (!points || points.length < 2) return null;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+    const n = points.length;
+    for (const p of points) {
+      sumX += p.x;
+      sumY += p.y;
+      sumXY += p.x * p.y;
+      sumXX += p.x * p.x;
+    }
+    const denom = n * sumXX - sumX * sumX;
+    if (denom === 0) return null;
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const intercept = (sumY - slope * sumX) / n;
+    const meanY = sumY / n;
+    let ssTot = 0;
+    let ssRes = 0;
+    for (const p of points) {
+      const predicted = slope * p.x + intercept;
+      ssRes += (p.y - predicted) ** 2;
+      ssTot += (p.y - meanY) ** 2;
+    }
+    const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+    return { slope, intercept, r2 };
+  }
+
+  function resetZoom() {
+    if (chart && typeof chart.resetZoom === "function") chart.resetZoom();
+  }
+
+  function shiftLabelText() {
+    if (selectedShifts.size === 0) return "no shifts";
+    if (selectedShifts.size === 3) return "all shifts";
+    return [...selectedShifts].join(", ");
+  }
+
+  function renderScatterChart(data) {
+    destroyChart();
+    const byShift = {};
+    for (const shift of SHIFT_ORDER) byShift[shift] = [];
+    for (const p of data.points || []) {
+      const shift = normalizeShift(p.shift);
+      if (!byShift[shift]) byShift[shift] = [];
+      byShift[shift].push({
+        x: p.x,
+        y: p.y,
+        cow_id: p.cow_id,
+        milking_point: p.milking_point,
+        shift,
+      });
+    }
+
+    const datasets = SHIFT_ORDER.filter((s) => byShift[s] && byShift[s].length).map((shift) => ({
+      type: "scatter",
+      label: shift,
+      data: byShift[shift],
+      backgroundColor: SHIFT_COLORS[shift] || "#666",
+      borderColor: SHIFT_COLORS[shift] || "#666",
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      order: 2,
+    }));
+
+    const avgSeries = (data.shift_day_averages || []).map((p) => ({
+      x: p.x,
+      y: p.y,
+      shift: p.shift,
+      milking_date: p.milking_date,
+      n: p.n,
+      isShiftDayAvg: true,
+    }));
+    if (avgSeries.length) {
+      datasets.push({
+        type: "line",
+        label: "Shift-day average",
+        data: avgSeries,
+        borderColor: "#ec4899",
+        backgroundColor: "#ec4899",
+        borderWidth: 2.5,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: "#ec4899",
+        pointBorderColor: "#fff",
+        pointBorderWidth: 1.5,
+        tension: 0.15,
+        order: 1,
+      });
+    }
+
+    const digits = data.digits != null ? data.digits : 1;
+    const unit = data.unit || "";
+
+    chart = new Chart(canvas, {
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { position: "top" },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const raw = items[0] && items[0].raw;
+                return raw ? formatTooltipTime(raw.x) : "";
+              },
+              label: (ctx) => {
+                const raw = ctx.raw || {};
+                const y = ctx.parsed.y;
+                const yText =
+                  y == null
+                    ? "—"
+                    : `${Number(y).toLocaleString(undefined, {
+                        maximumFractionDigits: digits,
+                        minimumFractionDigits: 0,
+                      })}${unit ? ` ${unit}` : ""}`;
+                if (raw.isShiftDayAvg) {
+                  const n = raw.n != null ? ` · n=${raw.n}` : "";
+                  return `Shift-day avg (${raw.shift || "?"}): ${yText}${n}`;
+                }
+                const point =
+                  raw.milking_point != null ? ` · Point ${raw.milking_point}` : "";
+                return `${ctx.dataset.label}: ${yText} · Cow ${raw.cow_id || "?"}${point}`;
+              },
+            },
+          },
+          zoom: {
+            pan: { enabled: false },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: "rgba(30,58,95,0.15)",
+                borderColor: "rgba(30,58,95,0.6)",
+                borderWidth: 1,
+              },
+              mode: "xy",
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            title: { display: true, text: "Start milking (date & time)" },
+            ticks: {
+              maxRotation: 45,
+              minRotation: 0,
+              callback: (value) => formatTick(value),
+              maxTicksLimit: 10,
+            },
+          },
+          y: {
+            title: { display: true, text: data.metric_label || "Metric" },
+            beginAtZero: false,
+          },
+        },
+      },
+    });
+    bindRightClickPan(chart, "xy");
+  }
+
+  function renderAttachmentBars(data) {
+    destroyChart();
+    const byShift = {};
+    for (const shift of SHIFT_ORDER) byShift[shift] = new Map();
+    let maxCount = 0;
+    for (const bin of data.bins || []) {
+      const shift = normalizeShift(bin.shift);
+      if (!byShift[shift]) byShift[shift] = new Map();
+      const next = (byShift[shift].get(bin.x) || 0) + (Number(bin.y) || 0);
+      byShift[shift].set(bin.x, next);
+    }
+    const totalsByX = new Map();
+    for (const shift of SHIFT_ORDER) {
+      const map = byShift[shift];
+      if (!map) continue;
+      for (const [x, y] of map.entries()) {
+        const total = (totalsByX.get(x) || 0) + y;
+        totalsByX.set(x, total);
+        if (total > maxCount) maxCount = total;
+      }
+    }
+    for (const shift of Object.keys(byShift)) {
+      byShift[shift] = [...byShift[shift].entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([x, y]) => ({ x, y, shift }));
+    }
+
+    const markerY = Math.max(1, maxCount) + Math.max(1, Math.ceil(maxCount * 0.08));
+    const gapPoints = (data.gaps || []).map((g) => ({
+      x: g.x,
+      y: markerY,
+      gap_minutes: g.gap_minutes,
+      shift: normalizeShift(g.shift),
+      milking_date: g.milking_date,
+      isGap: true,
+    }));
+
+    const datasets = SHIFT_ORDER.filter((s) => byShift[s] && byShift[s].length).map((shift) => ({
+      type: "bar",
+      label: shift,
+      data: byShift[shift],
+      backgroundColor: SHIFT_COLORS[shift] || "#666",
+      borderColor: SHIFT_COLORS[shift] || "#666",
+      borderWidth: 0,
+      stack: "attachments",
+      barPercentage: 1,
+      categoryPercentage: 1,
+      maxBarThickness: 28,
+      order: 2,
+    }));
+
+    if (gapPoints.length) {
+      datasets.push({
+        type: "scatter",
+        label: "Gaps > 5 min",
+        data: gapPoints,
+        isGapDataset: true,
+        backgroundColor: GAP_COLOR,
+        borderColor: "#fff",
+        borderWidth: 1.5,
+        pointStyle: "rectRot",
+        pointRadius: 7,
+        pointHoverRadius: 9,
+        showLine: false,
+        order: 0,
+      });
+    }
+
+    chart = new Chart(canvas, {
+      type: "bar",
+      data: { datasets },
+      plugins: [gapLabelPlugin],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        parsing: false,
+        plugins: {
+          legend: { position: "top" },
+          tooltip: {
+            mode: "nearest",
+            intersect: true,
+            callbacks: {
+              title: (items) => {
+                const raw = items[0] && items[0].raw;
+                if (!raw) return "";
+                if (raw.isGap) return formatTooltipTime(raw.x);
+                return formatBinRange(raw.x);
+              },
+              label: (ctx) => {
+                const raw = ctx.raw || {};
+                if (raw.isGap) {
+                  return `Gap: ${raw.gap_minutes} minute(s) between attachments (${raw.shift || "?"})`;
+                }
+                const y = ctx.parsed.y;
+                if (y == null || y === 0) return null;
+                return `${ctx.dataset.label}: ${Number(y).toLocaleString()} attachment(s)`;
+              },
+            },
+          },
+          zoom: {
+            pan: { enabled: false },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: "rgba(30,58,95,0.15)",
+                borderColor: "rgba(30,58,95,0.6)",
+                borderWidth: 1,
+              },
+              mode: "x",
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            stacked: true,
+            offset: false,
+            title: { display: true, text: "Attachment time (5-minute bins)" },
+            ticks: {
+              maxRotation: 45,
+              minRotation: 0,
+              callback: (value) => formatTick(value),
+              maxTicksLimit: 12,
+            },
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            suggestedMax: markerY + 1,
+            ticks: { precision: 0 },
+            title: { display: true, text: "Attachments" },
+          },
+        },
+      },
+    });
+    bindRightClickPan(chart, "x");
+  }
+
+  function renderLagXyChart(data) {
+    destroyChart();
+    const digits = data.digits != null ? data.digits : 1;
+    const unit = data.unit || "";
+    const xLabel = data.x_label || "Lag phase";
+    const xUnit = data.x_unit || "s";
+    const yLabel = data.y_label || data.metric_label || "Metric";
+    const points = (data.points || []).map((p) => ({
+      x: p.x,
+      y: p.y,
+      shift: normalizeShift(p.shift),
+      cow_id: p.cow_id,
+      milking_point: p.milking_point,
+      milking_date: p.milking_date,
+    }));
+
+    const byShift = {};
+    for (const shift of SHIFT_ORDER) byShift[shift] = [];
+    for (const p of points) {
+      if (!byShift[p.shift]) byShift[p.shift] = [];
+      byShift[p.shift].push(p);
+    }
+
+    const datasets = SHIFT_ORDER.filter((s) => byShift[s] && byShift[s].length).map((shift) => ({
+      type: "scatter",
+      label: shift,
+      data: byShift[shift],
+      backgroundColor: SHIFT_COLORS[shift] || "#666",
+      borderColor: SHIFT_COLORS[shift] || "#666",
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      order: 2,
+    }));
+
+    const fit = linearRegression(points);
+    let fitText = "";
+    if (fit) {
+      const xs = points.map((p) => p.x);
+      let xMin = Math.min(...xs);
+      let xMax = Math.max(...xs);
+      if (xMin === xMax) {
+        const pad = Math.abs(xMin) * 0.05 || 1;
+        xMin -= pad;
+        xMax += pad;
+      }
+      datasets.unshift({
+        type: "line",
+        label: "Regression",
+        data: [
+          { x: xMin, y: fit.slope * xMin + fit.intercept, isFit: true },
+          { x: xMax, y: fit.slope * xMax + fit.intercept, isFit: true },
+        ],
+        borderColor: REGRESSION_COLOR,
+        backgroundColor: "transparent",
+        borderWidth: 2.5,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        showLine: true,
+        fill: false,
+        tension: 0,
+        order: 0,
+      });
+      fitText = ` · R²=${fit.r2.toFixed(3)}`;
+    }
+
+    meta.textContent =
+      `${farm} · ${data.metric_label || "Lag phase"} · ${formatShortDate(selectedDateFrom())} – ${formatShortDate(selectedDateTo())} · ${shiftLabelText()} · ${points.length.toLocaleString()} point(s)${fitText}`;
+    help.textContent =
+      "Each point is one cow milking. X = lag phase. Pink dashed line = linear regression. Left-drag to zoom; right-drag to pan; Reset zoom to return.";
+
+    chart = new Chart(canvas, {
+      type: "scatter",
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { position: "top" },
+          tooltip: {
+            callbacks: {
+              title: () => xLabel,
+              label: (ctx) => {
+                const raw = ctx.raw || {};
+                if (raw.isFit || ctx.dataset.type === "line") {
+                  return `Fit: ${Number(ctx.parsed.y).toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+                }
+                const xText = `${Number(ctx.parsed.x).toLocaleString(undefined, {
+                  maximumFractionDigits: 0,
+                })}${xUnit ? ` ${xUnit}` : ""}`;
+                const yText = `${Number(ctx.parsed.y).toLocaleString(undefined, {
+                  maximumFractionDigits: digits,
+                  minimumFractionDigits: 0,
+                })}${unit ? ` ${unit}` : ""}`;
+                const point =
+                  raw.milking_point != null ? ` · Point ${raw.milking_point}` : "";
+                return `${ctx.dataset.label}: lag ${xText}, ${yText} · Cow ${raw.cow_id || "?"}${point}`;
+              },
+            },
+          },
+          zoom: {
+            pan: { enabled: false },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: "rgba(30,58,95,0.15)",
+                borderColor: "rgba(30,58,95,0.6)",
+                borderWidth: 1,
+              },
+              mode: "xy",
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            title: { display: true, text: xUnit ? `${xLabel} (${xUnit})` : xLabel },
+          },
+          y: {
+            title: { display: true, text: unit ? `${yLabel} (${unit})` : yLabel },
+            beginAtZero: false,
+          },
+        },
+      },
+    });
+    bindRightClickPan(chart, "xy");
+  }
+
+  async function loadBoundsAndChart(resetDates) {
+    meta.textContent = "Loading…";
+    try {
+      const boundsRes = await fetch(
+        "/parlours/api/scatter/bounds?" + new URLSearchParams({ farm })
+      );
+      if (!boundsRes.ok) throw new Error(await boundsRes.text());
+      const bounds = await boundsRes.json();
+      if (!bounds.date_min || !bounds.date_max) {
+        setupDateSliders(null, null, false);
+        destroyChart();
+        meta.textContent = `${farm} · no milk-flow data yet`;
+        return;
+      }
+      setupDateSliders(bounds.date_min, bounds.date_max, !resetDates);
+      await loadChart();
+    } catch (err) {
+      meta.textContent = "Failed to load";
+      console.error(err);
+    }
+  }
+
+  async function loadChart() {
+    const dateFrom = selectedDateFrom();
+    const dateTo = selectedDateTo();
+    const metric = metricSelect.value;
+    if (!metric || !dateFrom || !dateTo) return;
+
+    meta.textContent = "Loading…";
+    const params = new URLSearchParams({
+      farm,
+      metric,
+      date_from: dateFrom,
+      date_to: dateTo,
+      shifts: [...selectedShifts].join(","),
+    });
+    try {
+      const res = await fetch("/parlours/api/scatter?" + params.toString());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.detail || "Failed to load chart");
+
+      if (metric === ATTACHMENT_METRIC || data.chart === "bars") {
+        const gaps = data.gap_count || (data.gaps || []).length;
+        meta.textContent =
+          `${farm} · Attachments · ${formatShortDate(dateFrom)} – ${formatShortDate(dateTo)} · ${shiftLabelText()} · ${(data.attachment_count || 0).toLocaleString()} attachment(s)` +
+          (gaps ? ` · ${gaps.toLocaleString()} gap(s) > 5 min` : "");
+        help.textContent =
+          "Bars = attachments in each 5-minute bin, coloured by shift. Amber markers show gaps longer than 5 minutes between consecutive cows in the same shift. Left-drag to zoom; right-drag to pan.";
+        if (!data.attachment_count) {
+          destroyChart();
+          return;
+        }
+        renderAttachmentBars(data);
+        return;
+      }
+
+      if (data.chart === "lag_xy" || String(metric).startsWith("lag_vs_")) {
+        if (!data.point_count) {
+          destroyChart();
+          meta.textContent =
+            `${farm} · ${data.metric_label || "Lag phase"} · ${formatShortDate(dateFrom)} – ${formatShortDate(dateTo)} · ${shiftLabelText()} · 0 point(s)`;
+          help.textContent =
+            "Each point is one cow milking. X = lag phase. Pink line = linear regression.";
+          return;
+        }
+        renderLagXyChart(data);
+        return;
+      }
+
+      meta.textContent =
+        `${farm} · ${data.metric_label} · ${formatShortDate(dateFrom)} – ${formatShortDate(dateTo)} · ${shiftLabelText()} · ${Number(data.point_count || 0).toLocaleString()} point(s)`;
+      help.textContent =
+        "Each point is one cow milking. Pink line = average for each date × shift in the selection. Left-drag to zoom; right-drag to pan; Reset zoom to return.";
+      if (!data.point_count) {
+        destroyChart();
+        return;
+      }
+      renderScatterChart(data);
+    } catch (err) {
+      meta.textContent = err.message || "Failed to load chart";
+      console.error(err);
+    }
+  }
+
+  function scheduleLoad() {
+    if (loadTimer) clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => loadChart(), 150);
+  }
+
+  farmSlicer.addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    farmSlicer.querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.remove("selected");
+      b.setAttribute("aria-pressed", "false");
+    });
+    btn.classList.add("selected");
+    btn.setAttribute("aria-pressed", "true");
+    farm = btn.dataset.value;
+    loadBoundsAndChart(true);
+  });
+
+  shiftSlicer.addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    const value = btn.dataset.value;
+    if (selectedShifts.has(value)) {
+      selectedShifts.delete(value);
+      btn.classList.remove("selected");
+      btn.setAttribute("aria-pressed", "false");
+    } else {
+      selectedShifts.add(value);
+      btn.classList.add("selected");
+      btn.setAttribute("aria-pressed", "true");
+    }
+    scheduleLoad();
+  });
+
+  function onDateSliderInput(e) {
+    let fromIdx = Number(fromSlider.value);
+    let toIdx = Number(toSlider.value);
+    if (fromIdx > toIdx) {
+      if (e.target === fromSlider) toIdx = fromIdx;
+      else fromIdx = toIdx;
+      fromSlider.value = String(fromIdx);
+      toSlider.value = String(toIdx);
+    }
+    syncDateLabels();
+    scheduleLoad();
+  }
+
+  async function initMetrics() {
+    const res = await fetch("/parlours/api/scatter/metrics");
+    const data = await res.json();
+    metrics = data.metrics || [];
+    metricSelect.innerHTML = metrics
+      .map((m) => `<option value="${m.key}">${m.label}</option>`)
+      .join("");
+    const yieldOpt = metrics.find((m) => m.key === "yield_l");
+    if (yieldOpt) metricSelect.value = "yield_l";
+    else if (metrics.length) metricSelect.value = metrics[0].key;
+  }
+
+  fromSlider.addEventListener("input", onDateSliderInput);
+  toSlider.addEventListener("input", onDateSliderInput);
+  metricSelect.addEventListener("change", scheduleLoad);
+  resetZoomBtn.addEventListener("click", resetZoom);
+
+  initMetrics()
+    .then(() => loadBoundsAndChart(true))
+    .catch((err) => {
+      meta.textContent = "Failed to load metrics";
+      console.error(err);
+    });
+})();
+</script>
+{% endblock %}

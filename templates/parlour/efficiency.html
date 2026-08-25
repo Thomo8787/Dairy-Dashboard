@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}Efficiency · {{ app_name }}{% endblock %}
+{% block page_title %}Efficiency{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer,
+    .shift-slicer { display: grid; gap: 0.5rem; }
+    .farm-slicer { grid-template-columns: 1fr 1fr; }
+    .shift-slicer { grid-template-columns: 1fr; }
+    .slicer-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0.45rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .shift-slicer .slicer-btn.selected {
+      background: #1e3a5f;
+      border-color: #1e3a5f;
+      color: #fff;
+    }
+    input#ma-window {
+      width: 100%;
+      padding: 0.45rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      font-size: 0.875rem;
+    }
+    .dual-range {
+      position: relative;
+      height: 2rem;
+      margin: 0.35rem 0 0.5rem;
+    }
+    .dual-range input[type="range"] {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      margin: 0;
+      pointer-events: none;
+      appearance: none;
+      background: transparent;
+      height: 2rem;
+    }
+    .dual-range input[type="range"]::-webkit-slider-thumb {
+      pointer-events: auto;
+      appearance: none;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 50%;
+      background: #1e3a5f;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #1e3a5f;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+    .dual-range input[type="range"]::-moz-range-thumb {
+      pointer-events: auto;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 50%;
+      background: #1e3a5f;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #1e3a5f;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+    .dual-range input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: #d1d5db;
+      border-radius: 999px;
+    }
+    .dual-range input[type="range"]::-moz-range-track {
+      height: 4px;
+      background: #d1d5db;
+      border-radius: 999px;
+    }
+    .dual-range input[type="range"].range-max::-webkit-slider-thumb { z-index: 3; }
+    .date-range-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .stat-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .stat { min-width: 7rem; }
+    .stat .label { display: block; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+    .stat .value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1e3a5f;
+      font-variant-numeric: tabular-nums;
+    }
+    .chart-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .chart-toolbar .help-text { margin: 0; flex: 1; min-width: 12rem; }
+    .chart-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #1e3a5f;
+    }
+    .chart-btn:hover { background: #f3f4f6; }
+    .chart-wrap {
+      position: relative;
+      height: min(70vh, 640px);
+      width: 100%;
+    }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0.5rem 0 0; }
+    .shift-hint { font-size: 0.75rem; color: var(--muted); margin: 0.35rem 0 0; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button
+              type="button"
+              class="slicer-btn{% if farm.code == 'ALH' %} selected{% endif %}"
+              data-value="{{ farm.code }}"
+              aria-pressed="{{ 'true' if farm.code == 'ALH' else 'false' }}"
+            >{{ farm.code }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Date range</span>
+          <div class="dual-range">
+            <input type="range" id="date-from-slider" min="0" max="0" value="0" aria-label="From date">
+            <input type="range" id="date-to-slider" class="range-max" min="0" max="0" value="0" aria-label="To date">
+          </div>
+          <div class="date-range-labels">
+            <span id="date-from-label">—</span>
+            <span id="date-to-label">—</span>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Shift</span>
+          <div class="shift-slicer" id="shift-slicer" role="group" aria-label="Shift">
+            <button type="button" class="slicer-btn selected" data-value="Morning" aria-pressed="true">Morning</button>
+            <button type="button" class="slicer-btn selected" data-value="Day" aria-pressed="true">Day</button>
+            <button type="button" class="slicer-btn selected" data-value="Night" aria-pressed="true">Night</button>
+          </div>
+          <p class="shift-hint">Click to toggle. All, none, or any combination.</p>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Moving average window</span>
+          <input type="number" id="ma-window" min="5" max="500" value="40" step="1">
+          <p class="shift-hint">Number of successive stall cycles averaged (all stalls pooled).</p>
+        </div>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <div class="stat-row" id="stat-row" hidden>
+        <div class="stat">
+          <span class="label">Median rotation</span>
+          <span class="value" id="stat-median">—</span>
+        </div>
+        <div class="stat">
+          <span class="label">Mean rotation</span>
+          <span class="value" id="stat-mean">—</span>
+        </div>
+        <div class="stat">
+          <span class="label">Clean cycles</span>
+          <span class="value" id="stat-clean">—</span>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-toolbar">
+          <p class="help-text" id="chart-help">
+            Grey dots = cleaned time between cows on the same stall. Orange line = moving average across all stalls.
+            Drag a box to zoom.
+          </p>
+          <button type="button" class="chart-btn" id="reset-zoom-btn">Reset zoom</button>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="rotation-canvas"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script>
+(function () {
+  const farmSlicer = document.getElementById("farm-slicer");
+  const shiftSlicer = document.getElementById("shift-slicer");
+  const fromSlider = document.getElementById("date-from-slider");
+  const toSlider = document.getElementById("date-to-slider");
+  const fromLabel = document.getElementById("date-from-label");
+  const toLabel = document.getElementById("date-to-label");
+  const maWindow = document.getElementById("ma-window");
+  const meta = document.getElementById("meta-line");
+  const help = document.getElementById("chart-help");
+  const canvas = document.getElementById("rotation-canvas");
+  const resetZoomBtn = document.getElementById("reset-zoom-btn");
+  const statRow = document.getElementById("stat-row");
+  const statMedian = document.getElementById("stat-median");
+  const statMean = document.getElementById("stat-mean");
+  const statClean = document.getElementById("stat-clean");
+
+  let farm = "ALH";
+  let selectedShifts = new Set(["Morning", "Day", "Night"]);
+  let dateList = [];
+  let chart = null;
+  let loadTimer = null;
+
+  function isoFromParts(y, m, d) {
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  function parseIso(iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function formatShortDate(iso) {
+    if (!iso) return "—";
+    return parseIso(iso).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function formatTick(ms) {
+    const d = new Date(ms);
+    const day = d.getUTCDate();
+    const mon = d.toLocaleString(undefined, { month: "short", timeZone: "UTC" });
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${day} ${mon} ${hh}:${mm}`;
+  }
+
+  function formatTooltipTime(ms) {
+    const d = new Date(ms);
+    const day = d.getUTCDate();
+    const mon = d.toLocaleString(undefined, { month: "short", timeZone: "UTC" });
+    const year = d.getUTCFullYear();
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${day} ${mon} ${year} ${hh}:${mm}`;
+  }
+
+  function buildDateList(dateMin, dateMax) {
+    if (!dateMin || !dateMax) return [];
+    const start = parseIso(dateMin);
+    const end = parseIso(dateMax);
+    const out = [];
+    for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+      const d = new Date(t);
+      out.push(isoFromParts(d.getFullYear(), d.getMonth() + 1, d.getDate()));
+    }
+    return out;
+  }
+
+  function syncDateLabels() {
+    if (!dateList.length) {
+      fromLabel.textContent = "—";
+      toLabel.textContent = "—";
+      return;
+    }
+    fromLabel.textContent = formatShortDate(dateList[Number(fromSlider.value)] || dateList[0]);
+    toLabel.textContent = formatShortDate(dateList[Number(toSlider.value)] || dateList[dateList.length - 1]);
+  }
+
+  function setupDateSliders(dateMin, dateMax, keepSelection) {
+    const prevFrom = keepSelection && dateList.length ? dateList[Number(fromSlider.value)] : null;
+    const prevTo = keepSelection && dateList.length ? dateList[Number(toSlider.value)] : null;
+    dateList = buildDateList(dateMin, dateMax);
+    const maxIdx = Math.max(0, dateList.length - 1);
+    fromSlider.min = "0";
+    fromSlider.max = String(maxIdx);
+    toSlider.min = "0";
+    toSlider.max = String(maxIdx);
+
+    let fromIdx = 0;
+    let toIdx = maxIdx;
+    if (keepSelection && prevFrom && prevTo) {
+      fromIdx = dateList.indexOf(prevFrom);
+      toIdx = dateList.indexOf(prevTo);
+      if (fromIdx < 0) fromIdx = 0;
+      if (toIdx < 0) toIdx = maxIdx;
+    } else if (dateList.length > 7) {
+      fromIdx = Math.max(0, maxIdx - 6);
+    }
+    if (fromIdx > toIdx) [fromIdx, toIdx] = [toIdx, fromIdx];
+    fromSlider.value = String(fromIdx);
+    toSlider.value = String(toIdx);
+    syncDateLabels();
+  }
+
+  function selectedDateFrom() {
+    if (!dateList.length) return null;
+    return dateList[Number(fromSlider.value)] || dateList[0];
+  }
+
+  function selectedDateTo() {
+    if (!dateList.length) return null;
+    return dateList[Number(toSlider.value)] || dateList[dateList.length - 1];
+  }
+
+  function destroyChart() {
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+  }
+
+  function resetZoom() {
+    if (chart && typeof chart.resetZoom === "function") chart.resetZoom();
+  }
+
+  function fmtMin(v) {
+    if (v == null) return "—";
+    return `${Number(v).toFixed(1)} min`;
+  }
+
+  function renderChart(data) {
+    destroyChart();
+    const scatter = (data.points || []).map((p) => ({
+      x: p.x,
+      y: p.y,
+      milking_point: p.milking_point,
+    }));
+    const ma = (data.moving_average || []).map((p) => ({ x: p.x, y: p.y }));
+
+    chart = new Chart(canvas, {
+      data: {
+        datasets: [
+          {
+            type: "scatter",
+            label: "Stall cycle (cleaned)",
+            data: scatter,
+            backgroundColor: "rgba(100,116,139,0.28)",
+            borderColor: "rgba(100,116,139,0.28)",
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            order: 2,
+          },
+          {
+            type: "line",
+            label: `Moving average (${data.ma_window})`,
+            data: ma,
+            borderColor: "#c45c26",
+            backgroundColor: "#c45c26",
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            tension: 0.15,
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "nearest", intersect: false },
+        plugins: {
+          legend: { position: "top" },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const raw = items[0] && items[0].raw;
+                return raw ? formatTooltipTime(raw.x) : "";
+              },
+              label: (ctx) => {
+                const y = ctx.parsed.y;
+                const yText = y == null ? "—" : `${Number(y).toFixed(2)} min`;
+                if (ctx.dataset.type === "scatter" || ctx.dataset.label.startsWith("Stall")) {
+                  const pt = ctx.raw && ctx.raw.milking_point;
+                  return `Cycle: ${yText}${pt != null ? ` · Stall ${pt}` : ""}`;
+                }
+                return `MA: ${yText}`;
+              },
+            },
+          },
+          zoom: {
+            pan: { enabled: true, mode: "xy", modifierKey: "ctrl" },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: "rgba(30,58,95,0.15)",
+                borderColor: "rgba(30,58,95,0.6)",
+                borderWidth: 1,
+              },
+              mode: "xy",
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            title: { display: true, text: "Time (next cow start on stall)" },
+            ticks: {
+              maxRotation: 45,
+              callback: (value) => formatTick(value),
+              maxTicksLimit: 10,
+            },
+          },
+          y: {
+            title: { display: true, text: "Rotation time (minutes)" },
+            beginAtZero: false,
+          },
+        },
+      },
+    });
+  }
+
+  async function loadBoundsAndChart(resetDates) {
+    meta.textContent = "Loading…";
+    try {
+      const boundsRes = await fetch(
+        "/parlours/api/efficiency/bounds?" + new URLSearchParams({ farm })
+      );
+      if (!boundsRes.ok) throw new Error(await boundsRes.text());
+      const bounds = await boundsRes.json();
+      if (!bounds.date_min || !bounds.date_max) {
+        setupDateSliders(null, null, false);
+        destroyChart();
+        statRow.hidden = true;
+        meta.textContent = `${farm} · no milk-flow data yet`;
+        return;
+      }
+      setupDateSliders(bounds.date_min, bounds.date_max, !resetDates);
+      await loadChart();
+    } catch (err) {
+      meta.textContent = "Failed to load";
+      console.error(err);
+    }
+  }
+
+  async function loadChart() {
+    const dateFrom = selectedDateFrom();
+    const dateTo = selectedDateTo();
+    if (!dateFrom || !dateTo) return;
+    const window = Math.max(5, Math.min(500, Number(maWindow.value) || 40));
+    maWindow.value = String(window);
+
+    meta.textContent = "Loading rotation…";
+    const params = new URLSearchParams({
+      farm,
+      date_from: dateFrom,
+      date_to: dateTo,
+      shifts: [...selectedShifts].join(","),
+      ma_window: String(window),
+    });
+    try {
+      const res = await fetch("/parlours/api/efficiency?" + params.toString());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.detail || "Failed to load rotation");
+      const shiftLabel =
+        selectedShifts.size === 0
+          ? "no shifts"
+          : selectedShifts.size === 3
+            ? "all shifts"
+            : [...selectedShifts].join(", ");
+      meta.textContent =
+        `${farm} · ${formatShortDate(dateFrom)} – ${formatShortDate(dateTo)} · ${shiftLabel}` +
+        (data.truncated ? " · plot sampled" : "");
+      help.textContent =
+        `Gaps outside ${Math.round((data.min_seconds || 180) / 60)}–${Math.round((data.max_seconds || 780) / 60)} min are dropped. ` +
+        `Raw cycles ${Number(data.gap_count_raw || 0).toLocaleString()}, kept ${Number(data.gap_count_clean || 0).toLocaleString()}. ` +
+        "Drag a box to zoom; Reset zoom to return.";
+
+      if (data.gap_count_clean) {
+        statRow.hidden = false;
+        statMedian.textContent = fmtMin(data.median_rotation_minutes);
+        statMean.textContent = fmtMin(data.mean_rotation_minutes);
+        statClean.textContent = Number(data.gap_count_clean).toLocaleString();
+      } else {
+        statRow.hidden = true;
+      }
+
+      if (!data.gap_count_clean) {
+        destroyChart();
+        return;
+      }
+      renderChart(data);
+    } catch (err) {
+      meta.textContent = err.message || "Failed to load rotation";
+      console.error(err);
+    }
+  }
+
+  function scheduleLoad() {
+    if (loadTimer) clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => loadChart(), 150);
+  }
+
+  farmSlicer.addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    farmSlicer.querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.remove("selected");
+      b.setAttribute("aria-pressed", "false");
+    });
+    btn.classList.add("selected");
+    btn.setAttribute("aria-pressed", "true");
+    farm = btn.dataset.value;
+    loadBoundsAndChart(true);
+  });
+
+  shiftSlicer.addEventListener("click", (e) => {
+    const btn = e.target.closest(".slicer-btn");
+    if (!btn) return;
+    const value = btn.dataset.value;
+    if (selectedShifts.has(value)) {
+      selectedShifts.delete(value);
+      btn.classList.remove("selected");
+      btn.setAttribute("aria-pressed", "false");
+    } else {
+      selectedShifts.add(value);
+      btn.classList.add("selected");
+      btn.setAttribute("aria-pressed", "true");
+    }
+    scheduleLoad();
+  });
+
+  function onDateSliderInput(e) {
+    let fromIdx = Number(fromSlider.value);
+    let toIdx = Number(toSlider.value);
+    if (fromIdx > toIdx) {
+      if (e.target === fromSlider) toIdx = fromIdx;
+      else fromIdx = toIdx;
+      fromSlider.value = String(fromIdx);
+      toSlider.value = String(toIdx);
+    }
+    syncDateLabels();
+    scheduleLoad();
+  }
+
+  fromSlider.addEventListener("input", onDateSliderInput);
+  toSlider.addEventListener("input", onDateSliderInput);
+  maWindow.addEventListener("change", scheduleLoad);
+  resetZoomBtn.addEventListener("click", resetZoom);
+
+  loadBoundsAndChart(true);
+})();
+</script>
+{% endblock %}

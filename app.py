@@ -94,6 +94,22 @@ from services.stall_issues import (
     list_stall_issues,
     list_stall_metric_history,
 )
+from services.parlour_common import parse_shift_list
+from services.parlour_scatter import (
+    ATTACHMENT_METRIC_KEY,
+    LAG_PHASE_XY_METRIC_KEYS,
+    SCATTER_METRIC_KEYS,
+    list_attachment_time_bins,
+    list_lag_phase_xy_points,
+    list_scatter_metrics,
+    list_scatter_points,
+    scatter_date_bounds,
+)
+from services.parlour_efficiency import (
+    DEFAULT_MA_WINDOW,
+    list_rotation_series,
+    rotation_date_bounds,
+)
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
@@ -543,6 +559,133 @@ def parlour_api_stall_issues_detail():
                 milking_point=milking_point,
                 date_from=date_from,
                 date_to=date_to,
+            )
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/parlours/scatter-graphs")
+@permission_required("perm_parlours")
+def scatter_graphs():
+    return render_template(
+        "parlour/scatter.html",
+        **_page_context(active_nav="scatter_graphs"),
+    )
+
+
+@app.route("/parlours/efficiency")
+@permission_required("perm_parlours")
+def parlour_efficiency():
+    return render_template(
+        "parlour/efficiency.html",
+        **_page_context(active_nav="parlour_efficiency"),
+    )
+
+
+@app.route("/parlours/api/scatter/metrics")
+def parlour_api_scatter_metrics():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    return jsonify({"metrics": list_scatter_metrics()})
+
+
+@app.route("/parlours/api/scatter/bounds")
+def parlour_api_scatter_bounds():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "").upper() or None
+    if farm_code and farm_code not in {farm.code for farm in FARMS}:
+        farm_code = None
+    return jsonify(scatter_date_bounds(farm_code))
+
+
+@app.route("/parlours/api/scatter")
+def parlour_api_scatter():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    metric = (request.args.get("metric") or "yield_l").strip()
+    shifts = parse_shift_list(request.args.get("shifts"))
+    try:
+        if metric == ATTACHMENT_METRIC_KEY:
+            return jsonify(
+                list_attachment_time_bins(
+                    farm=farm_code,
+                    date_from=date_from,
+                    date_to=date_to,
+                    shifts=shifts,
+                )
+            )
+        if metric in LAG_PHASE_XY_METRIC_KEYS:
+            return jsonify(
+                list_lag_phase_xy_points(
+                    farm=farm_code,
+                    metric=metric,
+                    date_from=date_from,
+                    date_to=date_to,
+                    shifts=shifts,
+                )
+            )
+        if metric not in SCATTER_METRIC_KEYS:
+            allowed = ", ".join(
+                sorted({*SCATTER_METRIC_KEYS, ATTACHMENT_METRIC_KEY, *LAG_PHASE_XY_METRIC_KEYS})
+            )
+            return jsonify({"error": f"metric must be one of: {allowed}"}), 400
+        return jsonify(
+            list_scatter_points(
+                farm=farm_code,
+                metric=metric,
+                date_from=date_from,
+                date_to=date_to,
+                shifts=shifts,
+            )
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/parlours/api/efficiency/bounds")
+def parlour_api_efficiency_bounds():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "").upper() or None
+    if farm_code and farm_code not in {farm.code for farm in FARMS}:
+        farm_code = None
+    return jsonify(rotation_date_bounds(farm_code))
+
+
+@app.route("/parlours/api/efficiency")
+def parlour_api_efficiency():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    shifts = parse_shift_list(request.args.get("shifts"))
+    try:
+        ma_window = int(request.args.get("ma_window") or DEFAULT_MA_WINDOW)
+    except ValueError:
+        ma_window = DEFAULT_MA_WINDOW
+    try:
+        return jsonify(
+            list_rotation_series(
+                farm=farm_code,
+                date_from=date_from,
+                date_to=date_to,
+                shifts=shifts,
+                ma_window=ma_window,
             )
         )
     except ValueError as exc:
