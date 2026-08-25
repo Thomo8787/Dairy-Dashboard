@@ -33,14 +33,18 @@ def _run_incremental_sync() -> None:
     except Exception:
         logger.exception("Hourly parlour sync failed")
 
+
+def _run_nml_sync() -> None:
     try:
         from services.nml_import import format_nml_summary, import_nml_results, nml_is_configured
 
-        if nml_is_configured():
-            nml = import_nml_results(days=2)
-            logger.info("Hourly NML import: %s", format_nml_summary(nml))
+        if not nml_is_configured():
+            logger.info("NML email sync skipped — mailbox not configured")
+            return
+        nml = import_nml_results(days=3)
+        logger.info("NML email sync: %s", format_nml_summary(nml))
     except Exception:
-        logger.exception("Hourly NML import failed")
+        logger.exception("NML email sync failed")
 
 
 def start_parlour_hourly_sync(app: Flask) -> None:
@@ -82,8 +86,22 @@ def start_parlour_hourly_sync(app: Flask) -> None:
         max_instances=1,
         coalesce=True,
     )
+
+    def nml_job() -> None:
+        with app_ref.app_context():
+            _run_nml_sync()
+
+    scheduler.add_job(
+        nml_job,
+        trigger=IntervalTrigger(hours=3),
+        id="fetch_nml_emails",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     logger.info("Parlour hourly email sync started (every 1 hour)")
+    logger.info("NML email sync started (every 3 hours)")
 
     # Keep a reference on the app so it isn't garbage-collected.
     app.extensions["parlour_scheduler"] = scheduler

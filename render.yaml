@@ -81,6 +81,46 @@ services:
       - key: OUTLOOK_MAILBOX
         sync: false
 
+  # Every 3 hours: NML milk-quality PDFs from @nationalmilklabs.com.
+  # Skips emails already imported (by Outlook message ID).
+  - type: cron
+    name: fetch-nml-emails
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "0 */3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/sync_nml_emails.py --days 3
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: GRAPH_AUTH_MODE
+        value: application
+      - key: AZURE_CLIENT_ID
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_CLIENT_ID
+      - key: AZURE_CLIENT_SECRET
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_CLIENT_SECRET
+      - key: AZURE_TENANT_ID
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: AZURE_TENANT_ID
+      - key: OUTLOOK_MAILBOX
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: OUTLOOK_MAILBOX
+
   # Daily DairyComp DCEXPORT import at 05:00 UK time.
   # Render cron is UTC: 04:00 UTC = 05:00 BST (05:00 GMT in winter would need 05:00 UTC).
   - type: cron

@@ -58,18 +58,6 @@ def main(argv: list[str] | None = None) -> int:
         top=args.top,
     )
     print(format_sync_summary(result))
-
-    try:
-        from services.nml_import import format_nml_summary, import_nml_results, nml_is_configured
-
-        if nml_is_configured():
-            nml_days = args.days_back if args.days_back and args.days_back > 0 else 2
-            nml = import_nml_results(days=nml_days)
-            print(format_nml_summary(nml))
-    except Exception as exc:
-        logging.getLogger(__name__).exception("NML import after parlour sync failed")
-        print(f"NML import failed: {exc}")
-
     return 0
 
 
