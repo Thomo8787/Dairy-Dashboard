@@ -88,25 +88,6 @@
       background: #fff;
       color: var(--accent);
     }
-    .slicer-group.jv-slicer {
-      grid-template-columns: 1fr;
-    }
-    .slicer-group.jv-slicer .slicer-btn {
-      flex-direction: row;
-      min-height: 2.5rem;
-      justify-content: flex-start;
-      padding: 0.45rem 0.65rem;
-      gap: 0.5rem;
-    }
-    .slicer-group.jv-slicer .slicer-btn.selected {
-      background: #e8f5ee;
-      border-color: #2d6a4f;
-      color: #145530;
-    }
-    .slicer-group.jv-slicer .slicer-btn.selected .slicer-icon {
-      background: #95d5b2;
-      color: #145530;
-    }
     .view-toggle {
       display: flex;
       gap: 1rem;
@@ -247,23 +228,6 @@
           </div>
         </div>
         <div class="filter-section">
-          <span class="section-label">Joint venture (GAME / PATHWAY)</span>
-          <div class="slicer-group jv-slicer" role="radiogroup" aria-label="Joint venture">
-            <button type="button" class="slicer-btn selected" data-value="all" aria-pressed="true">
-              <span class="slicer-icon" aria-hidden="true">A</span>
-              All (incl. JV)
-            </button>
-            <button type="button" class="slicer-btn" data-value="exclude" aria-pressed="false">
-              <span class="slicer-icon" aria-hidden="true">N</span>
-              No JV
-            </button>
-            <button type="button" class="slicer-btn" data-value="only" aria-pressed="false">
-              <span class="slicer-icon" aria-hidden="true">J</span>
-              JV only
-            </button>
-          </div>
-        </div>
-        <div class="filter-section">
           <span class="section-label">Age range (months)</span>
           <div class="age-inputs">
             <label>
@@ -336,7 +300,6 @@
 
     function clearFilters() {
       resetFarmSlicers();
-      resetJvSlicer();
       if (storedAgeBounds) {
         syncAgeControls(storedAgeBounds, true);
       }
@@ -348,23 +311,10 @@
         .map(btn => btn.dataset.value);
     }
 
-    function selectedJvMode() {
-      const btn = document.querySelector(".jv-slicer .slicer-btn.selected");
-      return (btn && btn.dataset.value) || "all";
-    }
-
     function resetFarmSlicers() {
       document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
         btn.classList.add("selected");
         btn.setAttribute("aria-pressed", "true");
-      });
-    }
-
-    function resetJvSlicer() {
-      document.querySelectorAll(".jv-slicer .slicer-btn").forEach(btn => {
-        const on = btn.dataset.value === "all";
-        btn.classList.toggle("selected", on);
-        btn.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
 
@@ -376,20 +326,6 @@
           if (selected && count <= 1) return;
           btn.classList.toggle("selected", !selected);
           btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
-          loadReport();
-        });
-      });
-    }
-
-    function bindJvSlicer() {
-      document.querySelectorAll(".jv-slicer .slicer-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          if (btn.classList.contains("selected")) return;
-          document.querySelectorAll(".jv-slicer .slicer-btn").forEach(other => {
-            const on = other === btn;
-            other.classList.toggle("selected", on);
-            other.setAttribute("aria-pressed", on ? "true" : "false");
-          });
           loadReport();
         });
       });
@@ -474,7 +410,6 @@
       const { minAge, maxAge } = currentAgeRange();
       params.set("min_age", String(minAge));
       params.set("max_age", String(maxAge));
-      params.set("jv_mode", selectedJvMode());
       return params.toString();
     }
 
@@ -576,7 +511,6 @@
         backgroundColor: FARM_COLORS[farm] || "#888",
         stack: "beef",
       }));
-      const jvNote = data.jv_label ? ` · ${data.jv_label}` : "";
 
       beefChart = new Chart(canvas, {
         type: "bar",
@@ -587,7 +521,7 @@
           plugins: {
             title: {
               display: true,
-              text: `Beef Inventory by Age (Months Old) - Stacked by Farm${jvNote}`,
+              text: "Beef Inventory by Age (Months Old) - Stacked by Farm",
             },
             legend: { title: { display: true, text: "Farm" } },
           },
@@ -629,7 +563,6 @@
       const params = appendFarmParams(new URLSearchParams());
       params.set("min_age", String(minAge));
       params.set("max_age", String(maxAge));
-      params.set("jv_mode", selectedJvMode());
 
       const res = await fetch(`/stock-inventory/api/beef-inventory?${params}`);
       if (!res.ok) {
@@ -654,8 +587,7 @@
       const importNote = data.latest_import
         ? `Latest import: ${new Date(data.latest_import).toLocaleString("en-GB")}`
         : "No inventory import found — run the herd import cron job.";
-      const jvNote = data.jv_label ? ` · ${data.jv_label}` : "";
-      meta.textContent = importNote + jvNote;
+      meta.textContent = importNote;
 
       const totalHead = (data.grand_total && data.grand_total.total) || 0;
       if (!data.rows || !data.rows.length || totalHead === 0) {
@@ -697,7 +629,6 @@
 
     bindAgeInputs();
     bindFarmSlicers();
-    bindJvSlicer();
     document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
     setExportEnabled(false);
     loadReport();

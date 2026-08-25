@@ -8,6 +8,11 @@ from services.farms import FARM_CHART_COLORS, HERD_FARM_OPTIONS
 from services.events_pages import farm_titles
 
 STOCK_PAGES: dict[str, dict[str, Any]] = {
+    "stock-accruals": {
+        "heading": "Stock Accruals",
+        "nav": "stock_accruals",
+        "template": "stock_inventory/stock_accruals.html",
+    },
     "heifer-inventory": {
         "heading": "Heifer Inventory",
         "nav": "stock_heifer_inventory",

@@ -1,0 +1,667 @@
+{% extends "base.html" %}
+
+{% block page_title %}Stock Accruals{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .stock-group-slicer { grid-template-columns: 1fr 1fr 1fr; }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .farm-slicer .slicer-btn.selected .slicer-icon { background: #fff; color: var(--accent); }
+    .slicer-btn .slicer-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 1.5rem; height: 1.5rem; border-radius: 999px;
+      background: #e5e7eb; color: #9ca3af; font-size: 0.7rem; font-weight: 700;
+    }
+    .slicer-btn[data-value="cows"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="GAD"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .slicer-btn[data-value="youngstock"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+    .slicer-btn[data-value="beef"].selected { background: #ede9fe; border-color: #a78bfa; color: #5b21b6; }
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .filter-select { width: 100%; margin: 0; }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; }
+    .content-panel { min-width: 0; }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .meta-line.is-loading { font-style: italic; }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 14rem);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    #accruals-table { width: 100%; border-collapse: collapse; }
+    #accruals-table th, #accruals-table td {
+      padding: 0.45rem 0.55rem;
+      text-align: right;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--line);
+    }
+    #accruals-table th:first-child, #accruals-table td:first-child { text-align: left; }
+    #accruals-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    #accruals-table tbody tr.warn-row { background: #fef2f2; }
+    #accruals-table th .sales-toggle {
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    #accruals-table th .sales-toggle:hover { text-decoration: underline; }
+    #accruals-table th .sales-toggle .chevron {
+      font-size: 0.75rem;
+      opacity: 0.9;
+    }
+    #accruals-table tfoot th,
+    #accruals-table tfoot td {
+      background: #f3f4f6;
+      font-weight: 600;
+      border-top: 2px solid var(--line);
+    }
+    #accruals-table tfoot tr.average-row th,
+    #accruals-table tfoot tr.average-row td {
+      background: #e8eef4;
+      border-bottom: none;
+    }
+    .summary-panel {
+      margin-top: 1rem;
+      padding: 1rem 1.25rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      max-width: 20rem;
+    }
+    .summary-panel h3 {
+      margin: 0 0 0.35rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .summary-panel .summary-value {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.2;
+    }
+    .summary-panel .summary-note {
+      margin: 0.35rem 0 0;
+      font-size: 0.8125rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .empty-state {
+      padding: 2rem;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Stock group</span>
+          <div class="slicer-group stock-group-slicer" role="group" aria-label="Stock group">
+            <button type="button" class="slicer-btn selected" data-value="cows" aria-pressed="true">Cows</button>
+            <button type="button" class="slicer-btn" data-value="youngstock" aria-pressed="false">Youngstock</button>
+            <button type="button" class="slicer-btn" data-value="beef" aria-pressed="false">Beef</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Fiscal year</span>
+          <select id="fiscal-year-select" class="filter-select">
+            <option value="">All</option>
+          </select>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Month range</span>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="min-date-label">—</span></label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0">
+            <label>To <span class="month-label" id="max-date-label">—</span></label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0">
+          </div>
+        </div>
+        {% include "events/_refresh.html" %}
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading stock accruals…</p>
+      <div id="empty-state" class="empty-state" style="display:none;"></div>
+      <div class="table-wrap" id="table-wrap" style="display:none;">
+        <table id="accruals-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+          <tfoot id="table-foot"></tfoot>
+        </table>
+      </div>
+      <div class="summary-panel" id="summary-panel" style="display:none;">
+        <h3>Average stock</h3>
+        <p class="summary-value" id="avg-stock-value">—</p>
+        <p class="summary-note" id="avg-stock-note"></p>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const DEFAULT_MONTH_SPAN = 12;
+    const SALES_REASONS = ["CULL", "TB", "OFS", "Beef", "Dairy"];
+    const STOCK_GROUP_LABELS = {
+      cows: "Cows",
+      youngstock: "Youngstock (F)",
+      beef: "Beef",
+    };
+    let monthList = [];
+    let loadTimer = null;
+    let initialBoundsSynced = false;
+    let salesExpanded = false;
+    let cachedRows = [];
+    let cachedStockGroup = "cows";
+    let salesToggleBound = false;
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")]
+        .map(btn => btn.dataset.value);
+    }
+    function bindFarmSlicers() {
+      document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const selectedCount = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+          if (selected && selectedCount <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          loadReport();
+        });
+      });
+    }
+
+
+    function showBirthsColumn(stockGroup) {
+      return stockGroup === "youngstock" || stockGroup === "beef";
+    }
+
+    function stockGroupLabel(stockGroup) {
+      return STOCK_GROUP_LABELS[stockGroup] || "Cows";
+    }
+
+    function selectedStockGroup() {
+      return document.querySelector(".stock-group-slicer .slicer-btn.selected")?.dataset.value || "cows";
+    }
+
+    function bindExclusiveSlicers(selector) {
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(`${selector} .slicer-btn`).forEach(other => {
+            other.classList.remove("selected");
+            other.setAttribute("aria-pressed", "false");
+          });
+          btn.classList.add("selected");
+          btn.setAttribute("aria-pressed", "true");
+          loadReport();
+        });
+      });
+    }
+
+    function parseIsoDate(iso) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function buildMonthList(minIso, maxIso) {
+      const months = [];
+      let d = parseIsoDate(minIso);
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = parseIsoDate(maxIso);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(new Date(d));
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      return months;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      return `${mon}-${String(date.getFullYear()).slice(-2)}`;
+    }
+
+    function toIsoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function lastDayOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function updateDateLabels() {
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      document.getElementById("min-date-label").textContent =
+        monthList[minIdx] ? formatMonthLabel(monthList[minIdx]) : "—";
+      document.getElementById("max-date-label").textContent =
+        monthList[maxIdx] ? formatMonthLabel(monthList[maxIdx]) : "—";
+    }
+
+    function syncDateBounds(bounds) {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      if (!bounds?.min || !bounds?.max) {
+        monthList = [];
+        return;
+      }
+      monthList = buildMonthList(bounds.min, bounds.max);
+      const maxIdx = Math.max(0, monthList.length - 1);
+      const minIdx = Math.max(0, maxIdx - (DEFAULT_MONTH_SPAN - 1));
+      minRange.min = 0;
+      minRange.max = maxIdx;
+      maxRange.min = 0;
+      maxRange.max = maxIdx;
+      minRange.value = minIdx;
+      maxRange.value = maxIdx;
+      updateDateLabels();
+    }
+
+    function buildParams() {
+      const params = new URLSearchParams();
+      const farms = selectedFarms();
+      farms.forEach(farm => params.append("farm", farm));
+      params.set("stock_group", selectedStockGroup());
+      const fiscalYear = document.getElementById("fiscal-year-select").value;
+      if (fiscalYear) params.set("fiscal_year", fiscalYear);
+      if (monthList.length) {
+        const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+        const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+        params.set("month_from", toIsoDate(monthList[minIdx]));
+        params.set("month_to", toIsoDate(lastDayOfMonth(monthList[maxIdx])));
+      }
+      return params;
+    }
+
+    function renderFiscalYearOptions(options, selectedValue) {
+      const select = document.getElementById("fiscal-year-select");
+      const current = selectedValue || select.value;
+      select.innerHTML = '<option value="">All</option>';
+      (options || []).forEach(year => {
+        const opt = document.createElement("option");
+        opt.value = String(year);
+        opt.textContent = String(year);
+        select.appendChild(opt);
+      });
+      if (current && [...select.options].some(opt => opt.value === String(current))) {
+        select.value = String(current);
+      } else {
+        select.value = "";
+      }
+    }
+
+    function salesToggleButton(expanded, compact) {
+      const chevron = expanded ? "▾" : "▸";
+      if (compact) {
+        return `<button type="button" class="sales-toggle" aria-expanded="${expanded}" title="Collapse sales breakdown"><span class="chevron">${chevron}</span></button>`;
+      }
+      return `<button type="button" class="sales-toggle" aria-expanded="${expanded}" title="Expand sales breakdown">Sales <span class="chevron">${chevron}</span></button>`;
+    }
+
+    function salesHeaderCells() {
+      if (!salesExpanded) {
+        return `<th>${salesToggleButton(false, false)}</th>`;
+      }
+      return SALES_REASONS.map((reason, idx) => {
+        if (idx === 0) {
+          return `<th>${salesToggleButton(true, true)} ${reason}</th>`;
+        }
+        return `<th>${reason}</th>`;
+      }).join("");
+    }
+
+    function salesBodyCells(row) {
+      if (!salesExpanded) {
+        return `<td>${(row.sales_total || 0).toLocaleString("en-GB")}</td>`;
+      }
+      return SALES_REASONS.map(reason =>
+        `<td>${(row.sales?.[reason] || 0).toLocaleString("en-GB")}</td>`
+      ).join("");
+    }
+
+    function formatTotal(n) {
+      return Math.round(n).toLocaleString("en-GB");
+    }
+
+    function formatAverage(n) {
+      return n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    }
+
+    function salesFooterCells(stats, isAverage) {
+      const fmt = isAverage ? formatAverage : formatTotal;
+      if (!salesExpanded) {
+        const value = isAverage ? stats.sales_total_avg : stats.sales_total;
+        return `<td>${fmt(value)}</td>`;
+      }
+      return SALES_REASONS.map(reason => {
+        const value = isAverage ? stats.sales_avg[reason] : stats.sales[reason];
+        return `<td>${fmt(value)}</td>`;
+      }).join("");
+    }
+
+    function computeTableStats(rows) {
+      const n = rows.length;
+      if (!n) return null;
+
+      const stats = {
+        sales_total: 0,
+        sales: Object.fromEntries(SALES_REASONS.map(r => [r, 0])),
+        deaths: 0,
+        births: 0,
+        calvings: 0,
+        purchases: 0,
+      };
+      let avgStockSum = 0;
+      let monthsWithClosing = 0;
+
+      for (const row of rows) {
+        stats.sales_total += row.sales_total || 0;
+        for (const reason of SALES_REASONS) {
+          stats.sales[reason] += row.sales?.[reason] || 0;
+        }
+        stats.deaths += row.deaths || 0;
+        stats.births += row.births || 0;
+        stats.calvings += row.calvings || 0;
+        stats.purchases += row.purchases || 0;
+        if (row.closing != null && !Number.isNaN(row.closing)) {
+          avgStockSum += (row.opening + row.closing) / 2;
+          monthsWithClosing += 1;
+        }
+      }
+
+      return {
+        ...stats,
+        sales_total_avg: stats.sales_total / n,
+        sales_avg: Object.fromEntries(
+          SALES_REASONS.map(r => [r, stats.sales[r] / n])
+        ),
+        deaths_avg: stats.deaths / n,
+        births_avg: stats.births / n,
+        calvings_avg: stats.calvings / n,
+        purchases_avg: stats.purchases / n,
+        avgStock: monthsWithClosing ? avgStockSum / monthsWithClosing : 0,
+        monthsWithClosing,
+        monthCount: n,
+      };
+    }
+
+    function renderSummaryPanel(stats) {
+      const panel = document.getElementById("summary-panel");
+      if (!stats) {
+        panel.style.display = "none";
+        return;
+      }
+      panel.style.display = "";
+      document.getElementById("avg-stock-value").textContent =
+        formatTotal(stats.avgStock);
+      document.getElementById("avg-stock-note").textContent =
+        `Mean of (opening + closing) ÷ 2 across ${stats.monthsWithClosing.toLocaleString("en-GB")} month${stats.monthsWithClosing === 1 ? "" : "s"}`;
+    }
+
+    function renderTableFoot(rows, stockGroup) {
+      const foot = document.getElementById("table-foot");
+      const stats = computeTableStats(rows);
+      if (!stats) {
+        foot.innerHTML = "";
+        renderSummaryPanel(null);
+        return;
+      }
+      const showBirths = showBirthsColumn(stockGroup);
+      foot.innerHTML = `
+        <tr class="total-row">
+          <td>Total</td>
+          <td>—</td>
+          ${salesFooterCells(stats, false)}
+          <td>${formatTotal(stats.deaths)}</td>
+          ${showBirths ? `<td>${formatTotal(stats.births)}</td>` : ""}
+          <td>${formatTotal(stats.calvings)}</td>
+          <td>${formatTotal(stats.purchases)}</td>
+          <td>—</td>
+        </tr>
+        <tr class="average-row">
+          <td>Average</td>
+          <td>—</td>
+          ${salesFooterCells(stats, true)}
+          <td>${formatAverage(stats.deaths_avg)}</td>
+          ${showBirths ? `<td>${formatAverage(stats.births_avg)}</td>` : ""}
+          <td>${formatAverage(stats.calvings_avg)}</td>
+          <td>${formatAverage(stats.purchases_avg)}</td>
+          <td>—</td>
+        </tr>
+      `;
+      renderSummaryPanel(stats);
+    }
+
+    function bindSalesToggle() {
+      if (salesToggleBound) return;
+      salesToggleBound = true;
+      document.getElementById("table-head").addEventListener("click", event => {
+        const btn = event.target.closest(".sales-toggle");
+        if (!btn) return;
+        salesExpanded = !salesExpanded;
+        renderTable(cachedRows, cachedStockGroup);
+      });
+    }
+
+    function renderTableHead(stockGroup) {
+      const showBirths = showBirthsColumn(stockGroup);
+      document.getElementById("table-head").innerHTML = `
+        <tr>
+          <th>Month</th>
+          <th>Opening</th>
+          ${salesHeaderCells()}
+          <th>Deaths</th>
+          ${showBirths ? "<th>Births</th>" : ""}
+          <th>Calvings</th>
+          <th>Purchases</th>
+          <th>Closing</th>
+        </tr>
+      `;
+    }
+
+    function renderTable(rows, stockGroup) {
+      const body = document.getElementById("table-body");
+      renderTableHead(stockGroup);
+      const showBirths = showBirthsColumn(stockGroup);
+      body.innerHTML = rows.map(row => `
+        <tr class="${row.warning ? "warn-row" : ""}">
+          <td>${row.event_month}</td>
+          <td>${row.opening.toLocaleString("en-GB")}</td>
+          ${salesBodyCells(row)}
+          <td>${row.deaths.toLocaleString("en-GB")}</td>
+          ${showBirths ? `<td>${row.births.toLocaleString("en-GB")}</td>` : ""}
+          <td>${row.calvings.toLocaleString("en-GB")}</td>
+          <td>${row.purchases.toLocaleString("en-GB")}</td>
+          <td>${row.closing.toLocaleString("en-GB")}</td>
+        </tr>
+      `).join("");
+      renderTableFoot(rows, stockGroup);
+    }
+
+    async function loadReport() {
+      const meta = document.getElementById("meta-line");
+      const empty = document.getElementById("empty-state");
+      const wrap = document.getElementById("table-wrap");
+      const farms = selectedFarms();
+      if (!farms.length) {
+        meta.textContent = "";
+        empty.style.display = "";
+        empty.textContent = "Please select at least one farm.";
+        wrap.style.display = "none";
+        return;
+      }
+
+      meta.classList.add("is-loading");
+      meta.textContent = "Loading stock accruals…";
+      try {
+        const res = await fetch(`/stock-inventory/api/stock-accruals?${buildParams()}`);
+        if (!res.ok) throw new Error("load failed");
+        const data = await res.json();
+        renderFiscalYearOptions(data.fiscal_year_options || [], data.selected_fiscal_year);
+        if (data.date_bounds && !initialBoundsSynced) {
+          syncDateBounds(data.date_bounds);
+          initialBoundsSynced = true;
+          await loadReport();
+          return;
+        }
+
+        const rows = data.rows || [];
+        const groupLabel = stockGroupLabel(data.stock_group);
+        meta.textContent = `${farms.join(" + ")} · ${groupLabel}: ${rows.length.toLocaleString("en-GB")} months`;
+
+        if (!rows.length) {
+          empty.style.display = "";
+          empty.textContent = "No stock accrual data for the selected filters.";
+          wrap.style.display = "none";
+          document.getElementById("summary-panel").style.display = "none";
+          return;
+        }
+
+        empty.style.display = "none";
+        wrap.style.display = "";
+        cachedRows = rows;
+        cachedStockGroup = data.stock_group;
+        renderTable(cachedRows, cachedStockGroup);
+      } catch {
+        meta.textContent = "";
+        empty.style.display = "";
+        empty.textContent = "Failed to load stock accruals.";
+        wrap.style.display = "none";
+      } finally {
+        meta.classList.remove("is-loading");
+      }
+    }
+
+    function scheduleLoad() {
+      if (loadTimer) clearTimeout(loadTimer);
+      loadTimer = setTimeout(loadReport, 250);
+    }
+
+    function bindDateInputs() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      function clamp() {
+        if (!monthList.length) return;
+        let minVal = parseInt(minRange.value, 10);
+        let maxVal = parseInt(maxRange.value, 10);
+        if (minVal > maxVal) maxVal = minVal;
+        minRange.value = minVal;
+        maxRange.value = maxVal;
+        updateDateLabels();
+        scheduleLoad();
+      }
+      minRange.addEventListener("input", () => {
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) maxRange.value = minRange.value;
+        updateDateLabels();
+        scheduleLoad();
+      });
+      maxRange.addEventListener("input", () => {
+        if (parseInt(maxRange.value, 10) < parseInt(minRange.value, 10)) minRange.value = maxRange.value;
+        updateDateLabels();
+        scheduleLoad();
+      });
+      minRange.addEventListener("change", clamp);
+      maxRange.addEventListener("change", clamp);
+    }
+
+    bindFarmSlicers();
+    bindExclusiveSlicers(".stock-group-slicer");
+    bindDateInputs();
+    bindSalesToggle();
+    document.getElementById("fiscal-year-select").addEventListener("change", () => {
+      initialBoundsSynced = false;
+      loadReport();
+    });
+    loadReport();
+  </script>
+{% endblock %}

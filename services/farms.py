@@ -1,8 +1,9 @@
 """Farm registry for Thomasson Farms Dashboard.
 
-ALH and BNK share a DairyComp data source historically; SFR, PRK, and COF
-now also export DCEXPORT folders. BNK's DCEXPORT folder is coming soon.
-Only ALH/BNK are active for Outlook DataFlow imports for now.
+ALH and BNK share a DairyComp database. DCEXPORTALH files include both
+herds and are split on the BNAME column (ALH vs BNK). SFR, PRK, and COF
+each have their own DCEXPORT folder. Only ALH/BNK are active for Outlook
+DataFlow imports for now.
 """
 
 from __future__ import annotations

@@ -24,6 +24,12 @@ FP_INVENTORY = "herd_inventory.source_fingerprint"
 FP_EVENTS = "herd_events.source_fingerprint"
 FP_BIRTHS = "herd_births.source_fingerprint"
 
+# ALH and BNK share one DairyComp; DCEXPORTALH files are split on BNAME.
+SHARED_HERD_SOURCE_FARM = "ALH"
+SHARED_HERD_SPLIT_FARMS: tuple[str, ...] = ("ALH", "BNK")
+_BNAME_COLUMN_ALIASES = ("BNAME", "BARN NAME", "BARNNAME")
+_BNK_BNAME_TOKENS = frozenset({"BNK", "BANK", "BANK FARM", "BNK FARM"})
+
 
 def source_fingerprint(source_file: str, last_modified: str, **extra: str) -> str:
     """Stable JSON fingerprint of a herd export file identity + mtime."""
@@ -54,6 +60,86 @@ def store_source_fingerprint(
         db.add(AppSetting(key=key, value=fingerprint))
     else:
         row.value = fingerprint
+
+
+def bname_column(df: pd.DataFrame) -> str | None:
+    lookup = {str(col).strip().upper(): col for col in df.columns}
+    for alias in _BNAME_COLUMN_ALIASES:
+        if alias in lookup:
+            return lookup[alias]
+    return None
+
+
+def _normalize_bname(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip().upper()
+    if text in {"", "-", "NAN", "NONE", "<NA>", "NAT"}:
+        return ""
+    return " ".join(text.split())
+
+
+def farm_code_from_bname(value: Any, *, source_farm: str) -> str:
+    """Map a DairyComp BNAME onto ALH or BNK when reading the shared ALH export."""
+    if source_farm != SHARED_HERD_SOURCE_FARM:
+        return source_farm
+    text = _normalize_bname(value)
+    if text in _BNK_BNAME_TOKENS or text.startswith("BNK") or "BANK" in text:
+        return "BNK"
+    return "ALH"
+
+
+def is_shared_bname_split(df: pd.DataFrame, source_farm: str) -> bool:
+    return source_farm == SHARED_HERD_SOURCE_FARM and bname_column(df) is not None
+
+
+def split_targets_for_source(df: pd.DataFrame, source_farm: str) -> tuple[str, ...]:
+    if is_shared_bname_split(df, source_farm):
+        return SHARED_HERD_SPLIT_FARMS
+    return (source_farm,)
+
+
+def split_dataframe_by_bname(df: pd.DataFrame, *, source_farm: str) -> dict[str, pd.DataFrame]:
+    """Split a shared ALH DairyComp frame into ALH / BNK; other BNAME values stay on ALH."""
+    targets = split_targets_for_source(df, source_farm)
+    if len(targets) == 1:
+        out = df.copy()
+        if "Farm" in out.columns:
+            out["Farm"] = source_farm
+        return {source_farm: out}
+
+    col = bname_column(df)
+    assigned = df[col].map(lambda value: farm_code_from_bname(value, source_farm=source_farm))
+    parts: dict[str, pd.DataFrame] = {}
+    for farm in targets:
+        part = df.loc[assigned.eq(farm)].copy()
+        if "Farm" in part.columns:
+            part["Farm"] = farm
+        parts[farm] = part
+    return parts
+
+
+def shared_source_fingerprints_match(
+    db: Session, prefix: str, fingerprint: str, source_farm: str
+) -> bool:
+    """True when this source file was already imported at the current fingerprint.
+
+    For DCEXPORTALH, BNK is also checked once a BNAME split has stored its
+    fingerprint. If BNK has never been imported from this file, ALH matching is
+    enough (pre-split exports).
+    """
+    source_ok = load_source_fingerprint(db, prefix, source_farm) == fingerprint
+    if source_farm != SHARED_HERD_SOURCE_FARM or not source_ok:
+        return source_ok
+    bnk_stored = load_source_fingerprint(db, prefix, "BNK")
+    return bnk_stored is None or bnk_stored == fingerprint
+
+
+def store_split_source_fingerprints(
+    db: Session, prefix: str, fingerprint: str, farms: list[str] | tuple[str, ...]
+) -> None:
+    for farm in farms:
+        store_source_fingerprint(db, prefix, farm, fingerprint)
 
 
 def category_from_birth(cbrd: int | float | None, gndr: str | None) -> str:

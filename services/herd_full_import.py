@@ -12,6 +12,8 @@ from services.herd_events_import import import_cow_events
 from services.herd_inventory_import import import_herd_inventory
 from services.herd_onedrive import discover_dcexport_files, herd_import_config_error
 from services.genomic_import import import_genomic_results
+from services.stock_accruals import rebuild_stock_accrual_snapshots
+from services.stock_purchase_derivation import rebuild_stock_purchases
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,19 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Genomic import failed")
         genomic = {"skipped": True, "error": str(exc), "rows_imported": 0}
+
+    try:
+        purchases = rebuild_stock_purchases(db)
+    except Exception as exc:
+        logger.exception("Stock purchase rebuild failed")
+        purchases = {"skipped": True, "error": str(exc), "rows_imported": 0}
+
+    try:
+        accruals = rebuild_stock_accrual_snapshots(db)
+    except Exception as exc:
+        logger.exception("Stock accrual snapshot rebuild failed")
+        accruals = {"skipped": True, "error": str(exc), "rows_written": 0}
+
     return {
         "farms_found": farms_found,
         "files": [
@@ -47,6 +62,8 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
         "births": births,
         "inventory": inventory,
         "genomic": genomic,
+        "purchases": purchases,
+        "accruals": accruals,
     }
 
 
@@ -63,6 +80,16 @@ def format_herd_import_summary(result: dict[str, Any]) -> str:
         genomic_label = "unchanged"
     else:
         genomic_label = f"{genomic.get('rows_imported', 0)} rows"
+    purchases = result.get("purchases") or {}
+    accruals = result.get("accruals") or {}
+    if purchases.get("error"):
+        purchases_label = f"failed ({purchases['error']})"
+    else:
+        purchases_label = f"{purchases.get('rows_imported', 0)} animals"
+    if accruals.get("error"):
+        accruals_label = f"failed ({accruals['error']})"
+    else:
+        accruals_label = f"{accruals.get('rows_written', 0)} months"
     if inventory.get("skipped"):
         inventory_label = "unchanged"
     else:
@@ -76,5 +103,7 @@ def format_herd_import_summary(result: dict[str, Any]) -> str:
         f"({', '.join(events.get('farms_imported') or ['none'])}); "
         f"births {births.get('rows_imported', 0)}; "
         f"inventory {inventory_label}; "
-        f"genomics {genomic_label}."
+        f"genomics {genomic_label}; "
+        f"purchases {purchases_label}; "
+        f"accruals {accruals_label}."
     )

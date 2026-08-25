@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -12,6 +13,9 @@ from urllib.parse import quote
 from services.farms import FARMS_BY_CODE
 from services.graph_client import GRAPH_BASE, auth_mode, graph_get_bytes, require_azure_config
 from services.graph_onedrive import GraphOneDriveService, resolved_onedrive_user
+from services.herd_import_utils import SHARED_HERD_SOURCE_FARM
+
+logger = logging.getLogger(__name__)
 
 DCEXPORT_FOLDER_RE = re.compile(r"^DCEXPORT([A-Z]{3})$", re.IGNORECASE)
 CSV_SUFFIXES = {".csv"}
@@ -203,4 +207,15 @@ def download_dcexport_file(entry: dict[str, Any]) -> bytes:
 
 
 def files_for_kind(kind: str) -> list[dict[str, Any]]:
-    return [entry for entry in discover_dcexport_files() if entry.get("kind") == kind]
+    entries = [entry for entry in discover_dcexport_files() if entry.get("kind") == kind]
+    has_alh = any(entry.get("farm") == SHARED_HERD_SOURCE_FARM for entry in entries)
+    if not has_alh:
+        return entries
+    filtered = [entry for entry in entries if entry.get("farm") != "BNK"]
+    skipped = len(entries) - len(filtered)
+    if skipped:
+        logger.info(
+            "Skipping DCEXPORTBNK %s file(s); BNK is split from DCEXPORTALH using BNAME",
+            kind,
+        )
+    return filtered

@@ -21,12 +21,15 @@ from services.herd_onedrive import (
 )
 from services.herd_import_utils import (
     FP_EVENTS,
+    SHARED_HERD_SOURCE_FARM,
+    SHARED_HERD_SPLIT_FARMS,
     dedupe_exit_event_rows,
     dedupe_fresh_event_rows,
-    load_source_fingerprint,
     parse_date_series,
+    shared_source_fingerprints_match,
+    split_dataframe_by_bname,
     source_fingerprint,
-    store_source_fingerprint,
+    store_split_source_fingerprints,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,8 +37,8 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 2000
 _CSV_CHUNK_SIZE = 25_000
 _EVENT_DATE_COLUMNS = ("BDAT", "FDAT", "EDAT", "Date")
-# Bump this when the date parser changes so cron reimports already-fingerprinted files.
-_EVENTS_DATE_PARSER = "yy-yyyy"
+# Bump this when the date parser or ALH/BNK BNAME split changes so cron reimports.
+_EVENTS_DATE_PARSER = "yy-yyyy-bname-v1"
 
 
 def events_source_fingerprint(source_file: str, last_modified: str) -> str:
@@ -223,18 +226,20 @@ def _insert_dataframe_in_batches(
 
 def _import_farm_file(
     db: Session, entry: dict[str, Any], farm: str, import_time: dt.datetime
-) -> int:
+) -> dict[str, int]:
     """Download, clean, and replace one farm's events.
 
-    Existing rows are deleted only after at least one usable CSV row is parsed,
-    so an empty or half-written DC305 export cannot wipe the farm.
+    DCEXPORTALH files with BNAME are split into ALH and BNK. Existing rows are
+    deleted only after at least one usable CSV row is parsed, so an empty or
+    half-written DC305 export cannot wipe the farm.
     """
     file_bytes = download_dcexport_file(entry)
     buffer = io.BytesIO(file_bytes)
     del file_bytes
 
-    rows_imported = 0
-    replaced = False
+    rows_by_farm: dict[str, int] = {}
+    replaced: set[str] = set()
+    split_mode = False
     for chunk in pd.read_csv(
         buffer,
         encoding="utf-8",
@@ -246,16 +251,29 @@ def _import_farm_file(
         chunk = _clean_events_dataframe(chunk)
         if chunk.empty:
             continue
-        if not replaced:
-            db.execute(delete(CowEvent).where(CowEvent.farm == farm))
-            replaced = True
-        _insert_dataframe_in_batches(db, chunk, import_time, farm)
-        rows_imported += len(chunk)
+        parts = split_dataframe_by_bname(chunk, source_farm=farm)
+        if len(parts) > 1:
+            split_mode = True
+        for target_farm, part in parts.items():
+            if part.empty:
+                continue
+            if target_farm not in replaced:
+                db.execute(delete(CowEvent).where(CowEvent.farm == target_farm))
+                replaced.add(target_farm)
+            _insert_dataframe_in_batches(db, part, import_time, target_farm)
+            rows_by_farm[target_farm] = rows_by_farm.get(target_farm, 0) + len(part)
         del chunk
+
+    if split_mode and sum(rows_by_farm.values()) > 0:
+        for target_farm in SHARED_HERD_SPLIT_FARMS:
+            if target_farm not in replaced:
+                db.execute(delete(CowEvent).where(CowEvent.farm == target_farm))
+                replaced.add(target_farm)
+                rows_by_farm.setdefault(target_farm, 0)
 
     del buffer
     gc.collect()
-    return rows_imported
+    return rows_by_farm
 
 
 def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
@@ -292,14 +310,20 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
             }
         )
 
-        if not force and last_modified:
-            stored = load_source_fingerprint(db, FP_EVENTS, farm)
-            if stored == fingerprint:
-                farms_skipped.append(farm)
-                logger.info("Herd events %s unchanged; skipping", farm)
-                continue
+        if not force and last_modified and shared_source_fingerprints_match(
+            db, FP_EVENTS, fingerprint, farm
+        ):
+            skipped = (
+                list(SHARED_HERD_SPLIT_FARMS)
+                if farm == SHARED_HERD_SOURCE_FARM
+                else [farm]
+            )
+            farms_skipped.extend(skipped)
+            logger.info("Herd events %s unchanged; skipping", "+".join(skipped))
+            continue
 
-        rows = _import_farm_file(db, entry, farm, import_time)
+        rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
             logger.error(
@@ -309,8 +333,13 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
             continue
 
         rows_imported += rows
-        store_source_fingerprint(db, FP_EVENTS, farm, fingerprint)
-        farms_imported.append(farm)
+        imported_farms = list(rows_by_farm) or [farm]
+        store_split_source_fingerprints(db, FP_EVENTS, fingerprint, imported_farms)
+        farms_imported.extend(imported_farms)
+        logger.info(
+            "Herd events imported %s",
+            ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
+        )
 
     if farms_imported:
         duplicate_fresh_dropped = remove_duplicate_fresh_cow_events(

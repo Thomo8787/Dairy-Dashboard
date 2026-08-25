@@ -178,6 +178,15 @@
       display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; margin-top: 0.5rem;
     }
     .add-modal-error { color: #b91c1c; font-size: 0.8125rem; margin: 0; }
+    #coll-table thead th.col-edit { cursor: default; width: 4.2rem; }
+    #coll-table td.col-edit { text-align: right; }
+    .edit-row-btn {
+      appearance: none; margin: 0; padding: 0.2rem 0.5rem;
+      border: 1px solid var(--line); border-radius: 6px;
+      background: #fff; color: #1e3a5f;
+      font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+    }
+    .edit-row-btn:hover { background: #eef3f8; }
     .add-step[hidden] { display: none; }
   </style>
 {% endblock %}
@@ -205,10 +214,11 @@
         </div>
         <p class="help-text">
           Each row is one tanker load. Quality comes from NML; litres and weighbridge
-          tickets are from the farm collection sheet. Rows with no sample number are highlighted.
-          Fetch NML emails matches the sample number exactly and links it when the lab date is
-          within one day of the date the milk was sold. A green tick means that match succeeded;
-          a red cross means it did not.
+          tickets are from the farm collection sheet. Cows in milk is the herd count for
+          that farm and date (lactating, not dry, DIM over 4). Rows with no sample number
+          are highlighted. Fetch NML emails matches the sample number exactly and links it
+          when the lab date is within one day of the date the milk was sold. A green tick
+          means that match succeeded; a red cross means it did not.
         </p>
       </aside>
     </div>
@@ -233,6 +243,10 @@
       </div>
       <div class="charts-grid">
         <div class="chart-card">
+          <div class="chart-head"><h3>Milk / cow (L)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-per-cow"></canvas></div>
+        </div>
+        <div class="chart-card">
           <div class="chart-head"><h3>Butterfat (%)</h3></div>
           <div class="chart-wrap"><canvas id="chart-butterfat"></canvas></div>
         </div>
@@ -251,6 +265,10 @@
         <div class="chart-card">
           <div class="chart-head"><h3>BactoScan (x1000/ml)</h3></div>
           <div class="chart-wrap"><canvas id="chart-bactoscan"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Milk temp (°C)</h3></div>
+          <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
         </div>
       </div>
       <p class="chart-hint">Scroll to zoom, drag to box-zoom, hold Ctrl and drag to pan, double-click to reset.</p>
@@ -273,6 +291,7 @@
               <th data-sort="litres_load">Litres</th>
               <th data-sort="litres_weighbridge">Weighbridge</th>
               <th data-sort="temp_c">Temp °C</th>
+              <th data-sort="cows_in_milk">Cows in milk</th>
               <th data-sort="butterfat_pct">Butterfat %</th>
               <th data-sort="protein_pct">Protein %</th>
               <th data-sort="scc">SCC</th>
@@ -280,10 +299,11 @@
               <th data-sort="urea_pct">Urea</th>
               <th data-sort="fpd">FPD</th>
               <th data-sort="antibiotic_pass">A/B</th>
+              <th class="col-edit"></th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr><td colspan="15" class="empty-state">Loading…</td></tr>
+            <tr><td colspan="17" class="empty-state">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -340,6 +360,37 @@
           <button type="button" class="btn ghost" id="add-collection-back">Back</button>
           <button type="button" class="btn ghost" id="add-collection-cancel">Cancel</button>
           <button type="submit" class="btn" id="add-collection-save">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="add-modal-backdrop" id="edit-collection-modal" aria-hidden="true">
+    <div class="add-modal" role="dialog" aria-labelledby="edit-collection-title">
+      <form id="edit-collection-form" class="add-form-grid">
+        <h2 id="edit-collection-title">Edit Collection</h2>
+        <input type="hidden" id="edit-row-id" value="">
+        <p class="help-text" id="edit-collection-farm"></p>
+        <label>
+          Collection date
+          <input type="date" class="add-date-input" id="edit-date" required>
+        </label>
+        <label>
+          Volume (L)
+          <input type="number" id="edit-volume" min="1" step="1" inputmode="numeric" required>
+        </label>
+        <label>
+          Temp (°C)
+          <input type="number" id="edit-temp" step="0.01" min="0" inputmode="decimal">
+        </label>
+        <label>
+          Sample number
+          <input type="text" id="edit-sample" maxlength="16" autocomplete="off">
+        </label>
+        <p class="add-modal-error" id="edit-collection-error" hidden></p>
+        <div class="add-modal-actions">
+          <button type="button" class="btn ghost" id="edit-collection-cancel">Cancel</button>
+          <button type="submit" class="btn" id="edit-collection-save">Save</button>
         </div>
       </form>
     </div>
@@ -498,27 +549,53 @@
     return { lo: q1 - IQR_FACTOR * iqr, hi: q3 + IQR_FACTOR * iqr };
   }
 
-  function cappedValues(sampleRows, metric) {
-    const raw = sampleRows
-      .map((r) => r[metric])
-      .filter((v) => v != null)
-      .map(Number)
-      .filter((v) => !Number.isNaN(v));
-    if (!excludeOutliers || !IQR_METRICS.has(metric)) return raw;
-    const fences = iqrFences(raw);
-    if (!fences) return raw;
-    return raw.map((v) => Math.min(fences.hi, Math.max(fences.lo, v)));
+  function loadWeight(row) {
+    const load = Number(row.litres_load);
+    if (Number.isFinite(load) && load > 0) return load;
+    const weighbridge = Number(row.litres_weighbridge);
+    if (Number.isFinite(weighbridge) && weighbridge > 0) return weighbridge;
+    return null;
+  }
+
+  function weightedMean(items) {
+    let num = 0;
+    let den = 0;
+    for (const item of items) {
+      if (item == null || item.v == null || !(item.w > 0)) continue;
+      num += item.v * item.w;
+      den += item.w;
+    }
+    return den ? num / den : null;
+  }
+
+  function metricItems(sampleRows, metric) {
+    const items = [];
+    for (const row of sampleRows) {
+      const raw = row[metric];
+      const weight = loadWeight(row);
+      if (raw == null || weight == null) continue;
+      const value = Number(raw);
+      if (Number.isNaN(value)) continue;
+      items.push({ v: value, w: weight });
+    }
+    return items;
+  }
+
+  function capItems(items, metric) {
+    if (!excludeOutliers || !IQR_METRICS.has(metric)) return items;
+    const fences = iqrFences(items.map((item) => item.v));
+    if (!fences) return items;
+    return items.map((item) => ({
+      v: Math.min(fences.hi, Math.max(fences.lo, item.v)),
+      w: item.w,
+    }));
   }
 
   function summaryWithOutliers(summary) {
-    const mean = (arr) => {
-      if (!arr.length) return null;
-      return arr.reduce((a, b) => a + b, 0) / arr.length;
-    };
     return {
       ...summary,
-      avg_scc: mean(cappedValues(rows, "scc")),
-      avg_bactoscan: mean(cappedValues(rows, "bactoscan")),
+      avg_scc: weightedMean(capItems(metricItems(rows, "scc"), "scc")),
+      avg_bactoscan: weightedMean(capItems(metricItems(rows, "bactoscan"), "bactoscan")),
     };
   }
 
@@ -535,14 +612,19 @@
   function rollingMeanAt(points, dates, endIdx, windowDays, metric) {
     const start = new Date(dates[endIdx]);
     start.setDate(start.getDate() - (windowDays - 1));
-    let sum = 0, count = 0;
+    let sum = 0;
+    let weight = 0;
     for (let j = 0; j <= endIdx; j++) {
       if (dates[j] >= start && dates[j] <= dates[endIdx]) {
-        const v = points[j][metric];
-        if (v != null) { sum += v; count++; }
+        const value = points[j][metric];
+        if (value == null) continue;
+        const litres = Number(points[j].litres);
+        const dayWeight = Number.isFinite(litres) && litres > 0 ? litres : 1;
+        sum += value * dayWeight;
+        weight += dayWeight;
       }
     }
-    return count ? sum / count : null;
+    return weight ? sum / weight : null;
   }
 
   function rollingByDate(points, metric, windows) {
@@ -560,17 +642,31 @@
   function cleanedPoints(farm, metric) {
     const points = trend[farm] || [];
     if (!excludeOutliers || !IQR_METRICS.has(metric)) return points;
-    const vals = points.map((p) => p[metric]).filter((v) => v != null).map(Number);
-    const fences = iqrFences(vals);
-    if (!fences) return points;
-    return points.map((p) => {
-      const v = p[metric];
-      if (v == null) return p;
-      if (v < fences.lo || v > fences.hi) {
-        return Object.assign({}, p, { [metric]: Math.min(fences.hi, Math.max(fences.lo, v)) });
-      }
-      return p;
-    });
+    const farmRows = rows.filter((row) => row.farm === farm && row.sample_date);
+    const fences = iqrFences(
+      farmRows
+        .map((row) => row[metric])
+        .filter((value) => value != null)
+        .map(Number)
+        .filter((value) => !Number.isNaN(value))
+    );
+    const buckets = {};
+    for (const row of farmRows) {
+      const weight = loadWeight(row);
+      if (weight == null || row[metric] == null) continue;
+      let value = Number(row[metric]);
+      if (Number.isNaN(value)) continue;
+      if (fences) value = Math.min(fences.hi, Math.max(fences.lo, value));
+      const key = row.sample_date;
+      if (!buckets[key]) buckets[key] = { num: 0, den: 0 };
+      buckets[key].num += value * weight;
+      buckets[key].den += weight;
+    }
+    return Object.keys(buckets).sort().map((date) => ({
+      date,
+      litres: buckets[date].den,
+      [metric]: buckets[date].den ? buckets[date].num / buckets[date].den : null,
+    }));
   }
 
   function seriesFor(farm, metric, labels, mode) {
@@ -591,11 +687,13 @@
     const mode = smoothingMode;
     const tag = mode === "avg" ? " (rolling avg)" : mode === "avg30" ? " (30-day avg)" : "";
     const defs = [
+      ["chart-per-cow", "litres_per_cow", "Milk / cow"],
       ["chart-butterfat", "butterfat_pct", "Butterfat"],
       ["chart-protein", "protein_pct", "Protein"],
       ["chart-urea", "urea_pct", "Urea"],
       ["chart-scc", "scc", "SCC"],
       ["chart-bactoscan", "bactoscan", "BactoScan"],
+      ["chart-temp", "temp_c", "Milk temp"],
     ];
     defs.forEach(([canvasId, metric, suffix]) => {
       destroyChart(canvasId);
@@ -674,7 +772,7 @@
   function renderTable() {
     const tbody = document.getElementById("table-body");
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="15" class="empty-state">No collections match the current filters.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="17" class="empty-state">No collections match the current filters.</td></tr>';
       return;
     }
     tbody.innerHTML = sortRows(rows).map((row) => {
@@ -691,6 +789,7 @@
         `<td class="num">${escapeHtml(intFmt(row.litres_load))}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.litres_weighbridge))}</td>` +
         `<td class="num">${escapeHtml(num(row.temp_c, 2))}</td>` +
+        `<td class="num">${escapeHtml(intFmt(row.cows_in_milk))}</td>` +
         `<td class="num">${escapeHtml(num(row.butterfat_pct, 2))}</td>` +
         `<td class="num">${escapeHtml(num(row.protein_pct, 2))}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.scc))}</td>` +
@@ -698,6 +797,7 @@
         `<td class="num">${escapeHtml(num(row.urea_pct, 3))}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.fpd))}</td>` +
         `<td>${abCell(row.antibiotic_pass)}</td>` +
+        `<td class="col-edit"><button type="button" class="edit-row-btn" data-edit-id="${row.id != null ? row.id : ""}">Edit</button></td>` +
         `</tr>`;
     }).join("");
   }
@@ -721,7 +821,7 @@
     } catch (err) {
       document.getElementById("meta-line").textContent = "";
       document.getElementById("table-body").innerHTML =
-        '<tr><td colspan="15" class="empty-state">Could not load collections.</td></tr>';
+        '<tr><td colspan="17" class="empty-state">Could not load collections.</td></tr>';
       showMessage(err.message || String(err), true);
     }
   }
@@ -1041,6 +1141,103 @@
       loadResults();
     } catch (err) {
       showAddError(err.message || String(err));
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  const editModal = document.getElementById("edit-collection-modal");
+  const FARM_NAMES = {
+    {% for farm in farms %}"{{ farm.code }}": {{ farm.name | tojson }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  };
+
+  function showEditError(text) {
+    const err = document.getElementById("edit-collection-error");
+    err.hidden = !text;
+    err.textContent = text || "";
+  }
+
+  function closeEditModal() {
+    editModal.classList.remove("open");
+    editModal.setAttribute("aria-hidden", "true");
+    showEditError("");
+  }
+
+  function openEditModal(row) {
+    if (!row || row.id == null) return;
+    document.getElementById("edit-row-id").value = String(row.id);
+    const farmLabel = FARM_NAMES[row.farm] || row.farm || "";
+    const loadLabel = row.load_number != null ? " · Load " + row.load_number : "";
+    document.getElementById("edit-collection-title").textContent = "Edit Collection";
+    document.getElementById("edit-collection-farm").textContent = farmLabel + loadLabel;
+    document.getElementById("edit-date").value = row.sample_date || "";
+    document.getElementById("edit-volume").value = row.litres_load != null ? row.litres_load : "";
+    document.getElementById("edit-temp").value = formatTemp(row.temp_c);
+    document.getElementById("edit-sample").value = row.sample_id || "";
+    showEditError("");
+    editModal.classList.add("open");
+    editModal.setAttribute("aria-hidden", "false");
+    document.getElementById("edit-volume").focus();
+  }
+
+  document.getElementById("table-body").addEventListener("click", (e) => {
+    const btn = e.target.closest(".edit-row-btn");
+    if (!btn) return;
+    const id = Number(btn.dataset.editId);
+    const row = rows.find((item) => Number(item.id) === id);
+    if (!row) {
+      showMessage("Could not find that collection to edit.", true);
+      return;
+    }
+    openEditModal(row);
+  });
+  document.getElementById("edit-collection-cancel").addEventListener("click", closeEditModal);
+  editModal.addEventListener("click", (e) => {
+    if (e.target.id === "edit-collection-modal") closeEditModal();
+  });
+  document.getElementById("edit-collection-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    showEditError("");
+    const rowId = document.getElementById("edit-row-id").value;
+    const date = document.getElementById("edit-date").value;
+    const volumeRaw = document.getElementById("edit-volume").value;
+    const tempRaw = document.getElementById("edit-temp").value;
+    const sample = document.getElementById("edit-sample").value;
+    if (!rowId || !date) {
+      showEditError("Collection date is required.");
+      return;
+    }
+    const litresLoad = volumeRaw === "" ? null : Number(volumeRaw);
+    const tempC = tempRaw === "" ? null : Math.round(Number(tempRaw) * 100) / 100;
+    if (litresLoad == null || Number.isNaN(litresLoad) || litresLoad <= 0) {
+      showEditError("Enter a volume greater than zero.");
+      return;
+    }
+    if (Number.isNaN(tempC)) {
+      showEditError("Temperature must be a number.");
+      return;
+    }
+    const saveBtn = document.getElementById("edit-collection-save");
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/milk-quality/api/collections/" + encodeURIComponent(rowId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          litres_load: litresLoad,
+          temp_c: tempC,
+          sample_id: sample,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save collection");
+      closeEditModal();
+      showMessage("Updated collection for " + (data.farm || "") + ".", false);
+      loadResults();
+    } catch (err) {
+      showEditError(err.message || String(err));
     } finally {
       saveBtn.disabled = false;
     }

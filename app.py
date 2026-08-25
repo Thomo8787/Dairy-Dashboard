@@ -51,6 +51,7 @@ from services.herd_sync import (
     start_herd_import_job,
 )
 from services.stock_pages import STOCK_PAGES, stock_template_extras
+from services.stock_accruals import build_stock_accruals_report
 from services.heifer_inventory import (
     build_heifer_inventory_csv,
     build_heifer_inventory_pdf,
@@ -111,6 +112,7 @@ from services.parlour_efficiency import (
     rotation_date_bounds,
 )
 from services.nml_email import NML_LOOKBACK_DAYS
+from services.production_summary import get_production_summary
 from services.nml_results import (
     XLSX_CONTENT_TYPE,
     build_nml_results_csv,
@@ -120,7 +122,7 @@ from services.nml_results import (
 )
 from services.nml_statements import list_nml_statements
 from services.nml_sync import get_nml_import_status, start_nml_import_job
-from services.nml_manual import get_collection_day, save_collection_day
+from services.nml_manual import get_collection_day, save_collection_day, update_collection_load
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
@@ -251,6 +253,7 @@ def require_login():
             or request.endpoint.startswith("events_api")
             or request.endpoint.startswith("parlour_api")
             or request.endpoint.startswith("milk_quality_api")
+            or request.endpoint.startswith("stock_api")
         ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
@@ -826,6 +829,14 @@ def milk_quality_api_status():
     return jsonify(nml_status())
 
 
+@app.route("/milk-quality/api/production-summary")
+def milk_quality_api_production_summary():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    return jsonify(get_production_summary())
+
+
 @app.route("/milk-quality/api/statements")
 def milk_quality_api_statements():
     user, error = _milk_quality_json_user()
@@ -914,10 +925,35 @@ def milk_quality_api_collections_save():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/milk-quality/api/collections/<int:row_id>", methods=["PATCH", "POST"])
+def milk_quality_api_collections_update(row_id: int):
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    raw_date = (payload.get("date") or payload.get("sample_date") or "").strip()
+    try:
+        sample_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    try:
+        return jsonify(
+            update_collection_load(
+                row_id,
+                sample_date=sample_date,
+                litres_load=payload.get("litres_load", payload.get("volume_litres")),
+                temp_c=payload.get("temp_c"),
+                sample_id=payload.get("sample_id"),
+            )
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/stock-inventory")
 @permission_required("perm_stock")
 def stock_inventory():
-    return redirect(url_for("stock_heifer_inventory"))
+    return redirect(url_for("stock_accruals"))
 
 
 def _stock_json_user():
@@ -944,6 +980,12 @@ def _render_stock_page(slug: str):
         **_page_context(active_nav=page["nav"]),
         **stock_template_extras(),
     )
+
+
+@app.route("/stock-inventory/stock-accruals")
+@permission_required("perm_stock")
+def stock_accruals():
+    return _render_stock_page("stock-accruals")
 
 
 @app.route("/stock-inventory/heifer-inventory")
@@ -1052,6 +1094,24 @@ def _selected_stock_farms() -> list[str]:
     return [f for f in farms if f in HERD_FARM_OPTIONS]
 
 
+@app.route("/stock-inventory/api/stock-accruals")
+def stock_api_stock_accruals():
+    user, error = _stock_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(
+            build_stock_accruals_report(
+                session,
+                farms=_selected_stock_farms() or None,
+                stock_group=request.args.get("stock_group") or "cows",
+                month_from=_parse_date_arg("month_from"),
+                month_to=_parse_date_arg("month_to"),
+                fiscal_year=_parse_int_arg("fiscal_year"),
+            )
+        )
+
+
 @app.route("/stock-inventory/api/heifer-inventory")
 def stock_api_heifer_inventory():
     user, error = _stock_json_user()
@@ -1115,19 +1175,15 @@ def stock_api_beef_inventory():
     user, error = _stock_json_user()
     if error:
         return error
-    try:
-        with get_session() as session:
-            return jsonify(
-                get_beef_inventory_report(
-                    session,
-                    farms=_selected_stock_farms() or None,
-                    min_age=_parse_int_arg("min_age"),
-                    max_age=_parse_int_arg("max_age"),
-                    jv_mode=request.args.get("jv_mode") or "all",
-                )
+    with get_session() as session:
+        return jsonify(
+            get_beef_inventory_report(
+                session,
+                farms=_selected_stock_farms() or None,
+                min_age=_parse_int_arg("min_age"),
+                max_age=_parse_int_arg("max_age"),
             )
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        )
 
 
 @app.route("/stock-inventory/api/beef-inventory/export.csv")
@@ -1136,17 +1192,13 @@ def stock_api_beef_inventory_csv():
     if error:
         return error
     farms = _selected_stock_farms()
-    try:
-        with get_session() as session:
-            report = get_beef_inventory_report(
-                session,
-                farms=farms or None,
-                min_age=_parse_int_arg("min_age"),
-                max_age=_parse_int_arg("max_age"),
-                jv_mode=request.args.get("jv_mode") or "all",
-            )
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    with get_session() as session:
+        report = get_beef_inventory_report(
+            session,
+            farms=farms or None,
+            min_age=_parse_int_arg("min_age"),
+            max_age=_parse_int_arg("max_age"),
+        )
     content = build_beef_inventory_csv(report, farms or list(HERD_FARM_OPTIONS))
     return Response(
         content,
@@ -1161,17 +1213,13 @@ def stock_api_beef_inventory_pdf():
     if error:
         return error
     farms = _selected_stock_farms()
-    try:
-        with get_session() as session:
-            report = get_beef_inventory_report(
-                session,
-                farms=farms or None,
-                min_age=_parse_int_arg("min_age"),
-                max_age=_parse_int_arg("max_age"),
-                jv_mode=request.args.get("jv_mode") or "all",
-            )
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    with get_session() as session:
+        report = get_beef_inventory_report(
+            session,
+            farms=farms or None,
+            min_age=_parse_int_arg("min_age"),
+            max_age=_parse_int_arg("max_age"),
+        )
     content = build_beef_inventory_pdf(report, farms or list(HERD_FARM_OPTIONS))
     return Response(
         content,

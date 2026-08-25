@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 
 from services.database import NmlMilkResult, get_session
+from services.nml_results import _load_weight, _weighted_avg
 from services.events_common import (
     _fiscal_year_calendar_bounds,
     _fiscal_year_from_date,
@@ -45,17 +46,16 @@ def _combine(records: list[NmlMilkResult]) -> dict[str, Any]:
         "antibiotic_fails": sum(1 for r in records if r.antibiotic_pass is False),
     }
     for field in _QUALITY_FIELDS:
-        values = [getattr(r, field) for r in records if getattr(r, field) is not None]
-        if not values:
+        digits = 3 if field == "urea_pct" else 0 if field in _INT_FIELDS else 2
+        mean = _weighted_avg(records, field, digits)
+        if mean is None:
             out[field] = None
-            continue
-        mean = sum(float(v) for v in values) / len(values)
-        if field in _INT_FIELDS:
+        elif field in _INT_FIELDS:
             out[field] = int(round(mean))
-        elif field == "urea_pct":
-            out[field] = round(mean, 3)
         else:
-            out[field] = round(mean, 2)
+            out[field] = mean
+    litres = sum(_load_weight(r) or 0.0 for r in records)
+    out["litres_sold"] = round(litres, 0) if litres else None
     return out
 
 
@@ -114,7 +114,7 @@ def list_nml_statements(
     }
 
     if len(selected_farms) > 1:
-        farm_label = " + ".join(selected_farms) + " — sample average"
+        farm_label = " + ".join(selected_farms) + " — litre-weighted"
     else:
         farm = FARMS_BY_CODE.get(selected_farms[0])
         farm_label = farm.name if farm else selected_farms[0]
@@ -125,7 +125,7 @@ def list_nml_statements(
         "fiscal_year_options": fiscal_year_options,
         "farms": selected_farms,
         "farm_label": farm_label,
-        "is_weighted": False,
+        "is_weighted": True,
         "source": "nml",
         "rows": rows,
         "total": total,

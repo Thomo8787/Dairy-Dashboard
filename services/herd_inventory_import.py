@@ -11,14 +11,17 @@ import pandas as pd
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from services.database import HerdInventory
+from services.database import HerdInventory, StockAccrualSnapshot, StockOpeningBaseline
 from services.herd_import_utils import (
     FP_INVENTORY,
+    SHARED_HERD_SOURCE_FARM,
+    SHARED_HERD_SPLIT_FARMS,
     bulk_insert_dataframe,
-    load_source_fingerprint,
     parse_date_series,
+    shared_source_fingerprints_match,
+    split_dataframe_by_bname,
     source_fingerprint,
-    store_source_fingerprint,
+    store_split_source_fingerprints,
 )
 from services.herd_onedrive import (
     KIND_INVENTORY,
@@ -30,8 +33,8 @@ from services.inventory_processor import load_inventory_csv, process_inventory_f
 
 logger = logging.getLogger(__name__)
 
-# Bump this when inventory processing changes so cron reimports already-fingerprinted files.
-_INVENTORY_PROCESSOR = "category-months-v1"
+# Bump this when inventory processing or ALH/BNK BNAME split changes.
+_INVENTORY_PROCESSOR = "category-months-bname-v1"
 
 
 def inventory_source_fingerprint(source_file: str, last_modified: str) -> str:
@@ -107,21 +110,40 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
     return out.to_dict(orient="records")
 
 
-def _import_farm_file(db: Session, entry: dict[str, Any], farm: str, import_time: dt.datetime) -> int:
+def _reset_shared_herd_openings(db: Session, farms: list[str]) -> None:
+    """Drop stored openings so stock accruals re-seed after ALH/BNK first split."""
+    db.execute(delete(StockOpeningBaseline).where(StockOpeningBaseline.farm.in_(farms)))
+    db.execute(delete(StockAccrualSnapshot).where(StockAccrualSnapshot.farm.in_(farms)))
+
+
+def _import_farm_file(
+    db: Session, entry: dict[str, Any], farm: str, import_time: dt.datetime
+) -> dict[str, int]:
     file_bytes = download_dcexport_file(entry)
     df = load_inventory_csv(file_bytes)
     del file_bytes
     df = process_inventory_file(df, farm)
-    rows = len(df)
-    if rows == 0:
-        del df
-        gc.collect()
-        return 0
-    db.execute(delete(HerdInventory).where(HerdInventory.farm == farm))
-    bulk_insert_dataframe(db, HerdInventory, df, _dataframe_to_mappings, import_time)
+    parts = split_dataframe_by_bname(df, source_farm=farm)
     del df
+    split_mode = len(parts) > 1
+    rows_by_farm: dict[str, int] = {}
+    for target_farm, part in parts.items():
+        part["Farm"] = target_farm
+        if part.empty:
+            rows_by_farm[target_farm] = 0
+            continue
+        db.execute(delete(HerdInventory).where(HerdInventory.farm == target_farm))
+        bulk_insert_dataframe(db, HerdInventory, part, _dataframe_to_mappings, import_time)
+        rows_by_farm[target_farm] = len(part)
+
+    total = sum(rows_by_farm.values())
+    if split_mode and total > 0:
+        for target_farm in SHARED_HERD_SPLIT_FARMS:
+            if rows_by_farm.get(target_farm, 0) == 0:
+                db.execute(delete(HerdInventory).where(HerdInventory.farm == target_farm))
+                rows_by_farm.setdefault(target_farm, 0)
     gc.collect()
-    return rows
+    return rows_by_farm
 
 
 def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
@@ -153,21 +175,50 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
                 "last_modified": last_modified,
             }
         )
-        if not force and last_modified:
-            stored = load_source_fingerprint(db, FP_INVENTORY, farm)
-            if stored == fingerprint:
-                farms_skipped.append(farm)
-                logger.info("Herd inventory %s unchanged; skipping", farm)
-                continue
+        if not force and last_modified and shared_source_fingerprints_match(
+            db, FP_INVENTORY, fingerprint, farm
+        ):
+            skipped = (
+                list(SHARED_HERD_SPLIT_FARMS)
+                if farm == SHARED_HERD_SOURCE_FARM
+                else [farm]
+            )
+            farms_skipped.extend(skipped)
+            logger.info("Herd inventory %s unchanged; skipping", "+".join(skipped))
+            continue
 
-        rows = _import_farm_file(db, entry, farm, import_time)
+        bnk_before = 0
+        if farm == SHARED_HERD_SOURCE_FARM:
+            bnk_before = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(HerdInventory)
+                    .where(HerdInventory.farm == "BNK")
+                )
+                or 0
+            )
+
+        rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
             logger.error("Herd inventory %s file had 0 usable rows; leaving existing data", farm)
             continue
         rows_imported += rows
-        store_source_fingerprint(db, FP_INVENTORY, farm, fingerprint)
-        farms_imported.append(farm)
+        imported_farms = list(rows_by_farm) or [farm]
+        store_split_source_fingerprints(db, FP_INVENTORY, fingerprint, imported_farms)
+        farms_imported.extend(imported_farms)
+        if (
+            farm == SHARED_HERD_SOURCE_FARM
+            and bnk_before == 0
+            and "BNK" in rows_by_farm
+        ):
+            _reset_shared_herd_openings(db, list(SHARED_HERD_SPLIT_FARMS))
+            logger.info("Reset ALH/BNK stock accrual openings after first BNAME split")
+        logger.info(
+            "Herd inventory imported %s",
+            ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
+        )
 
     farm_counts = dict(
         db.execute(select(HerdInventory.farm, func.count()).group_by(HerdInventory.farm)).all()

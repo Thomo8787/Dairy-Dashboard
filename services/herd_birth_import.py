@@ -21,22 +21,26 @@ from services.herd_onedrive import (
 )
 from services.herd_import_utils import (
     FP_BIRTHS,
+    SHARED_HERD_SOURCE_FARM,
+    SHARED_HERD_SPLIT_FARMS,
     bulk_insert_dataframe,
     birth_category_series,
     dedupe_birth_rows,
     drop_unnamed_columns,
     fiscal_year_from_dates,
-    load_source_fingerprint,
     parse_date_series,
     remove_invalid_id_rows,
+    shared_source_fingerprints_match,
+    split_dataframe_by_bname,
     source_fingerprint,
-    store_source_fingerprint,
+    store_split_source_fingerprints,
 )
 
 logger = logging.getLogger(__name__)
 
 _BIRTH_ENCODING = "windows-1252"
 _BIRTH_REQUIRED_COLUMNS = ("ID", "ETAG", "BDAT", "CBRD", "GNDR")
+_BIRTHS_SPLITTER = "bname-v1"
 
 
 def _clean_birth_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -55,7 +59,8 @@ def _clean_birth_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
             .apply(lambda col: col.str.strip())
         )
 
-    df = df[list(_BIRTH_REQUIRED_COLUMNS) + ["Farm"]].copy()
+    keep = list(_BIRTH_REQUIRED_COLUMNS) + ["Farm"]
+    df = df[[col for col in keep if col in df.columns]].copy()
     df = remove_invalid_id_rows(df)
 
     bdat_as_str = df["BDAT"].astype(str).str.strip()
@@ -105,7 +110,7 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
 
 def _import_farm_file(
     db: Session, entry: dict[str, Any], farm: str, import_time: dt.datetime
-) -> tuple[int, int]:
+) -> tuple[dict[str, int], int]:
     file_bytes = download_dcexport_file(entry)
     df = pd.read_csv(
         io.BytesIO(file_bytes),
@@ -115,18 +120,33 @@ def _import_farm_file(
     )
     del file_bytes
 
-    df["Farm"] = farm
-    df, duplicates_dropped = _clean_birth_dataframe(df)
-    rows = len(df)
-    if rows == 0:
-        del df
-        gc.collect()
-        return 0, duplicates_dropped
-    db.execute(delete(HerdBirth).where(HerdBirth.farm == farm))
-    bulk_insert_dataframe(db, HerdBirth, df, _dataframe_to_mappings, import_time)
+    parts = split_dataframe_by_bname(df, source_farm=farm)
     del df
+    split_mode = len(parts) > 1
+    rows_by_farm: dict[str, int] = {}
+    duplicates_dropped = 0
+
+    for target_farm, part in parts.items():
+        part["Farm"] = target_farm
+        cleaned, dropped = _clean_birth_dataframe(part)
+        duplicates_dropped += dropped
+        if cleaned.empty:
+            rows_by_farm[target_farm] = 0
+            continue
+        db.execute(delete(HerdBirth).where(HerdBirth.farm == target_farm))
+        bulk_insert_dataframe(db, HerdBirth, cleaned, _dataframe_to_mappings, import_time)
+        rows_by_farm[target_farm] = len(cleaned)
+        del cleaned
+
+    total = sum(rows_by_farm.values())
+    if split_mode and total > 0:
+        for target_farm in SHARED_HERD_SPLIT_FARMS:
+            if rows_by_farm.get(target_farm, 0) == 0:
+                db.execute(delete(HerdBirth).where(HerdBirth.farm == target_farm))
+                rows_by_farm.setdefault(target_farm, 0)
+
     gc.collect()
-    return rows, duplicates_dropped
+    return rows_by_farm, duplicates_dropped
 
 
 def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
@@ -156,7 +176,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
         farm = entry["farm"]
         relative_path = entry["relative_path"]
         last_modified = entry.get("last_modified") or ""
-        fingerprint = source_fingerprint(relative_path, last_modified)
+        fingerprint = source_fingerprint(relative_path, last_modified, splitter=_BIRTHS_SPLITTER)
         sources.append(
             {
                 "farm": farm,
@@ -165,14 +185,20 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
             }
         )
 
-        if not force and last_modified:
-            stored = load_source_fingerprint(db, FP_BIRTHS, farm)
-            if stored == fingerprint:
-                farms_skipped.append(farm)
-                logger.info("Herd births %s unchanged; skipping", farm)
-                continue
+        if not force and last_modified and shared_source_fingerprints_match(
+            db, FP_BIRTHS, fingerprint, farm
+        ):
+            skipped = (
+                list(SHARED_HERD_SPLIT_FARMS)
+                if farm == SHARED_HERD_SOURCE_FARM
+                else [farm]
+            )
+            farms_skipped.extend(skipped)
+            logger.info("Herd births %s unchanged; skipping", "+".join(skipped))
+            continue
 
-        rows, dropped = _import_farm_file(db, entry, farm, import_time)
+        rows_by_farm, dropped = _import_farm_file(db, entry, farm, import_time)
+        rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
             logger.error(
@@ -182,10 +208,17 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
             continue
         rows_imported += rows
         duplicate_rows_dropped += dropped
+        imported_farms = list(rows_by_farm) or [farm]
         if dropped:
-            duplicate_rows_dropped_by_farm[farm] = dropped
-        store_source_fingerprint(db, FP_BIRTHS, farm, fingerprint)
-        farms_imported.append(farm)
+            for code, count in rows_by_farm.items():
+                if count:
+                    duplicate_rows_dropped_by_farm[code] = dropped
+        store_split_source_fingerprints(db, FP_BIRTHS, fingerprint, imported_farms)
+        farms_imported.extend(imported_farms)
+        logger.info(
+            "Herd births imported %s",
+            ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
+        )
 
     farm_counts = dict(
         db.execute(select(HerdBirth.farm, func.count()).group_by(HerdBirth.farm)).all()

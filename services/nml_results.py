@@ -11,6 +11,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
 
+from services.cows_in_milk import cows_in_milk_for_dates
 from services.database import NmlMilkResult, get_session
 from services.farms import FARMS
 
@@ -28,6 +29,7 @@ _HEADERS = (
     "Litres",
     "Weighbridge",
     "Temp °C",
+    "Cows in milk",
     "Butterfat %",
     "Protein %",
     "SCC",
@@ -37,7 +39,7 @@ _HEADERS = (
     "Urea",
 )
 
-_TREND_METRICS = ("butterfat_pct", "protein_pct", "scc", "bactoscan", "urea_pct", "fpd")
+_TREND_METRICS = ("butterfat_pct", "protein_pct", "scc", "bactoscan", "urea_pct", "fpd", "temp_c")
 _FARM_ORDER = tuple(farm.code for farm in FARMS)
 
 
@@ -68,6 +70,7 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
     sample_missing = bool(row.sample_missing)
     status = _nml_status(row)
     return {
+        "id": row.id,
         "farm": row.farm or "",
         "producer_ref": row.producer_ref or "",
         "milk_buyer": row.milk_buyer or "",
@@ -77,6 +80,7 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
         "sample_missing": sample_missing,
         "litres_load": row.litres_load,
         "litres_weighbridge": row.litres_weighbridge,
+        "cows_in_milk": None,
         "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
         "butterfat_pct": row.butterfat_pct,
         "protein_pct": row.protein_pct,
@@ -92,25 +96,117 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
     }
 
 
+def _load_weight(row: dict[str, Any] | Any) -> float | None:
+    """Litres used to weight quality averages. Prefer tanker litres, then weighbridge."""
+    getter = row.get if isinstance(row, dict) else lambda key, default=None: getattr(row, key, default)
+    for key in ("litres_load", "litres_weighbridge"):
+        raw = getter(key)
+        if raw is None:
+            continue
+        try:
+            weight = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if weight > 0:
+            return weight
+    return None
+
+
+def _weighted_avg(rows: list[Any], metric: str, digits: int = 2) -> float | None:
+    total = 0.0
+    weight = 0.0
+    for row in rows:
+        getter = row.get if isinstance(row, dict) else lambda key, default=None: getattr(row, key, default)
+        value = getter(metric)
+        litres = _load_weight(row)
+        if value is None or litres is None:
+            continue
+        total += float(value) * litres
+        weight += litres
+    if weight <= 0:
+        return None
+    return round(total / weight, digits)
+
+
+def _attach_cows_in_milk(session: Any, rows: list[dict[str, Any]]) -> None:
+    """Set cows_in_milk from herd inventory / events (same farm + date on every load)."""
+    if not rows:
+        return
+    farms: set[str] = set()
+    dates: set[dt.date] = set()
+    parsed: list[tuple[dict[str, Any], str, dt.date | None]] = []
+    for row in rows:
+        farm = (row.get("farm") or "").strip().upper()
+        day: dt.date | None = None
+        raw_date = row.get("sample_date") or ""
+        if isinstance(raw_date, dt.date):
+            day = raw_date
+        else:
+            try:
+                day = dt.date.fromisoformat(str(raw_date)[:10])
+            except ValueError:
+                day = None
+        parsed.append((row, farm, day))
+        if farm and day is not None:
+            farms.add(farm)
+            dates.add(day)
+    counts = cows_in_milk_for_dates(session, farms, dates)
+    for row, farm, day in parsed:
+        if not farm or day is None:
+            row["cows_in_milk"] = None
+            continue
+        row["cows_in_milk"] = counts.get((farm, day))
+
+
 def _build_trend(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    buckets: dict[tuple[str, str], dict[str, list[float]]] = {}
+    buckets: dict[tuple[str, str], dict[str, list[tuple[float, float]]]] = {}
+    day_litres: dict[tuple[str, str], float] = {}
+    day_cows: dict[tuple[str, str], int] = {}
     for row in rows:
         farm = row["farm"] or "?"
         date = row["sample_date"]
         if not date:
             continue
-        bucket = buckets.setdefault((farm, date), {m: [] for m in _TREND_METRICS})
+        key = (farm, date)
+        litres = _load_weight(row)
+        if litres:
+            day_litres[key] = day_litres.get(key, 0.0) + litres
+        cows = row.get("cows_in_milk")
+        if cows is not None:
+            try:
+                day_cows[key] = int(cows)
+            except (TypeError, ValueError):
+                pass
+        if litres is None:
+            continue
+        bucket = buckets.setdefault(key, {m: [] for m in _TREND_METRICS})
         for metric in _TREND_METRICS:
             value = row.get(metric)
             if value is not None:
-                bucket[metric].append(float(value))
+                bucket[metric].append((float(value), litres))
 
     trend: dict[str, list[dict[str, Any]]] = {}
     for (farm, date), metrics in buckets.items():
-        point: dict[str, Any] = {"date": date}
+        litres = round(day_litres.get((farm, date), 0.0), 0)
+        cows = day_cows.get((farm, date))
+        point: dict[str, Any] = {
+            "date": date,
+            "litres": litres or None,
+            "volume_litres": litres or None,
+            "cows_in_milk": cows,
+        }
+        if litres and cows and cows > 0:
+            point["litres_per_cow"] = round(float(litres) / cows, 2)
+        else:
+            point["litres_per_cow"] = None
         for metric in _TREND_METRICS:
-            values = metrics[metric]
-            point[metric] = round(sum(values) / len(values), 3) if values else None
+            pairs = metrics[metric]
+            if not pairs:
+                point[metric] = None
+                continue
+            total = sum(value * weight for value, weight in pairs)
+            weight = sum(weight for _value, weight in pairs)
+            point[metric] = round(total / weight, 3) if weight else None
         trend.setdefault(farm, []).append(point)
     for points in trend.values():
         points.sort(key=lambda item: item["date"])
@@ -118,10 +214,6 @@ def _build_trend(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    def avg(metric: str, digits: int = 2) -> float | None:
-        values = [float(r[metric]) for r in rows if r.get(metric) is not None]
-        return round(sum(values) / len(values), digits) if values else None
-
     latest = max((r["sample_date"] for r in rows if r["sample_date"]), default="")
     fails = sum(1 for r in rows if r.get("antibiotic_pass") is False)
     litres = [float(r["litres_load"]) for r in rows if r.get("litres_load") is not None]
@@ -133,12 +225,12 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "count": len(rows),
         "latest_sample_date": latest,
-        "avg_butterfat_pct": avg("butterfat_pct"),
-        "avg_protein_pct": avg("protein_pct"),
-        "avg_scc": avg("scc"),
-        "avg_bactoscan": avg("bactoscan"),
-        "avg_urea_pct": avg("urea_pct", 3),
-        "avg_temp_c": avg("temp_c", 2),
+        "avg_butterfat_pct": _weighted_avg(rows, "butterfat_pct"),
+        "avg_protein_pct": _weighted_avg(rows, "protein_pct"),
+        "avg_scc": _weighted_avg(rows, "scc"),
+        "avg_bactoscan": _weighted_avg(rows, "bactoscan"),
+        "avg_urea_pct": _weighted_avg(rows, "urea_pct", 3),
+        "avg_temp_c": _weighted_avg(rows, "temp_c", 2),
         "antibiotic_fails": fails,
         "total_litres": round(sum(litres), 0) if litres else None,
         "total_weighbridge": round(sum(weighbridge), 0) if weighbridge else None,
@@ -167,6 +259,7 @@ def list_nml_results(
             NmlMilkResult.sample_id.desc(),
         )
         rows = [_row_to_dict(row, today=dt.date.today()) for row in session.scalars(query).all()]
+        _attach_cows_in_milk(session, rows)
     return {
         "rows": rows,
         "total": len(rows),
@@ -215,6 +308,7 @@ def _export_cells(row: dict[str, Any]) -> list[Any]:
         row.get("litres_load"),
         row.get("litres_weighbridge"),
         row.get("temp_c"),
+        row.get("cows_in_milk"),
         row.get("butterfat_pct"),
         row.get("protein_pct"),
         row.get("scc"),
@@ -241,7 +335,7 @@ def build_nml_results_xlsx(rows: list[dict[str, Any]]) -> bytes:
     ws.append(list(_HEADERS))
     for row in rows:
         ws.append(_export_cells(row))
-    widths = [8, 14, 14, 8, 12, 10, 12, 12, 10, 12, 11, 8, 11, 8, 8, 9]
+    widths = [8, 14, 14, 8, 12, 10, 12, 12, 10, 12, 12, 11, 8, 11, 8, 8, 9]
     for index, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(index)].width = width
     for cell in ws[1]:

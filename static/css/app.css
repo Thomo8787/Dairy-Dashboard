@@ -440,6 +440,59 @@ html, body {
   color: var(--muted);
 }
 
+.home-section {
+  margin-top: 1.35rem;
+}
+
+.home-section-heading {
+  margin: 0 0 0.65rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1e3a5f;
+  letter-spacing: 0.02em;
+}
+
+.home-farm-block + .home-farm-block {
+  margin-top: 0.85rem;
+}
+
+.home-farm-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.home-production .home-widget {
+  min-width: 6.75rem;
+  flex: 1 1 6.75rem;
+  max-width: 10rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.home-widget .widget-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-bottom: 0.12rem;
+  color: #1a6b3c;
+  flex-shrink: 0;
+}
+
+.home-widget .widget-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 560px) {
+  .home-production .home-widget {
+    max-width: none;
+  }
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

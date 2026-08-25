@@ -14,6 +14,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -305,6 +306,90 @@ class HerdInventory(Base):
     expected_month = Column(String(16))
     value = Column(Float)
     import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+STOCK_GROUP_COWS = "cows"
+STOCK_GROUP_YOUNGSTOCK = "youngstock"
+STOCK_GROUP_BEEF = "beef"
+STOCK_GROUP_OPTIONS: tuple[str, ...] = (
+    STOCK_GROUP_COWS,
+    STOCK_GROUP_YOUNGSTOCK,
+    STOCK_GROUP_BEEF,
+)
+STOCK_GROUP_CATEGORY: dict[str, str] = {
+    STOCK_GROUP_COWS: "Dairy",
+    STOCK_GROUP_YOUNGSTOCK: "Youngstock",
+    STOCK_GROUP_BEEF: "Beef",
+}
+
+
+class StockOpeningBaseline(Base):
+    """Opening stock count for a farm/group from a specific month onward."""
+
+    __tablename__ = "stock_opening_baselines"
+    __table_args__ = (
+        UniqueConstraint("farm", "stock_group", name="uq_stock_opening_baseline_farm_group"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    stock_group = Column(String(16), nullable=False, index=True)
+    month_start = Column(Date, nullable=False, index=True)
+    opening_count = Column(Integer, nullable=False)
+
+
+class StockAccrualSnapshot(Base):
+    """Pre-computed monthly stock accrual rows per farm (rebuilt on herd import)."""
+
+    __tablename__ = "stock_accrual_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "anchor_import_timestamp",
+            "farm",
+            "stock_group",
+            "month_start",
+            name="uq_stock_accrual_snapshot",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    anchor_import_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    farm = Column(String(8), nullable=False, index=True)
+    stock_group = Column(String(16), nullable=False, index=True)
+    month_start = Column(Date, nullable=False, index=True)
+    opening_count = Column(Integer, nullable=False, default=0)
+    sales = Column(JSON, nullable=False)
+    sales_total = Column(Integer, nullable=False, default=0)
+    deaths = Column(Integer, nullable=False, default=0)
+    births = Column(Integer, nullable=False, default=0)
+    calvings = Column(Integer, nullable=False, default=0)
+    purchases = Column(Integer, nullable=False, default=0)
+    closing_count = Column(Integer, nullable=False, default=0)
+    warning = Column(Boolean, nullable=False, default=False)
+
+
+class StockPurchaseAnimal(Base):
+    """Purchased animals derived from cow events (EDAT != BDAT), rebuilt on herd import."""
+
+    __tablename__ = "stock_purchase_animals"
+    __table_args__ = (
+        UniqueConstraint("farm", "etag", name="uq_stock_purchase_animal_farm_etag"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    etag = Column(String(64), nullable=False, index=True)
+    edat = Column(Date, nullable=False, index=True)
+    bdat = Column(Date, nullable=False)
+    lact = Column(Integer)
+    cbrd = Column(Integer)
+    gndr = Column(String(8))
+    stock_group = Column(String(16), nullable=False, index=True)
+    import_timestamp = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
 
 
 class GenomicResult(Base):
