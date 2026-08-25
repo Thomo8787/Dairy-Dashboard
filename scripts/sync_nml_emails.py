@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import logging
 import sys
 from pathlib import Path
@@ -34,12 +35,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Scan from 2000-01-01 instead of --days",
     )
+    parser.add_argument(
+        "--since",
+        help="Only emails on/after this date (YYYY-MM-DD). Overrides --days.",
+    )
     args = parser.parse_args(argv)
 
     from services.nml_import import format_nml_summary, import_nml_results
 
-    days = None if args.full_history else max(1, args.days)
-    result = import_nml_results(full_history=args.full_history, days=days)
+    since = None
+    if args.since:
+        try:
+            since = dt.date.fromisoformat(args.since)
+        except ValueError:
+            parser.error("--since must be YYYY-MM-DD")
+
+    days = None if args.full_history or since else max(1, args.days)
+    result = import_nml_results(full_history=args.full_history, days=days, since=since)
     print(format_nml_summary(result))
     for warning in result.get("warnings") or []:
         print(f"warning: {warning}")

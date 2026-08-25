@@ -72,6 +72,7 @@ def import_nml_results(
     *,
     full_history: bool = False,
     days: int | None = None,
+    since: dt.date | dt.datetime | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     mailbox = (os.environ.get("OUTLOOK_MAILBOX") or "").strip()
@@ -84,22 +85,27 @@ def import_nml_results(
             "NML import is not configured. Set OUTLOOK_MAILBOX or LOCAL_NML_DIR."
         )
 
-    if days is not None and days > 0:
-        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    if since is not None:
+        if isinstance(since, dt.datetime):
+            since_at = since if since.tzinfo else since.replace(tzinfo=dt.timezone.utc)
+        else:
+            since_at = dt.datetime(since.year, since.month, since.day, tzinfo=dt.timezone.utc)
+    elif days is not None and days > 0:
+        since_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     elif full_history:
-        since = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
+        since_at = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
     else:
-        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=NML_LOOKBACK_DAYS)
+        since_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=NML_LOOKBACK_DAYS)
 
-    lookback = days or NML_LOOKBACK_DAYS
-    fetch_top = min(800, max(50, lookback * 10))
+    lookback = max(1, (dt.datetime.now(dt.timezone.utc) - since_at).days)
+    fetch_top = min(2000, max(50, lookback * 8))
 
     if force or not local_dir:
-        # Temporary force-scan ignores known email IDs so bugs can be re-tested.
-        # Long term, skip_message_ids will skip mail already imported.
+        # Cron/normal import skips Outlook message IDs already saved.
+        # The dashboard force button passes skip_ids=empty.
         skip_ids: set[str] = set() if force else _known_message_ids()
         sources = NmlPdfEmailService().fetch_pdfs(
-            since=since,
+            since=since_at,
             skip_message_ids=skip_ids,
             top=fetch_top,
         )
