@@ -27,7 +27,7 @@ from services.auth import (
     user_has_permission,
     user_to_template,
 )
-from services.events_common import build_events_page_report
+from services.events_common import build_dairy_semen_30d, build_events_page_report
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
 from services.births_report import build_births_report
 from services.stp_report import build_stp_report
@@ -38,8 +38,6 @@ from services.breeding_sires import (
 )
 from services.database import (
     ensure_auth_ready,
-    get_dashboard_summary,
-    get_recent_records,
     get_session,
     health_check,
     save_dataframe,
@@ -90,6 +88,11 @@ from services.milking_efficiency_summary import (
     build_farm_summaries,
     build_metric_trend,
     build_pen_breakdown,
+)
+from services.stall_issues import (
+    latest_milking_date,
+    list_stall_issues,
+    list_stall_metric_history,
 )
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
@@ -206,6 +209,7 @@ def require_login():
         if request.endpoint and (
             request.endpoint.startswith("milking_efficiency")
             or request.endpoint.startswith("events_api")
+            or request.endpoint.startswith("parlour_api")
         ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
@@ -257,18 +261,8 @@ def logout():
 @app.route("/")
 @permission_required("perm_home")
 def home():
-    summary = {"total_records": 0, "total_batches": 0, "latest_import": None, "recent_batches": [], "category_totals": []}
-    records = []
-    try:
-        summary = get_dashboard_summary()
-        records = get_recent_records(limit=50)
-    except Exception:
-        logger.exception("Home data load failed")
-
     return render_template(
         "home.html",
-        summary=summary,
-        records=records,
         **_page_context(active_nav="home"),
     )
 
@@ -467,6 +461,92 @@ def milking_efficiency_trend():
             pen=pen,
         )
     )
+
+
+def _parlour_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_parlours"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+def _parse_iso_date_arg(name: str):
+    raw = (request.args.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+
+
+@app.route("/parlours/stall-issues")
+@permission_required("perm_parlours")
+def stall_issues():
+    return render_template(
+        "parlour/stall_issues.html",
+        **_page_context(active_nav="stall_issues"),
+    )
+
+
+@app.route("/parlours/api/status")
+def parlour_api_status():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "").upper() or None
+    if farm_code and farm_code not in {farm.code for farm in FARMS}:
+        farm_code = None
+    latest = latest_milking_date(farm_code)
+    return jsonify({"latest_milking_date": latest.isoformat() if latest else None})
+
+
+@app.route("/parlours/api/stall-issues")
+def parlour_api_stall_issues():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    try:
+        return jsonify(list_stall_issues(farm=farm_code, date_from=date_from, date_to=date_to))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/parlours/api/stall-issues/detail")
+def parlour_api_stall_issues_detail():
+    user, error = _parlour_json_user()
+    if error:
+        return error
+    farm_code = (request.args.get("farm") or "ALH").upper()
+    raw_point = (request.args.get("milking_point") or "").strip()
+    if not raw_point:
+        return jsonify({"error": "milking_point is required."}), 400
+    try:
+        milking_point = int(raw_point)
+    except ValueError:
+        milking_point = raw_point
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    try:
+        return jsonify(
+            list_stall_metric_history(
+                farm=farm_code,
+                milking_point=milking_point,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/stock-inventory")
@@ -993,6 +1073,15 @@ def events_breedings():
 @permission_required("perm_events")
 def events_total_protein():
     return _render_events_page("total-protein")
+
+
+@app.route("/api/events/dairy-semen-30d")
+def events_api_dairy_semen_30d():
+    user, error = _events_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(build_dairy_semen_30d(session))
 
 
 @app.route("/events/api/<slug>")

@@ -4,61 +4,59 @@
 {% block page_title %}Home{% endblock %}
 
 {% block content %}
-  <section class="cards">
-    <div class="stat">
-      <div class="stat-label">Total records</div>
-      <div class="stat-value">{{ summary.total_records }}</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Import batches</div>
-      <div class="stat-value">{{ summary.total_batches }}</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Latest import</div>
-      <div class="stat-value" style="font-size:1rem;">
-        {% if summary.latest_import %}
-          {{ summary.latest_import.strftime('%Y-%m-%d %H:%M') }}
-        {% else %}
-          —
-        {% endif %}
-      </div>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>Welcome</h2>
-    <p class="lead">
-      Overview for Thomasson Farms. Use <strong>Office</strong> to sync Outlook and OneDrive,
-      <strong>Events</strong> for DairyComp reports, and <strong>Stock Inventory</strong>
-      for heifers, beef, calves due, and heifers due.
-    </p>
-  </section>
-
-  <section class="panel">
-    <h2>Recent imports</h2>
-    {% if summary.recent_batches %}
-      <table>
-        <thead>
-          <tr>
-            <th>File</th>
-            <th>Source</th>
-            <th>Rows</th>
-            <th>Imported</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for batch in summary.recent_batches %}
-            <tr>
-              <td>{{ batch.filename }}</td>
-              <td>{{ batch.email_subject or '—' }}</td>
-              <td>{{ batch.row_count }}</td>
-              <td>{{ batch.imported_at.strftime('%Y-%m-%d %H:%M') if batch.imported_at else '—' }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="empty">No imports yet. Sync from the Office page when you are ready.</p>
+  <div class="home-widgets">
+    {% if current_user and current_user.perm_events %}
+    <a href="{{ url_for('events_breedings') }}?semen=dairy" class="home-widget home-widget-wide status-loading" id="dairy-semen-widget" aria-label="Dairy semen used in the last 30 days" aria-live="polite">
+      <p class="widget-kicker">Dairy Semen - 30 Days</p>
+      <p class="widget-title" id="dairy-semen-count">—</p>
+      <p class="widget-sub" id="dairy-semen-avg" title="120-day dairy semen ÷ 4 (avg per 30 days)">—</p>
+    </a>
     {% endif %}
-  </section>
+    {% if not current_user or not current_user.perm_events %}
+    <div class="stat">
+      <p class="lead" style="margin:0">Use the sidebar to open a section.</p>
+    </div>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block scripts %}
+{% if current_user and current_user.perm_events %}
+<script>
+(() => {
+  const widget = document.getElementById("dairy-semen-widget");
+  const countEl = document.getElementById("dairy-semen-count");
+  const avgEl = document.getElementById("dairy-semen-avg");
+  if (!widget || !countEl || !avgEl) return;
+
+  function formatAvg(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "—";
+    return Math.round(n).toLocaleString("en-GB");
+  }
+
+  async function loadDairySemen() {
+    try {
+      const res = await fetch("/api/events/dairy-semen-30d");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        widget.className = "home-widget home-widget-wide status-error";
+        return;
+      }
+      const status = data.status || "unknown";
+      widget.className = `home-widget home-widget-wide status-${status}`;
+      countEl.textContent = Number(data.count || 0).toLocaleString("en-GB");
+      avgEl.textContent = formatAvg(data.avg_30d_120);
+      const avgTone = data.avg_status || "unknown";
+      avgEl.className = `widget-sub tone-${avgTone}`;
+      if (data.href) widget.href = data.href;
+    } catch (_err) {
+      widget.className = "home-widget home-widget-wide status-error";
+    }
+  }
+
+  loadDairySemen();
+})();
+</script>
+{% endif %}
 {% endblock %}

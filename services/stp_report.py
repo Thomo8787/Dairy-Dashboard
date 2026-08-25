@@ -13,7 +13,7 @@ from services.database import CowEvent
 from services.farms import HERD_FARM_OPTIONS
 from services.events_common import normalize_farms
 
-STP_EVENT = "STP"
+STP_EVENT = "TP"
 STP_MAX_AGE_DAYS = 7
 
 STP_BREED_BEEF = "beef"

@@ -1,0 +1,637 @@
+{% extends "base.html" %}
+
+{% block title %}Stall Issues · {{ app_name }}{% endblock %}
+{% block page_title %}Stall Issues{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0.45rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .filter-panel input[type="date"] {
+      width: 100%;
+      padding: 0.45rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      font-size: 0.875rem;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 12rem);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .content-panel.has-detail .table-wrap { max-height: 38vh; }
+    #stall-issues-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.8125rem;
+    }
+    #stall-issues-table th,
+    #stall-issues-table td {
+      padding: 0.4rem 0.45rem;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid #eef0f3;
+      text-align: center;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    #stall-issues-table th:first-child,
+    #stall-issues-table td:first-child {
+      text-align: left;
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #fff;
+      min-width: 4.5rem;
+      font-weight: 600;
+    }
+    #stall-issues-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #f8fafc;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    #stall-issues-table thead th:first-child { z-index: 4; }
+    #stall-issues-table td.count-hot {
+      color: #b91c1c;
+      font-weight: 700;
+      background: #fef2f2;
+    }
+    #stall-issues-table td.count-mild {
+      color: #92400e;
+      font-weight: 600;
+    }
+    #stall-issues-table tbody tr.stall-row { cursor: pointer; }
+    #stall-issues-table tbody tr.stall-row:hover td,
+    #stall-issues-table tbody tr.stall-row:hover td:first-child {
+      background: #f1f5f9;
+    }
+    #stall-issues-table tbody tr.stall-row.selected td,
+    #stall-issues-table tbody tr.stall-row.selected td:first-child {
+      background: #ffe8d6;
+    }
+    #stall-issues-table tbody tr.stall-row.selected td:first-child {
+      box-shadow: inset 3px 0 0 #c45c26;
+    }
+    .detail-section { margin-top: 1.25rem; }
+    .detail-section h2 {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+      color: #1e3a5f;
+    }
+    .detail-section .pen-meta {
+      color: var(--muted);
+      font-size: 0.8125rem;
+      margin: 0 0 0.65rem;
+    }
+    .detail-wrap {
+      overflow: auto;
+      max-height: none;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .metric-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.75rem;
+    }
+    .metric-table th,
+    .metric-table td {
+      padding: 0.35rem 0.4rem;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid #eef0f3;
+      text-align: center;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-table thead tr:first-child th:first-child,
+    .metric-table tbody td:first-child {
+      text-align: left;
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #fff;
+      font-weight: 600;
+    }
+    .metric-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #f8fafc;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .metric-table thead tr:first-child th:first-child { z-index: 4; }
+    .metric-table thead tr.shift-row th {
+      top: 1.7rem;
+      z-index: 3;
+      min-width: 3.5rem;
+    }
+    .metric-table thead th.stat-col {
+      background: #2a5080;
+      color: #fff;
+      min-width: 4.25rem;
+    }
+    .metric-table tbody td.stat-col {
+      background: #eef3f8;
+      font-weight: 600;
+      color: #1e3a5f;
+    }
+    .metric-table tbody tr:nth-child(even) td { background: #f7f9fb; }
+    .metric-table tbody tr:nth-child(even) td:first-child { background: #f7f9fb; }
+    .metric-table tbody tr:nth-child(even) td.stat-col { background: #e4ebf3; }
+    .metric-table td.outlier-bad {
+      background: #fee2e2 !important;
+      color: #991b1b;
+      font-weight: 700;
+    }
+    .metric-table td.outlier-problem {
+      background: #7f1d1d !important;
+      color: #fff;
+      font-weight: 700;
+    }
+    .empty-state { color: var(--muted); padding: 1.5rem 0.25rem; }
+    .help-note {
+      margin: 0.75rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button
+              type="button"
+              class="slicer-btn{% if farm.code == 'ALH' %} selected{% endif %}"
+              data-value="{{ farm.code }}"
+              aria-pressed="{{ 'true' if farm.code == 'ALH' else 'false' }}"
+            >{{ farm.code }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">From</span>
+          <input type="date" id="date-from">
+        </div>
+        <div class="filter-section">
+          <span class="section-label">To</span>
+          <input type="date" id="date-to">
+        </div>
+        <p class="help-note">
+          Cell = number of shifts that stall was a problem stall that day
+          (metric ≥2 SD bad this shift and the previous shift).
+          Red = more than one shift. Click a stall for its last 4 days of metrics.
+        </p>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line">Loading stall issues…</p>
+      <div class="table-wrap" id="table-wrap" hidden>
+        <table id="stall-issues-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <div id="empty-state" class="empty-state" hidden>
+        No problem-stall data for this farm and date range.
+      </div>
+      <section id="detail-section" class="detail-section" hidden></section>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const farmSlicer = document.getElementById("farm-slicer");
+  const dateFromInput = document.getElementById("date-from");
+  const dateToInput = document.getElementById("date-to");
+  const metaLine = document.getElementById("meta-line");
+  const tableWrap = document.getElementById("table-wrap");
+  const tableHead = document.getElementById("table-head");
+  const tableBody = document.getElementById("table-body");
+  const emptyState = document.getElementById("empty-state");
+  const detailSection = document.getElementById("detail-section");
+  const contentPanel = document.querySelector(".content-panel");
+
+  let farm = "ALH";
+  let loadToken = 0;
+  let detailToken = 0;
+  let selectedStall = null;
+
+  function isoDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function parseIsoDate(iso) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function formatDayHeader(iso) {
+    const d = parseIsoDate(iso);
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  }
+
+  function selectedFarm() {
+    const btn = farmSlicer.querySelector(".slicer-btn.selected");
+    return btn ? btn.dataset.value : "ALH";
+  }
+
+  function setDefaultDates(latestIso) {
+    const to = latestIso ? parseIsoDate(latestIso) : new Date();
+    const from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - 3);
+    dateToInput.value = isoDate(to);
+    dateFromInput.value = isoDate(from);
+  }
+
+  function fmtNum(n, digits) {
+    if (n == null || Number.isNaN(n)) return "—";
+    return Number(n).toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  }
+
+  function formatDurationFromSeconds(seconds) {
+    if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
+    const total = Math.max(0, Math.round(Number(seconds)));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+
+  function formatMetric(m, s) {
+    if (!s) return "";
+    if (m.metricKey && m.metricKey.endsWith("_seconds")) {
+      const labelKey = m.metricKey.replace(/_seconds$/, "_label");
+      if (s[labelKey]) return s[labelKey];
+      return formatDurationFromSeconds(s[m.metricKey]);
+    }
+    if ((m.metricKey && m.metricKey.endsWith("_pct")) || (m.label && m.label.includes("%"))) {
+      return s[m.metricKey] != null ? `${fmtNum(s[m.metricKey], 1)}%` : "—";
+    }
+    if (m.label === "Cows") return s.cow_count != null ? fmtNum(s.cow_count, 0) : "—";
+    if (m.label && m.label.includes("(L)")) {
+      const digits = m.metricKey === "yield_kg" ? 1 : 2;
+      return s[m.metricKey] != null ? fmtNum(s[m.metricKey], digits) : "—";
+    }
+    return s[m.metricKey] != null ? fmtNum(s[m.metricKey], 1) : "—";
+  }
+
+  function formatStat(m, value, isSd) {
+    if (value == null || !Number.isFinite(value)) return "—";
+    if (m.metricKey && m.metricKey.endsWith("_seconds")) {
+      return formatDurationFromSeconds(value);
+    }
+    if ((m.metricKey && m.metricKey.endsWith("_pct")) || (m.label && m.label.includes("%"))) {
+      return `${fmtNum(value, 1)}%`;
+    }
+    if (m.label === "Cows") return fmtNum(value, isSd ? 1 : 0);
+    if (m.label && m.label.includes("(L)")) {
+      return fmtNum(value, m.metricKey === "yield_kg" && !isSd ? 1 : 2);
+    }
+    return fmtNum(value, isSd ? 2 : 1);
+  }
+
+  const STALL_METRICS = [
+    { label: "Total yield (L)", metricKey: "yield_kg" },
+    { label: "Average Yield (L)", metricKey: "avg_yield_kg" },
+    { label: "Cows", metricKey: "cow_count" },
+    { label: "High flow takeoffs % (>1800)", metricKey: "high_flow_takeoff_pct" },
+    { label: "Average Takeoff Flow", metricKey: "avg_flow_rate_at_removal" },
+    { label: "Bi-modal let-down %", metricKey: "bimodal_pct" },
+    { label: "Median Unit On Time", metricKey: "median_milking_duration_seconds" },
+    { label: "Average Unit On Time", metricKey: "avg_milking_duration_seconds" },
+    { label: "Avg 15s flow", metricKey: "avg_flow_15s" },
+    { label: "Avg 30s flow", metricKey: "avg_flow_30s" },
+    { label: "Avg 60s flow", metricKey: "avg_flow_60s" },
+    { label: "Avg 120s flow", metricKey: "avg_flow_120s" },
+    { label: "Average Peak Flow", metricKey: "avg_peak_flow" },
+    { label: "Average Flow", metricKey: "avg_average_flow" },
+    { label: "Avg % in 2 minutes", metricKey: "avg_pct_2_minutes" },
+    { label: "Avg milk yield at 2 min (L)", metricKey: "avg_milk_yield_2_minutes" },
+  ];
+
+  function detailRange() {
+    const to = dateToInput.value;
+    if (!to) return null;
+    const toDate = parseIsoDate(to);
+    const fromDate = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate() - 3);
+    return { from: isoDate(fromDate), to };
+  }
+
+  function closeDetail() {
+    selectedStall = null;
+    detailToken += 1;
+    detailSection.hidden = true;
+    detailSection.innerHTML = "";
+    contentPanel.classList.remove("has-detail");
+    tableBody.querySelectorAll("tr.stall-row.selected").forEach((tr) => {
+      tr.classList.remove("selected");
+    });
+  }
+
+  function renderDetail(payload) {
+    const dates = payload.dates || [];
+    const shifts = payload.shifts || ["Morning", "Day", "Night"];
+    const cells = payload.cells || {};
+    const allStats = payload.stats || {};
+    const point = payload.milking_point;
+    const shiftShort = { Morning: "AM", Day: "Day", Night: "Night" };
+
+    const dayHead = dates
+      .map((d) => `<th colspan="${shifts.length}">${formatDayHeader(d)}</th>`)
+      .join("");
+    const shiftHead = dates
+      .map(() =>
+        shifts.map((s) => `<th>${shiftShort[s] || s}</th>`).join("")
+      )
+      .join("");
+
+    const body = STALL_METRICS.map((m) => {
+      const tds = dates
+        .map((d) =>
+          shifts
+            .map((shift) => {
+              const item = cells[d] && cells[d][shift];
+              if (!item) return `<td></td>`;
+              const flag = (item.outlier_flags || {})[m.metricKey];
+              const cls =
+                flag === "problem"
+                  ? "outlier-problem"
+                  : flag === "alert"
+                    ? "outlier-bad"
+                    : "";
+              return `<td class="${cls}">${formatMetric(m, item)}</td>`;
+            })
+            .join("")
+        )
+        .join("");
+      const stats = allStats[m.metricKey] || {};
+      return (
+        `<tr>` +
+        `<td>${m.label}</td>` +
+        `<td class="stat-col">${formatStat(m, stats.mean, false)}</td>` +
+        `<td class="stat-col">${formatStat(m, stats.sd, true)}</td>` +
+        `${tds}` +
+        `</tr>`
+      );
+    }).join("");
+
+    detailSection.hidden = false;
+    contentPanel.classList.add("has-detail");
+    detailSection.innerHTML =
+      `<h2>Stall ${point}</h2>` +
+      `<p class="pen-meta">${payload.farm} · ${payload.date_from} → ${payload.date_to} · ` +
+      `red = ≥2 SD worse this shift · dark red = problem stall (same metric previous shift) · Average / SD are all stalls in this window</p>` +
+      `<div class="detail-wrap"><table class="metric-table">` +
+      `<thead>` +
+      `<tr><th>Metric</th><th class="stat-col">Average</th><th class="stat-col">SD</th>${dayHead}</tr>` +
+      `<tr class="shift-row"><th></th><th class="stat-col"></th><th class="stat-col"></th>${shiftHead}</tr>` +
+      `</thead>` +
+      `<tbody>${body}</tbody>` +
+      `</table></div>`;
+  }
+
+  async function loadDetail(milkingPoint) {
+    const range = detailRange();
+    if (!range) return;
+    const token = ++detailToken;
+    detailSection.hidden = false;
+    contentPanel.classList.add("has-detail");
+    detailSection.innerHTML =
+      `<h2>Stall ${milkingPoint}</h2>` +
+      `<p class="pen-meta">Loading last 4 days…</p>`;
+
+    const params = new URLSearchParams({
+      farm,
+      milking_point: String(milkingPoint),
+      date_from: range.from,
+      date_to: range.to,
+    });
+    try {
+      const res = await fetch(`/parlours/api/stall-issues/detail?${params}`);
+      const data = await res.json().catch(() => ({}));
+      if (token !== detailToken) return;
+      if (!res.ok) {
+        detailSection.innerHTML =
+          `<h2>Stall ${milkingPoint}</h2>` +
+          `<p class="pen-meta">${data.error || data.detail || "Failed to load stall metrics."}</p>`;
+        return;
+      }
+      renderDetail(data);
+    } catch (_err) {
+      if (token !== detailToken) return;
+      detailSection.innerHTML =
+        `<h2>Stall ${milkingPoint}</h2>` +
+        `<p class="pen-meta">Failed to load stall metrics.</p>`;
+    }
+  }
+
+  function selectStall(milkingPoint) {
+    if (selectedStall === milkingPoint) {
+      closeDetail();
+      return;
+    }
+    selectedStall = milkingPoint;
+    tableBody.querySelectorAll("tr.stall-row").forEach((tr) => {
+      tr.classList.toggle("selected", String(tr.dataset.stall) === String(milkingPoint));
+    });
+    loadDetail(milkingPoint);
+  }
+
+  function render(payload) {
+    const dates = payload.dates || [];
+    const rows = (payload.rows || []).filter((row) => Number(row.total || 0) > 0);
+    if (!dates.length || !rows.length) {
+      tableWrap.hidden = true;
+      emptyState.hidden = false;
+      closeDetail();
+      metaLine.textContent = `${payload.farm || farm} · no problem stalls in this range`;
+      return;
+    }
+
+    emptyState.hidden = true;
+    tableWrap.hidden = false;
+    metaLine.textContent =
+      `${payload.farm} · ${dates[0]} → ${dates[dates.length - 1]} · ` +
+      `${rows.length} stall${rows.length === 1 ? "" : "s"} with issues · ` +
+      `click a stall for last 4 days of metrics`;
+
+    tableHead.innerHTML =
+      `<tr><th>Stall</th>` +
+      dates.map((d) => `<th>${formatDayHeader(d)}</th>`).join("") +
+      `<th>Total</th></tr>`;
+
+    tableBody.innerHTML = rows.map((row) => {
+      const cells = dates.map((d) => {
+        const n = Number((row.by_date && row.by_date[d]) || 0);
+        if (!n) return `<td></td>`;
+        const cls = n > 1 ? "count-hot" : "count-mild";
+        return `<td class="${cls}">${n}</td>`;
+      }).join("");
+      const selected =
+        selectedStall != null && String(row.milking_point) === String(selectedStall)
+          ? " selected"
+          : "";
+      return (
+        `<tr class="stall-row${selected}" data-stall="${row.milking_point}">` +
+        `<td>${row.milking_point ?? "—"}</td>` +
+        cells +
+        `<td>${row.total || ""}</td>` +
+        `</tr>`
+      );
+    }).join("");
+  }
+
+  async function load() {
+    const token = ++loadToken;
+    farm = selectedFarm();
+    const from = dateFromInput.value;
+    const to = dateToInput.value;
+    if (!from || !to) return;
+    if (from > to) {
+      metaLine.textContent = "From date must be on or before To date.";
+      return;
+    }
+
+    closeDetail();
+    metaLine.textContent = "Loading stall issues…";
+    tableWrap.hidden = true;
+    emptyState.hidden = true;
+
+    const params = new URLSearchParams({
+      farm,
+      date_from: from,
+      date_to: to,
+    });
+    try {
+      const res = await fetch(`/parlours/api/stall-issues?${params}`);
+      const data = await res.json().catch(() => ({}));
+      if (token !== loadToken) return;
+      if (!res.ok) {
+        metaLine.textContent = data.error || data.detail || "Failed to load stall issues.";
+        return;
+      }
+      render(data);
+    } catch (err) {
+      if (token !== loadToken) return;
+      metaLine.textContent = "Failed to load stall issues.";
+    }
+  }
+
+  tableBody.addEventListener("click", (event) => {
+    const row = event.target.closest("tr.stall-row");
+    if (!row) return;
+    const raw = row.dataset.stall;
+    if (raw === "" || raw == null) return;
+    const asNum = Number(raw);
+    selectStall(Number.isFinite(asNum) ? asNum : raw);
+  });
+  farmSlicer.addEventListener("click", (event) => {
+    const btn = event.target.closest(".slicer-btn");
+    if (!btn) return;
+    farmSlicer.querySelectorAll(".slicer-btn").forEach((el) => {
+      el.classList.remove("selected");
+      el.setAttribute("aria-pressed", "false");
+    });
+    btn.classList.add("selected");
+    btn.setAttribute("aria-pressed", "true");
+    load();
+  });
+  dateFromInput.addEventListener("change", load);
+  dateToInput.addEventListener("change", load);
+
+  async function init() {
+    let latest = null;
+    try {
+      const res = await fetch("/parlours/api/status?farm=ALH");
+      if (res.ok) {
+        const status = await res.json();
+        latest = status.latest_milking_date || null;
+      }
+    } catch (_err) {
+      /* Fall back to calendar today. */
+    }
+    setDefaultDates(latest);
+    await load();
+  }
+
+  init();
+})();
+</script>
+{% endblock %}

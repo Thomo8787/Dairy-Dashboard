@@ -33,6 +33,12 @@ NAV_ITEMS = [
                 "endpoint": "milking_efficiency",
                 "permission": "perm_parlours",
             },
+            {
+                "id": "stall_issues",
+                "label": "Stall Issues",
+                "endpoint": "stall_issues",
+                "permission": "perm_parlours",
+            },
         ],
     },
     {

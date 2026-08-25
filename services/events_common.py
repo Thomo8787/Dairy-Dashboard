@@ -1848,3 +1848,50 @@ def build_events_page_report(
         y_max=y_max if page_slug == "disease" else None,
         bounds_event_types=page_event_types,
     )
+
+
+def _semen_status_band(value: float, average: float) -> str:
+    if average <= 0:
+        return "unknown" if value <= 0 else "green"
+    ratio = value / average
+    if ratio >= 1.0:
+        return "green"
+    if ratio >= 0.9:
+        return "yellow"
+    return "red"
+
+
+def build_dairy_semen_30d(db: Session) -> dict[str, Any]:
+    """Home widget: dairy BRED events in the last 30 days vs 120-day average."""
+    today = dt.date.today()
+    start_30 = today - dt.timedelta(days=30)
+    start_120 = today - dt.timedelta(days=120)
+    overrides = load_sire_overrides(db)
+    rows = db.execute(
+        select(CowEvent.remark, CowEvent.event_date)
+        .where(CowEvent.event == "BRED")
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date >= start_120)
+        .where(CowEvent.event_date <= today)
+    ).all()
+
+    count_30 = 0
+    count_120 = 0
+    for remark, event_date in rows:
+        if classify_semen_type(remark, overrides) != "dairy":
+            continue
+        if hasattr(event_date, "date"):
+            event_date = event_date.date()
+        count_120 += 1
+        if event_date >= start_30:
+            count_30 += 1
+
+    avg_30d_120 = count_120 / 4.0
+    status = _semen_status_band(count_30, avg_30d_120)
+    return {
+        "count": count_30,
+        "avg_30d_120": round(avg_30d_120, 1),
+        "status": status,
+        "avg_status": status,
+        "href": "/events/breedings?semen=dairy",
+    }

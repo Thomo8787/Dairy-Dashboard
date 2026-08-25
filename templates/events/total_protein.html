@@ -550,7 +550,7 @@
       const perf = block.performance || {};
       const total = perf.total || 0;
       if (!total) {
-        el.innerHTML = `<h3>${title}</h3><p class="stp-unknown-note">No STP results for this selection.</p>`;
+        el.innerHTML = `<h3>${title}</h3><p class="stp-unknown-note">No TP results for this selection.</p>`;
         return;
       }
 
@@ -711,14 +711,14 @@
       const note = data.latest_import
         ? `Latest import: ${new Date(data.latest_import).toLocaleString("en-GB")}`
         : "No events import found — run the herd import cron job.";
-      meta.textContent = `${note} · Calves only (lact=0), STP at age 0–${data.max_age_days} days · Dairy CBRD < 102 · Beef CBRD > 101 · Excellent ≥6.2 · Good ≥5.8 · Fair ≥5.1`;
+      meta.textContent = `${note} · Calves only (lact=0), TP at age 0–${data.max_age_days} days · Dairy CBRD < 102 · Beef CBRD > 101 · Excellent ≥6.2 · Good ≥5.8 · Fair ≥5.1`;
 
       const hasData = (data.total?.total || 0) > 0;
       if (!hasData) {
         empty.style.display = "";
         empty.textContent = data.latest_import
-          ? "No STP results in the selected filters."
-          : "No STP data available.";
+          ? "No TP results in the selected filters."
+          : "No TP data available.";
         stack.style.display = "none";
         HERD_FARMS.forEach((farm) => destroyChart(farm));
         destroyChart("total");
