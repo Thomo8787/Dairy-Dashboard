@@ -416,6 +416,8 @@ def _day_metrics(
     bimodal_flags = []
 
     by_point: dict[str, list[float]] = defaultdict(list)
+    manual_takeoff_count = 0
+    max_time_removal_count = 0
 
     for row in rows:
         unit = _parse_hms(row.unit_on_time)
@@ -450,6 +452,10 @@ def _day_metrics(
             pct_2min.append(row.percentage_yield_at_2_min)
         if row.milk_yield_at_2_min_l is not None:
             yield_2min.append(row.milk_yield_at_2_min_l)
+        if "manual" in (row.final_detaching or "").strip().lower():
+            manual_takeoff_count += 1
+        if "removal" in (row.final_detaching or "").strip().lower():
+            max_time_removal_count += 1
 
         # Bi-modal let-down: early flow drops vs a prior interval.
         f15 = row.flow_rate_15s_ml_per_min
@@ -559,6 +565,8 @@ def _day_metrics(
         "avg_yield_2min_l": _mean(yield_2min),
         "shift_start_s": shift_start,
         "shift_end_s": shift_end,
+        "manual_takeoff_count": manual_takeoff_count,
+        "max_time_removal_count": max_time_removal_count,
         "entry_match_count": len(lag_secs),
     }
 
@@ -587,6 +595,8 @@ METRIC_ROWS = (
     ("avg_yield_2min_l", "Avg milk yield at 2 min (L)", "number2"),
     ("shift_start_s", "Shift start time", "hms"),
     ("shift_end_s", "Shift end time", "hms"),
+    ("manual_takeoff_count", "Manual take off", "int"),
+    ("max_time_removal_count", "Max time Removal", "int"),
 )
 
 METRIC_BY_KEY = {key: {"label": label, "kind": kind} for key, label, kind in METRIC_ROWS}
@@ -1026,9 +1036,15 @@ def _payload_from_cache(farm: Any, *, allow_stale: bool) -> dict[str, Any] | Non
             dates_newest_first: list[date] = []
             for row in rows:
                 try:
-                    metrics_by_date[row.milking_date] = json.loads(row.metrics_json)
+                    parsed = json.loads(row.metrics_json)
                 except json.JSONDecodeError:
                     continue
+                if not allow_stale and (
+                    "manual_takeoff_count" not in parsed
+                    or "max_time_removal_count" not in parsed
+                ):
+                    return None
+                metrics_by_date[row.milking_date] = parsed
                 dates_newest_first.append(row.milking_date)
             shifts[option["id"]] = _shift_view_payload(
                 farm,
