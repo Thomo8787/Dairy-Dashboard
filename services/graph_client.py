@@ -192,20 +192,51 @@ def graph_headers() -> dict:
     return {"Authorization": f"Bearer {get_access_token()}"}
 
 
+_TRANSIENT_REQUEST_ERRORS = (
+    requests.Timeout,
+    requests.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ContentDecodingError,
+)
+
+
 def _request_with_retries(
     method: str,
     url: str,
     *,
-    timeout: int,
+    timeout: int | tuple[int, int],
     headers: dict | None = None,
     max_attempts: int = 6,
+    extra_retry_statuses: set[int] | frozenset[int] | None = None,
+    stream: bool = False,
 ) -> requests.Response:
-    """GET/POST with backoff on Graph throttling (429) and transient 5xx."""
+    """GET/POST with backoff on Graph throttling, 5xx, and optional extra statuses."""
     hdrs = headers or graph_headers()
+    retry_statuses = {429, *(extra_retry_statuses or set())}
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
-        response = requests.request(method, url, headers=hdrs, timeout=timeout)
-        if response.status_code == 429 or response.status_code >= 500:
+        try:
+            response = requests.request(
+                method, url, headers=hdrs, timeout=timeout, stream=stream
+            )
+        except _TRANSIENT_REQUEST_ERRORS as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                raise
+            wait_s = min(2 ** attempt, 30) + (attempt * 0.15)
+            logger.warning(
+                "Graph %s — retry %s/%s after %.1fs (%s)",
+                type(exc).__name__,
+                attempt,
+                max_attempts,
+                wait_s,
+                url.split("?")[0][-80:],
+            )
+            time.sleep(wait_s)
+            hdrs = headers or graph_headers()
+            continue
+
+        if response.status_code in retry_statuses or response.status_code >= 500:
             retry_after = response.headers.get("Retry-After")
             try:
                 wait_s = float(retry_after) if retry_after else min(2 ** attempt, 30)
@@ -215,9 +246,10 @@ def _request_with_retries(
                 f"{response.status_code} for url: {url}",
                 response=response,
             )
+            if stream:
+                response.close()
             if attempt >= max_attempts:
                 response.raise_for_status()
-            # Slight jitter so parallel workers don't retry in lockstep.
             wait_s = wait_s + (attempt * 0.15)
             logger.warning(
                 "Graph %s — retry %s/%s after %.1fs (%s)",
@@ -228,7 +260,6 @@ def _request_with_retries(
                 url.split("?")[0][-80:],
             )
             time.sleep(wait_s)
-            # Refresh token header in case the wait crossed expiry.
             hdrs = headers or graph_headers()
             continue
         response.raise_for_status()
@@ -243,6 +274,27 @@ def graph_get(url: str, timeout: int = 60) -> dict:
     return response.json()
 
 
-def graph_get_bytes(url: str, timeout: int = 120) -> bytes:
-    response = _request_with_retries("GET", url, timeout=timeout)
-    return response.content
+def graph_get_bytes(
+    url: str,
+    timeout: int | tuple[int, int] = 120,
+    *,
+    extra_retry_statuses: set[int] | frozenset[int] | None = None,
+    max_attempts: int = 6,
+) -> bytes:
+    """Download Graph item content. Streams the body so large DCEXPORT files fit in memory."""
+    response = _request_with_retries(
+        "GET",
+        url,
+        timeout=timeout,
+        extra_retry_statuses=extra_retry_statuses,
+        max_attempts=max_attempts,
+        stream=True,
+    )
+    try:
+        chunks = bytearray()
+        for part in response.iter_content(chunk_size=256 * 1024):
+            if part:
+                chunks.extend(part)
+        return bytes(chunks)
+    finally:
+        response.close()

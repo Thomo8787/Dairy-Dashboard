@@ -157,6 +157,7 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
     farms_imported: list[str] = []
     farms_skipped: list[str] = []
     empty_source_farms: list[str] = []
+    failed: list[dict[str, str]] = []
     rows_imported = 0
 
     entries = files_for_kind(KIND_INVENTORY)
@@ -198,7 +199,14 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
                 or 0
             )
 
-        rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        try:
+            rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        except Exception as exc:
+            logger.exception("Herd inventory import failed for %s (%s)", farm, relative_path)
+            failed.append({"farm": farm, "source_file": relative_path, "error": str(exc)})
+            db.rollback()
+            continue
+
         rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
@@ -215,6 +223,7 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
         ):
             _reset_shared_herd_openings(db, list(SHARED_HERD_SPLIT_FARMS))
             logger.info("Reset ALH/BNK stock accrual openings after first BNAME split")
+        db.commit()
         logger.info(
             "Herd inventory imported %s",
             ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
@@ -223,7 +232,7 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
     farm_counts = dict(
         db.execute(select(HerdInventory.farm, func.count()).group_by(HerdInventory.farm)).all()
     )
-    all_skipped = bool(farms_skipped) and not farms_imported
+    all_skipped = bool(farms_skipped) and not farms_imported and not failed
     return {
         "skipped": all_skipped,
         "reason": "source_unchanged" if all_skipped else None,
@@ -232,6 +241,7 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
         "farms_imported": farms_imported,
         "farms_skipped": farms_skipped,
         "empty_source_farms": empty_source_farms,
+        "failed": failed,
         "imported_at": None if all_skipped else import_time.isoformat(timespec="seconds"),
         "source_files": [item["source_file"] for item in sources],
         "sources": sources,

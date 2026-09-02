@@ -163,6 +163,7 @@ services:
 
   # Daily DairyComp DCEXPORT import at 05:00 UK time.
   # Render cron is UTC: 04:00 UTC = 05:00 BST (05:00 GMT in winter would need 05:00 UTC).
+  # ALHEVENTS.CSV is ~50MB and lands ~03:57 UTC; the importer retries Graph 404/timeouts.
   - type: cron
     name: fetch-one-drive-data
     runtime: python

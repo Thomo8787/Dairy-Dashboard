@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 import gc
-import io
 import logging
+import os
+import tempfile
 from typing import Any
 
 import pandas as pd
@@ -45,9 +46,13 @@ def events_source_fingerprint(source_file: str, last_modified: str) -> str:
     return source_fingerprint(source_file, last_modified, parser=_EVENTS_DATE_PARSER)
 
 
+_EVENT_ENCODING = "windows-1252"
+
+
 def _clean_events_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    str_cols = df.select_dtypes(include="object").columns
-    df[str_cols] = df[str_cols].apply(lambda col: col.str.strip())
+    str_cols = df.select_dtypes(include=["object", "string"]).columns
+    if len(str_cols):
+        df[str_cols] = df[str_cols].apply(lambda col: col.str.strip())
 
     for col in _EVENT_DATE_COLUMNS:
         if col in df.columns:
@@ -234,15 +239,30 @@ def _import_farm_file(
     half-written DC305 export cannot wipe the farm.
     """
     file_bytes = download_dcexport_file(entry)
-    buffer = io.BytesIO(file_bytes)
-    del file_bytes
+    tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+    try:
+        tmp.write(file_bytes)
+        tmp.close()
+        del file_bytes
+        gc.collect()
+        return _import_events_from_path(db, tmp.name, farm, import_time)
+    finally:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
+
+def _import_events_from_path(
+    db: Session, path: str, farm: str, import_time: dt.datetime
+) -> dict[str, int]:
     rows_by_farm: dict[str, int] = {}
     replaced: set[str] = set()
     split_mode = False
     for chunk in pd.read_csv(
-        buffer,
-        encoding="utf-8",
+        path,
+        encoding=_EVENT_ENCODING,
         dayfirst=True,
         on_bad_lines="skip",
         chunksize=_CSV_CHUNK_SIZE,
@@ -271,7 +291,6 @@ def _import_farm_file(
                 replaced.add(target_farm)
                 rows_by_farm.setdefault(target_farm, 0)
 
-    del buffer
     gc.collect()
     return rows_by_farm
 
@@ -292,6 +311,7 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
     farms_imported: list[str] = []
     farms_skipped: list[str] = []
     empty_source_farms: list[str] = []
+    failed: list[dict[str, str]] = []
     rows_imported = 0
 
     entries = files_for_kind(KIND_EVENTS)
@@ -322,7 +342,14 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
             logger.info("Herd events %s unchanged; skipping", "+".join(skipped))
             continue
 
-        rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        try:
+            rows_by_farm = _import_farm_file(db, entry, farm, import_time)
+        except Exception as exc:
+            logger.exception("Herd events import failed for %s (%s)", farm, relative_path)
+            failed.append({"farm": farm, "source_file": relative_path, "error": str(exc)})
+            db.rollback()
+            continue
+
         rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
@@ -336,23 +363,27 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
         imported_farms = list(rows_by_farm) or [farm]
         store_split_source_fingerprints(db, FP_EVENTS, fingerprint, imported_farms)
         farms_imported.extend(imported_farms)
+        db.commit()
         logger.info(
             "Herd events imported %s",
             ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
         )
 
+    duplicate_fresh_dropped = 0
+    duplicate_exit_dropped = 0
+    purchase_stats: dict[str, Any] = {}
     if farms_imported:
-        duplicate_fresh_dropped = remove_duplicate_fresh_cow_events(
-            db, farms=farms_imported
-        )
-        duplicate_exit_dropped = remove_duplicate_exit_cow_events(
-            db, farms=farms_imported
-        )
-        purchase_stats = {}
-    else:
-        duplicate_fresh_dropped = 0
-        duplicate_exit_dropped = 0
-        purchase_stats = {}
+        try:
+            duplicate_fresh_dropped = remove_duplicate_fresh_cow_events(
+                db, farms=farms_imported
+            )
+            duplicate_exit_dropped = remove_duplicate_exit_cow_events(
+                db, farms=farms_imported
+            )
+            db.commit()
+        except Exception:
+            logger.exception("Duplicate event cleanup failed")
+            db.rollback()
 
     farm_counts = dict(
         db.execute(
@@ -361,7 +392,7 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
     )
     latest_date = db.scalar(select(func.max(CowEvent.event_date)))
     source_files = [item["source_file"] for item in sources]
-    all_skipped = bool(farms_skipped) and not farms_imported
+    all_skipped = bool(farms_skipped) and not farms_imported and not failed
 
     if all_skipped:
         return {
@@ -374,6 +405,7 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
             "farms_imported": [],
             "farms_skipped": farms_skipped,
             "empty_source_farms": empty_source_farms,
+            "failed": failed,
             "latest_event_date": latest_date.isoformat() if latest_date else None,
             "imported_at": None,
             "source_files": source_files,
@@ -390,6 +422,7 @@ def import_cow_events(db: Session, *, force: bool = True) -> dict[str, Any]:
         "farms_imported": farms_imported,
         "farms_skipped": farms_skipped,
         "empty_source_farms": empty_source_farms,
+        "failed": failed,
         "latest_event_date": latest_date.isoformat() if latest_date else None,
         "imported_at": import_time.isoformat(timespec="seconds"),
         "source_files": source_files,

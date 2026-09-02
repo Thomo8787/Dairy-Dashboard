@@ -127,6 +127,12 @@ def _discover_local() -> list[dict[str, Any]]:
     return found
 
 
+# Recently uploaded large CSVs (ALHEVENTS is ~50MB) can 404/409 until OneDrive finishes
+# processing. Retry those statuses; small mail attachments should not.
+_CONTENT_RETRY_STATUSES = frozenset({404, 409, 423})
+_LARGE_FILE_BYTES = 5_000_000
+
+
 def _download_graph_item(service: GraphOneDriveService, item: dict) -> bytes:
     parent = item.get("parentReference") or {}
     drive_id = parent.get("driveId") or service._drive_id
@@ -137,7 +143,19 @@ def _download_graph_item(service: GraphOneDriveService, item: dict) -> bytes:
         url = f"{GRAPH_BASE}/me/drive/items/{item_id}/content"
     else:
         url = f"{GRAPH_BASE}/users/{quote(service.user)}/drive/items/{item_id}/content"
-    return graph_get_bytes(url)
+    size = int(item.get("size") or 0)
+    timeout: int | tuple[int, int] = (30, 600) if size >= _LARGE_FILE_BYTES else (30, 180)
+    logger.info(
+        "Downloading OneDrive %s (%s bytes)",
+        item.get("name") or item_id,
+        size or "unknown",
+    )
+    return graph_get_bytes(
+        url,
+        timeout=timeout,
+        extra_retry_statuses=_CONTENT_RETRY_STATUSES,
+        max_attempts=8,
+    )
 
 
 def _discover_onedrive() -> list[dict[str, Any]]:

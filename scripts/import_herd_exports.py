@@ -31,12 +31,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from services.database import get_session, init_db
-    from services.herd_full_import import format_herd_import_summary, import_herd_exports
+    from services.herd_full_import import (
+        format_herd_import_summary,
+        herd_import_failures,
+        import_herd_exports,
+    )
 
     init_db()
     with get_session() as session:
         result = import_herd_exports(session, force=args.force)
     print(format_herd_import_summary(result))
+    failures = herd_import_failures(result)
+    if failures:
+        logging.error("Herd import failed: %s", "; ".join(failures))
+        return 1
     return 0
 
 

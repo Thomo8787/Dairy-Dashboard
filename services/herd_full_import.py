@@ -67,6 +67,21 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
     }
 
 
+def _section_failures(section: dict[str, Any] | None) -> list[dict[str, str]]:
+    return list((section or {}).get("failed") or [])
+
+
+def herd_import_failures(result: dict[str, Any]) -> list[str]:
+    """Human-readable failures from events/births/inventory for the cron exit code."""
+    labels: list[str] = []
+    for kind in ("events", "births", "inventory"):
+        for item in _section_failures(result.get(kind)):
+            farm = item.get("farm") or "?"
+            error = item.get("error") or "unknown error"
+            labels.append(f"{farm} {kind}: {error}")
+    return labels
+
+
 def format_herd_import_summary(result: dict[str, Any]) -> str:
     farms = result.get("farms_found") or []
     farm_label = ", ".join(farms) if farms else "no DCEXPORT folders"
@@ -97,7 +112,7 @@ def format_herd_import_summary(result: dict[str, Any]) -> str:
             f"{inventory.get('rows_imported', 0)} "
             f"({', '.join(inventory.get('farms_imported') or ['none'])})"
         )
-    return (
+    text = (
         f"Herd import ({farm_label}) — "
         f"events {events.get('rows_imported', 0)} rows "
         f"({', '.join(events.get('farms_imported') or ['none'])}); "
@@ -107,3 +122,7 @@ def format_herd_import_summary(result: dict[str, Any]) -> str:
         f"purchases {purchases_label}; "
         f"accruals {accruals_label}."
     )
+    failures = herd_import_failures(result)
+    if failures:
+        text += " FAILED: " + "; ".join(failures)
+    return text

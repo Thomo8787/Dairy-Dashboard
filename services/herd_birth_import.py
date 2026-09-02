@@ -165,6 +165,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
     farms_imported: list[str] = []
     farms_skipped: list[str] = []
     empty_source_farms: list[str] = []
+    failed: list[dict[str, str]] = []
     rows_imported = 0
     duplicate_rows_dropped = 0
     duplicate_rows_dropped_by_farm: dict[str, int] = {}
@@ -197,7 +198,14 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
             logger.info("Herd births %s unchanged; skipping", "+".join(skipped))
             continue
 
-        rows_by_farm, dropped = _import_farm_file(db, entry, farm, import_time)
+        try:
+            rows_by_farm, dropped = _import_farm_file(db, entry, farm, import_time)
+        except Exception as exc:
+            logger.exception("Herd births import failed for %s (%s)", farm, relative_path)
+            failed.append({"farm": farm, "source_file": relative_path, "error": str(exc)})
+            db.rollback()
+            continue
+
         rows = sum(rows_by_farm.values())
         if rows == 0:
             empty_source_farms.append(farm)
@@ -215,6 +223,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
                     duplicate_rows_dropped_by_farm[code] = dropped
         store_split_source_fingerprints(db, FP_BIRTHS, fingerprint, imported_farms)
         farms_imported.extend(imported_farms)
+        db.commit()
         logger.info(
             "Herd births imported %s",
             ", ".join(f"{code}={count}" for code, count in sorted(rows_by_farm.items())),
@@ -225,7 +234,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
     )
     latest_birth = db.scalar(select(func.max(HerdBirth.bdat)))
     source_files = [item["source_file"] for item in sources]
-    all_skipped = bool(farms_skipped) and not farms_imported
+    all_skipped = bool(farms_skipped) and not farms_imported and not failed
 
     if all_skipped:
         return {
@@ -238,6 +247,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
             "farms_imported": [],
             "farms_skipped": farms_skipped,
             "empty_source_farms": empty_source_farms,
+            "failed": failed,
             "latest_birth_date": latest_birth.isoformat() if latest_birth else None,
             "imported_at": None,
             "source_files": source_files,
@@ -253,6 +263,7 @@ def import_herd_births(db: Session, *, force: bool = True) -> dict[str, Any]:
         "farms_imported": farms_imported,
         "farms_skipped": farms_skipped,
         "empty_source_farms": empty_source_farms,
+        "failed": failed,
         "latest_birth_date": latest_birth.isoformat() if latest_birth else None,
         "imported_at": import_time.isoformat(timespec="seconds"),
         "source_files": source_files,
