@@ -5,8 +5,14 @@
     Reads <strong>Genetics/animals_ahdb.csv</strong> and current DCEXPORT inventory
     from Parlours OneDrive. Graphs only include animals still in inventory,
     matched on the last 12 digits of eartag / etag.
+    {% if herd_import_on_web %}
     Cron also runs daily at 05:00 UK time.
+    {% else %}
+    On the live site this import runs only on the daily cron at 05:00 UK —
+    starting it here would restart the website.
+    {% endif %}
   </p>
+  {% if herd_import_on_web %}
   <form
     class="js-sync-form"
     method="post"
@@ -30,5 +36,6 @@
       <span data-sync-status-text>Importing…</span>
     </p>
   </form>
+  {% endif %}
 </div>
 {% endif %}

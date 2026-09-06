@@ -611,7 +611,7 @@ def _metric_rows_for_farm(farm: Any) -> tuple[tuple[str, str, str], ...]:
 
 TREND_DAY_COUNT = 45
 SUMMARY_DAYS_PER_SHIFT = 7
-SUMMARY_DATE_CHUNK = 14
+SUMMARY_DATE_CHUNK = 3
 SHIFT_TREND_COLORS = {
     "Morning": "#1f7a4c",
     "Day": "#c47a12",
@@ -885,6 +885,8 @@ def _compute_metrics_for_dates(
                     crosses_midnight=spec["overnight"],
                     stall_count=stall_count,
                 )
+        session.expunge_all()
+        del milk_rows, entry_rows, milk_by_date, entry_by_date
     return result
 
 
@@ -1239,96 +1241,109 @@ def build_metric_trend(
             return empty
 
         start_date = latest - timedelta(days=days - 1)
-        end_date = latest
-        # Overnight lag matching may need the day after the window.
-        entry_end = end_date + timedelta(days=1)
-
-        milk_rows = (
-            session.query(MilkFlowRecord)
-            .filter(
-                MilkFlowRecord.farm_code == farm.code,
-                MilkFlowRecord.milking_date >= start_date,
-                MilkFlowRecord.milking_date <= end_date,
-            )
-            .all()
-        )
-        entry_rows = (
-            session.query(RotaryEntryIdRecord)
-            .filter(
-                RotaryEntryIdRecord.farm_code == farm.code,
-                RotaryEntryIdRecord.milking_date >= start_date,
-                RotaryEntryIdRecord.milking_date <= entry_end,
-            )
-            .all()
-        )
-
-    milk_by_date: dict[date, list[MilkFlowRecord]] = defaultdict(list)
-    for row in milk_rows:
-        if row.milking_date is not None:
-            milk_by_date[row.milking_date].append(row)
-
-    entry_by_date: dict[date, list[RotaryEntryIdRecord]] = defaultdict(list)
-    for row in entry_rows:
-        if row.milking_date is not None:
-            entry_by_date[row.milking_date].append(row)
-
-    dates = [start_date + timedelta(days=offset) for offset in range(days)]
-    date_labels = [d.strftime("%d %b") for d in dates]
-    series = []
-
-    for shift in SHIFT_OPTIONS:
-        shift_id = shift["id"]
-        _, db_values = resolve_shift_filter(shift_id)
-        db_values_normalized = {_normalize_shift(v).lower() for v in db_values}
-        overnight = uses_overnight_shift_window(farm.code, shift_id)
-        values: list[float | None] = []
-
-        for milking_date in dates:
-            day_milk = _filter_shift_rows(milk_by_date.get(milking_date, []), db_values_normalized)
-            if not day_milk:
-                values.append(None)
-                continue
-
-            day_entries = _entry_rows_for_date_from_maps(
-                entry_by_date,
-                milking_date,
-                db_values_normalized,
-                crosses_midnight=overnight,
-            )
-            stall_count = _resolve_stall_count(farm)
-
-            if pen_id is not None:
-                by_pen, _ = correct_misassigned_pen_cows(day_milk)
-                pen_rows = by_pen.get(pen_id) or []
-                if not pen_rows:
-                    values.append(None)
-                    continue
-                metrics = _day_metrics(
-                    pen_rows,
-                    day_entries,
-                    trim_shift_outliers=True,
-                    crosses_midnight=overnight,
-                    stall_count=stall_count,
+        dates = [start_date + timedelta(days=offset) for offset in range(days)]
+        date_labels = [d.strftime("%d %b") for d in dates]
+        stall_count = _resolve_stall_count(farm)
+        values_by_shift: dict[str, list[float | None]] = {
+            shift["id"]: [None] * days for shift in SHIFT_OPTIONS
+        }
+        shift_specs: list[tuple[dict[str, Any], set[str], bool]] = []
+        for shift in SHIFT_OPTIONS:
+            _, db_values = resolve_shift_filter(shift["id"])
+            shift_specs.append(
+                (
+                    shift,
+                    {_normalize_shift(v).lower() for v in db_values},
+                    uses_overnight_shift_window(farm.code, shift["id"]),
                 )
-            else:
-                metrics = _day_metrics(
-                    day_milk,
-                    day_entries,
-                    crosses_midnight=overnight,
-                    stall_count=stall_count,
+            )
+
+        for offset in range(0, days, SUMMARY_DATE_CHUNK):
+            chunk_dates = dates[offset : offset + SUMMARY_DATE_CHUNK]
+            chunk_end = chunk_dates[-1]
+            milk_rows = (
+                session.query(MilkFlowRecord)
+                .filter(
+                    MilkFlowRecord.farm_code == farm.code,
+                    MilkFlowRecord.milking_date.in_(chunk_dates),
                 )
+                .all()
+            )
+            entry_rows = (
+                session.query(RotaryEntryIdRecord)
+                .filter(
+                    RotaryEntryIdRecord.farm_code == farm.code,
+                    RotaryEntryIdRecord.milking_date.in_(
+                        set(chunk_dates) | {chunk_end + timedelta(days=1)}
+                    ),
+                )
+                .all()
+            )
 
-            raw = metrics.get(metric_key)
-            values.append(float(raw) if raw is not None else None)
+            milk_by_date: dict[date, list[MilkFlowRecord]] = defaultdict(list)
+            for row in milk_rows:
+                if row.milking_date is not None:
+                    milk_by_date[row.milking_date].append(row)
 
-        series.append(
+            entry_by_date: dict[date, list[RotaryEntryIdRecord]] = defaultdict(list)
+            for row in entry_rows:
+                if row.milking_date is not None:
+                    entry_by_date[row.milking_date].append(row)
+
+            for index, milking_date in enumerate(chunk_dates):
+                date_index = offset + index
+                for shift, db_values_normalized, overnight in shift_specs:
+                    day_milk = _filter_shift_rows(
+                        milk_by_date.get(milking_date, []),
+                        db_values_normalized,
+                    )
+                    if not day_milk:
+                        continue
+
+                    day_entries = _entry_rows_for_date_from_maps(
+                        entry_by_date,
+                        milking_date,
+                        db_values_normalized,
+                        crosses_midnight=overnight,
+                    )
+
+                    if pen_id is not None:
+                        by_pen, _ = correct_misassigned_pen_cows(day_milk)
+                        pen_rows = by_pen.get(pen_id) or []
+                        if not pen_rows:
+                            continue
+                        metrics = _day_metrics(
+                            pen_rows,
+                            day_entries,
+                            trim_shift_outliers=True,
+                            crosses_midnight=overnight,
+                            stall_count=stall_count,
+                        )
+                    else:
+                        metrics = _day_metrics(
+                            day_milk,
+                            day_entries,
+                            crosses_midnight=overnight,
+                            stall_count=stall_count,
+                        )
+
+                    raw = metrics.get(metric_key)
+                    values_by_shift[shift["id"]][date_index] = (
+                        float(raw) if raw is not None else None
+                    )
+
+            session.expunge_all()
+            del milk_rows, entry_rows, milk_by_date, entry_by_date
+
+        series = [
             {
-                "shift_id": shift_id,
+                "shift_id": shift["id"],
                 "shift_label": shift["label"],
-                "color": SHIFT_TREND_COLORS.get(shift_id, "#355f7a"),
-                "values": values,
+                "color": SHIFT_TREND_COLORS.get(shift["id"], "#355f7a"),
+                "values": values_by_shift[shift["id"]],
             }
-        )
+            for shift in SHIFT_OPTIONS
+        ]
 
     has_data = any(value is not None for item in series for value in item["values"])
     return {

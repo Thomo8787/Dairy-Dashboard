@@ -47,6 +47,7 @@ from services.graph_onedrive import GraphOneDriveService
 from services.herd_sync import (
     consume_herd_import_result,
     get_herd_import_status,
+    herd_import_allowed_on_web,
     herd_import_status_payload,
     start_herd_import_job,
 )
@@ -229,6 +230,7 @@ def _page_context(active_nav: str = "home", **extra):
         "can_sync_outlook": user_has_permission(user, "perm_sync_outlook"),
         "can_sync_onedrive": user_has_permission(user, "perm_sync_onedrive"),
         "can_sync_dataflow": user_has_permission(user, "perm_sync_dataflow"),
+        "herd_import_on_web": herd_import_allowed_on_web(),
         "herd_import_status": get_herd_import_status(),
     }
     ctx.update(extra)

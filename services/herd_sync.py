@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -63,7 +64,18 @@ def consume_herd_import_result() -> dict[str, Any] | None:
         return result
 
 
+def herd_import_allowed_on_web() -> bool:
+    """OneDrive DCEXPORT import is too large for the Render starter web box."""
+    return not bool(os.environ.get("RENDER", "").strip())
+
+
 def start_herd_import_job(*, force: bool = False) -> tuple[bool, str]:
+    if not herd_import_allowed_on_web():
+        return (
+            False,
+            "Herd import runs on the daily OneDrive cron (05:00 UK). "
+            "Using it here restarts the website.",
+        )
     with _job_lock:
         if _job_state["running"]:
             return False, "A herd import is already running."

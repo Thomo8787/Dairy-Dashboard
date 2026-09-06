@@ -5,8 +5,14 @@
     Reads <strong>DCEXPORTALH</strong> (split to ALH and BNK by BNAME),
     <strong>DCEXPORTSFR</strong>, <strong>DCEXPORTPRK</strong>, and
     <strong>DCEXPORTCOF</strong> from Parlours OneDrive.
+    {% if herd_import_on_web %}
     Cron also runs daily at 05:00 UK time.
+    {% else %}
+    On the live site this import runs only on the daily cron at 05:00 UK —
+    starting it here would restart the website.
+    {% endif %}
   </p>
+  {% if herd_import_on_web %}
   <form
     class="js-sync-form"
     method="post"
@@ -30,5 +36,6 @@
       <span data-sync-status-text>Importing…</span>
     </p>
   </form>
+  {% endif %}
 </div>
 {% endif %}
