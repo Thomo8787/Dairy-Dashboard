@@ -31,6 +31,7 @@ from services.events_common import build_dairy_semen_30d, build_events_page_repo
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
 from services.births_report import build_births_report
 from services.stp_report import build_stp_report
+from services.urine_ph_report import build_urine_ph_report
 from services.breeding_sires import (
     delete_sire_classification,
     list_all_sires,
@@ -1490,6 +1491,12 @@ def events_total_protein():
     return _render_events_page("total-protein")
 
 
+@app.route("/events/urine-ph")
+@permission_required("perm_events")
+def events_urine_ph():
+    return _render_events_page("urine-ph")
+
+
 @app.route("/api/events/dairy-semen-30d")
 def events_api_dairy_semen_30d():
     user, error = _events_json_user()
@@ -1538,6 +1545,13 @@ def events_api_report(slug: str):
                 breed_types=breed,
                 birth_from=_parse_date_arg("birth_from"),
                 birth_to=_parse_date_arg("birth_to"),
+            )
+        elif slug == "urine-ph":
+            payload = build_urine_ph_report(
+                session,
+                farms=farms,
+                event_from=event_from,
+                event_to=event_to,
             )
         else:
             payload = build_events_page_report(

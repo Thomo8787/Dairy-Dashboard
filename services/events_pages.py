@@ -72,6 +72,12 @@ EVENT_PAGES: dict[str, dict[str, Any]] = {
         "nav": "events_total_protein",
         "template": "events/total_protein.html",
     },
+    "urine-ph": {
+        "heading": "Urine PH",
+        "chart_title": "Urine pH",
+        "nav": "events_urine_ph",
+        "template": "events/urine_ph.html",
+    },
 }
 
 
