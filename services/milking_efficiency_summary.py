@@ -10,6 +10,8 @@ from statistics import median
 from typing import Any
 
 from services.database import (
+    CowEvent,
+    HerdInventory,
     MilkFlowRecord,
     MilkingEfficiencyDayCache,
     ParlourImportBatch,
@@ -18,6 +20,7 @@ from services.database import (
     init_db,
 )
 from services.farms import FARMS, FARMS_BY_CODE
+from services.cows_in_milk import _is_milking_inventory_row, cows_in_milk_for_dates
 from services.parlour_link import (
     OVERNIGHT_NEXT_DAY_ID_BEFORE_S,
     match_milk_flow_to_entry_ids,
@@ -397,6 +400,8 @@ def _day_metrics(
     trim_shift_outliers: bool = False,
     crosses_midnight: bool = False,
     stall_count: int | None = None,
+    cows_in_milk: int | None = None,
+    id_cow_scope: set[str] | None = None,
 ) -> dict[str, Any]:
     if not rows:
         return {}
@@ -541,10 +546,19 @@ def _day_metrics(
     if bimodal_flags:
         bimodal_pct = 100.0 * sum(bimodal_flags) / len(bimodal_flags)
 
+    # ID Efficiency: unique cows ID'd on the rotary ÷ DairyComp cows in milk.
+    id_cow_count = _unique_identified_cows(entry_rows, cow_scope=id_cow_scope)
+    id_efficiency_pct = None
+    if cows_in_milk is not None and cows_in_milk > 0 and entry_rows is not None:
+        id_efficiency_pct = 100.0 * id_cow_count / cows_in_milk
+
     return {
         "total_yield_l": sum(yields) if yields else None,
         "avg_yield_l": _mean(yields),
         "total_cows": total_cows,
+        "id_cow_count": id_cow_count,
+        "cows_in_milk": cows_in_milk,
+        "id_efficiency_pct": id_efficiency_pct,
         "cows_per_hour": cows_per_hour,
         "rotation_min": (rotation / 60) if rotation is not None else None,
         "lag_phase_s": _mean(lag_secs),
@@ -571,10 +585,46 @@ def _day_metrics(
     }
 
 
+def _unique_identified_cows(
+    entry_rows: list[RotaryEntryIdRecord] | None,
+    *,
+    cow_scope: set[str] | None = None,
+) -> int:
+    """Count distinct cow numbers ID'd on the parlour (optional milk-row scope)."""
+    if not entry_rows:
+        return 0
+    cows: set[str] = set()
+    for entry in entry_rows:
+        cow = str(entry.cow_number or "").strip()
+        if not cow:
+            continue
+        if cow_scope is not None and cow not in cow_scope:
+            continue
+        cows.add(cow)
+    return len(cows)
+
+
+def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
+    """Current DairyComp inventory cows-in-milk counts keyed by pen."""
+    rows = (
+        session.query(HerdInventory.pen, HerdInventory.rpro, HerdInventory.lact, HerdInventory.dim)
+        .filter(HerdInventory.farm == farm_code)
+        .all()
+    )
+    counts: dict[str, int] = defaultdict(int)
+    for pen, rpro, lact, dim in rows:
+        if not _is_milking_inventory_row(rpro, lact, dim):
+            continue
+        key = (pen or "").strip() or "Unknown"
+        counts[key] += 1
+    return dict(counts)
+
+
 METRIC_ROWS = (
     ("total_yield_l", "Total yield (L)", "number1"),
     ("avg_yield_l", "Average Yield (L)", "number1"),
     ("total_cows", "Total Cows", "int"),
+    ("id_efficiency_pct", "ID Efficiency", "pct1"),
     ("cows_per_hour", "Cows / hour", "number1"),
     ("rotation_min", "Rotation (min)", "number1_highlight"),
     ("lag_phase_s", "Lag phase (s)", "number0"),
@@ -831,6 +881,7 @@ def _compute_metrics_for_dates(
     if not dates:
         return result
 
+    cows_in_milk_by_date = cows_in_milk_for_dates(session, [farm.code], dates)
     any_overnight = any(spec["overnight"] for spec in shift_specs)
     for offset in range(0, len(dates), SUMMARY_DATE_CHUNK):
         chunk = dates[offset : offset + SUMMARY_DATE_CHUNK]
@@ -867,6 +918,7 @@ def _compute_metrics_for_dates(
             day_rows = milk_by_date.get(milking_date, [])
             if not day_rows:
                 continue
+            cows_in_milk = cows_in_milk_by_date.get((farm.code, milking_date))
             for spec in shift_specs:
                 filtered = _filter_shift_rows(day_rows, spec["db_values"])
                 if not filtered:
@@ -884,6 +936,7 @@ def _compute_metrics_for_dates(
                     entries,
                     crosses_midnight=spec["overnight"],
                     stall_count=stall_count,
+                    cows_in_milk=cows_in_milk,
                 )
         session.expunge_all()
         del milk_rows, entry_rows, milk_by_date, entry_by_date
@@ -898,6 +951,27 @@ def _cache_is_fresh(session: Any, farm_code: str) -> bool:
         .limit(1)
         .scalar()
     )
+    latest_entry_import_at = (
+        session.query(ParlourImportBatch.imported_at)
+        .filter_by(farm_code=farm_code, report_type="rotary_entry_id")
+        .order_by(ParlourImportBatch.imported_at.desc())
+        .limit(1)
+        .scalar()
+    )
+    latest_herd_at = (
+        session.query(HerdInventory.import_timestamp)
+        .filter(HerdInventory.farm == farm_code)
+        .order_by(HerdInventory.import_timestamp.desc())
+        .limit(1)
+        .scalar()
+    )
+    latest_event_at = (
+        session.query(CowEvent.import_timestamp)
+        .filter(CowEvent.farm == farm_code)
+        .order_by(CowEvent.import_timestamp.desc())
+        .limit(1)
+        .scalar()
+    )
     latest_cache_at = (
         session.query(MilkingEfficiencyDayCache.computed_at)
         .filter_by(farm_code=farm_code)
@@ -907,8 +981,15 @@ def _cache_is_fresh(session: Any, farm_code: str) -> bool:
     )
     if latest_cache_at is None:
         return False
-    if latest_import_at is not None and _as_utc(latest_cache_at) < _as_utc(latest_import_at):
-        return False
+    cache_utc = _as_utc(latest_cache_at)
+    for stamp in (
+        latest_import_at,
+        latest_entry_import_at,
+        latest_herd_at,
+        latest_event_at,
+    ):
+        if stamp is not None and cache_utc < _as_utc(stamp):
+            return False
     return True
 
 
@@ -1134,16 +1215,27 @@ def build_pen_breakdown(farm_code: str, shift_id: str, milking_date: date) -> di
 
         pen_keys = sorted(by_pen.keys(), key=_pen_sort_key)
         stall_count = _resolve_stall_count(farm)
-        metrics_by_pen = {
-            pen: _day_metrics(
-                by_pen[pen],
+        cows_in_milk = cows_in_milk_for_dates(
+            session, [farm.code], [milking_date]
+        ).get((farm.code, milking_date))
+        cows_in_milk_by_pen = _cows_in_milk_by_pen(session, farm.code)
+        metrics_by_pen = {}
+        for pen in pen_keys:
+            pen_rows = by_pen[pen]
+            pen_cows = {
+                str(row.cow_number).strip()
+                for row in pen_rows
+                if row.cow_number
+            }
+            metrics_by_pen[pen] = _day_metrics(
+                pen_rows,
                 entry_filtered,
                 trim_shift_outliers=True,
                 crosses_midnight=overnight,
                 stall_count=stall_count,
+                cows_in_milk=cows_in_milk_by_pen.get(pen, cows_in_milk),
+                id_cow_scope=pen_cows,
             )
-            for pen in pen_keys
-        }
         table_rows = _build_metric_table_rows(pen_keys, metrics_by_pen, farm=farm)
         pen_headers = [{"id": pen, "label": f"Pen {pen}"} for pen in pen_keys]
 
@@ -1290,6 +1382,11 @@ def build_metric_trend(
                 if row.milking_date is not None:
                     entry_by_date[row.milking_date].append(row)
 
+            cows_in_milk_by_date = cows_in_milk_for_dates(session, [farm.code], chunk_dates)
+            cows_in_milk_by_pen = (
+                _cows_in_milk_by_pen(session, farm.code) if pen_id is not None else {}
+            )
+
             for index, milking_date in enumerate(chunk_dates):
                 date_index = offset + index
                 for shift, db_values_normalized, overnight in shift_specs:
@@ -1306,18 +1403,26 @@ def build_metric_trend(
                         db_values_normalized,
                         crosses_midnight=overnight,
                     )
+                    cows_in_milk = cows_in_milk_by_date.get((farm.code, milking_date))
 
                     if pen_id is not None:
                         by_pen, _ = correct_misassigned_pen_cows(day_milk)
                         pen_rows = by_pen.get(pen_id) or []
                         if not pen_rows:
                             continue
+                        pen_cows = {
+                            str(row.cow_number).strip()
+                            for row in pen_rows
+                            if row.cow_number
+                        }
                         metrics = _day_metrics(
                             pen_rows,
                             day_entries,
                             trim_shift_outliers=True,
                             crosses_midnight=overnight,
                             stall_count=stall_count,
+                            cows_in_milk=cows_in_milk_by_pen.get(pen_id, cows_in_milk),
+                            id_cow_scope=pen_cows,
                         )
                     else:
                         metrics = _day_metrics(
@@ -1325,6 +1430,7 @@ def build_metric_trend(
                             day_entries,
                             crosses_midnight=overnight,
                             stall_count=stall_count,
+                            cows_in_milk=cows_in_milk,
                         )
 
                     raw = metrics.get(metric_key)

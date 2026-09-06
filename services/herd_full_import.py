@@ -52,6 +52,15 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
         logger.exception("Stock accrual snapshot rebuild failed")
         accruals = {"skipped": True, "error": str(exc), "rows_written": 0}
 
+    # ID Efficiency on Milking Efficiency uses DairyComp cows-in-milk — refresh cache.
+    try:
+        from services.milking_efficiency_summary import refresh_efficiency_cache
+
+        efficiency = refresh_efficiency_cache(force=True)
+    except Exception as exc:
+        logger.exception("Milking efficiency cache refresh after herd import failed")
+        efficiency = {"skipped": True, "error": str(exc)}
+
     return {
         "farms_found": farms_found,
         "files": [
@@ -64,6 +73,7 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
         "genomic": genomic,
         "purchases": purchases,
         "accruals": accruals,
+        "efficiency": efficiency,
     }
 
 
