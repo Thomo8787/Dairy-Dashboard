@@ -95,7 +95,8 @@ SALES_MAPPED_REMARKS: tuple[str, ...] = ("OFS", *SALES_TB_REMARKS, "CAR16", *SAL
 # sales in reporting via sales_classified_event_clause().
 DIED_AS_SALES_REMARKS: tuple[str, ...] = ("TB", "OFS")
 # Fallen-stock collectors recorded on DEST (DairyComp item codes).
-OFS_DEST_PREFIXES: tuple[str, ...] = ("OFS", "CNEILD", "CSARG")
+# CNIELD is the SFR spelling of Cneild.
+OFS_DEST_PREFIXES: tuple[str, ...] = ("OFS", "CNEILD", "CNIELD", "CSARG")
 BREEDINGS_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
 BREEDINGS_CHART_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
 
@@ -105,7 +106,7 @@ def _dest_upper():
 
 
 def ofs_dest_clause():
-    """DEST is OFS or a fallen-stock collector (Cneild / CSarg…)."""
+    """DEST is OFS or a fallen-stock collector (Cneild / CSarg)."""
     dest = _dest_upper()
     return and_(
         CowEvent.dest.isnot(None),
@@ -113,9 +114,18 @@ def ofs_dest_clause():
     )
 
 
+def _remark_upper():
+    return func.upper(func.trim(func.coalesce(CowEvent.remark, "")))
+
+
+def died_cert_clause():
+    """DIED with Remark CERT / CERT BL / CERT NERVEDAM."""
+    return and_(CowEvent.event == "DIED", _remark_upper().like("CERT%"))
+
+
 def ofs_sales_clause():
     """Remark OFS, or DEST is a fallen-stock collector / OFS."""
-    return or_(CowEvent.remark == "OFS", ofs_dest_clause())
+    return or_(_remark_upper() == "OFS", ofs_dest_clause())
 
 
 def died_as_sales_clause():
@@ -123,8 +133,9 @@ def died_as_sales_clause():
     return and_(
         CowEvent.event == "DIED",
         or_(
-            CowEvent.remark.in_(list(DIED_AS_SALES_REMARKS)),
-            ofs_dest_clause(),
+            _remark_upper().in_(list(SALES_TB_REMARKS)),
+            ofs_sales_clause(),
+            _remark_upper().like("CERT%"),
         ),
     )
 
@@ -139,16 +150,7 @@ def sales_classified_event_clause():
 
 def death_report_event_clause():
     """True DIED events for deaths/fallen-stock reports (exclude TB/OFS sales-deaths)."""
-    return and_(
-        CowEvent.event == "DIED",
-        ~or_(
-            and_(
-                CowEvent.remark.isnot(None),
-                CowEvent.remark.in_(list(DIED_AS_SALES_REMARKS)),
-            ),
-            ofs_dest_clause(),
-        ),
-    )
+    return and_(CowEvent.event == "DIED", ~died_as_sales_clause())
 
 # Deaths report: for youngstock (lact == 0) exclude very-early deaths and
 # deaths recorded with generic/unwanted reasons so they don't skew the report.
@@ -355,7 +357,7 @@ def _apply_fiscal_year(query, fiscal_year: int | None):
 
 def _sales_reason_expression():
     return case(
-        (ofs_sales_clause(), literal("OFS")),
+        (or_(ofs_sales_clause(), died_cert_clause()), literal("OFS")),
         (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
         (CowEvent.remark == "CAR16", literal("Beef")),
         (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),

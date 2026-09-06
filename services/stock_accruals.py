@@ -15,6 +15,7 @@ from services.database import (
     STOCK_GROUP_COWS,
     STOCK_GROUP_OPTIONS,
     STOCK_GROUP_YOUNGSTOCK,
+    AppSetting,
     CowEvent,
     HerdBirth,
     HerdInventory,
@@ -38,6 +39,8 @@ from services.stock_purchase_derivation import ensure_stock_purchases
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
+ACCRUAL_LOGIC_VERSION = "ofs-cert-v2"
+ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
 
 def _month_start(value: dt.date) -> dt.date:
@@ -725,6 +728,19 @@ def _rows_from_snapshots(
     return _merge_farm_rows([by_farm[farm] for farm in selected_farms])
 
 
+def _ensure_accrual_logic_version(db: Session) -> None:
+    """Rebuild snapshots when OFS/death classification rules change."""
+    row = db.scalar(select(AppSetting).where(AppSetting.key == ACCRUAL_LOGIC_SETTING))
+    if row is not None and row.value == ACCRUAL_LOGIC_VERSION:
+        return
+    rebuild_stock_accrual_snapshots(db)
+    if row is None:
+        db.add(AppSetting(key=ACCRUAL_LOGIC_SETTING, value=ACCRUAL_LOGIC_VERSION))
+    else:
+        row.value = ACCRUAL_LOGIC_VERSION
+    db.flush()
+
+
 def rebuild_stock_accrual_snapshots(db: Session) -> dict[str, Any]:
     """Recompute and persist stock accrual rows for all farms and stock groups."""
     ensure_stock_purchases(db)
@@ -829,6 +845,7 @@ def build_stock_accruals_report(
 
     ensure_stock_purchases(db)
     ensure_stock_opening_baselines(db)
+    _ensure_accrual_logic_version(db)
 
     baselines = list(
         db.scalars(
