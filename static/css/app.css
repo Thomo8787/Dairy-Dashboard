@@ -879,6 +879,11 @@ th {
   font-weight: 700;
 }
 
+.me-summary-table td.is-late {
+  color: #c0392b;
+  font-weight: 700;
+}
+
 .me-hint {
   margin: 0 0 0.75rem;
   color: var(--muted);

@@ -701,21 +701,60 @@ def _pen_sort_key(pen: str) -> tuple[int, int | str]:
         return (1, pen)
 
 
+# Highlight Shift start time after these clock times (farm-specific).
+_SHIFT_START_LATE_AFTER_S: dict[str, dict[str, int]] = {
+    "ALH": {
+        "Morning": 4 * 3600 + 5 * 60,
+        "Day": 12 * 3600 + 5 * 60,
+        "Night": 20 * 3600 + 5 * 60,
+    },
+    "PRK": {
+        "Morning": 5 * 3600,
+        "Day": 12 * 3600 + 30 * 60,
+        "Night": 20 * 3600 + 15 * 60,
+    },
+}
+
+
+def _shift_start_is_late(farm_code: str | None, shift_id: str | None, start_s: Any) -> bool:
+    if start_s is None or not shift_id or not farm_code:
+        return False
+    limits = _SHIFT_START_LATE_AFTER_S.get(farm_code)
+    if not limits:
+        return False
+    try:
+        clock = int(round(float(start_s))) % DAY_SECONDS
+    except (TypeError, ValueError):
+        return False
+    if clock < 0:
+        clock += DAY_SECONDS
+    limit = limits.get(shift_id)
+    if limit is None:
+        return False
+    if shift_id == "Night" and clock < 12 * 3600:
+        return True
+    return clock > limit
+
+
 def _build_metric_table_rows(
     column_keys: list[Any],
     metrics_by_key: dict[Any, dict[str, Any]],
     *,
     farm: Any | None = None,
+    shift_id: str | None = None,
 ) -> list[dict[str, Any]]:
     table_rows = []
+    farm_code = getattr(farm, "code", None)
     for key, label, kind in _metric_rows_for_farm(farm):
         cells = []
         for column_key in column_keys:
             raw = metrics_by_key.get(column_key, {}).get(key)
+            late = key == "shift_start_s" and _shift_start_is_late(farm_code, shift_id, raw)
             cells.append(
                 {
                     "text": _format_metric(raw, kind),
                     "highlight": kind == "number1_highlight" and raw is not None,
+                    "late": late,
                 }
             )
         table_rows.append({"key": key, "label": label, "cells": cells})
@@ -810,7 +849,9 @@ def _shift_view_payload(
             {"date": d.isoformat(), "label": d.strftime("%a, %b %d")}
             for d in selected_dates
         ],
-        "table_rows": _build_metric_table_rows(selected_dates, metrics_by_date, farm=farm),
+        "table_rows": _build_metric_table_rows(
+            selected_dates, metrics_by_date, farm=farm, shift_id=shift_id
+        ),
         "has_data": bool(selected_dates),
         "day_count": len(selected_dates),
     }
@@ -1236,7 +1277,9 @@ def build_pen_breakdown(farm_code: str, shift_id: str, milking_date: date) -> di
                 cows_in_milk=cows_in_milk_by_pen.get(pen, cows_in_milk),
                 id_cow_scope=pen_cows,
             )
-        table_rows = _build_metric_table_rows(pen_keys, metrics_by_pen, farm=farm)
+        table_rows = _build_metric_table_rows(
+            pen_keys, metrics_by_pen, farm=farm, shift_id=shift_id
+        )
         pen_headers = [{"id": pen, "label": f"Pen {pen}"} for pen in pen_keys]
 
         return {

@@ -255,6 +255,7 @@
           (row.cells || []).forEach((cell, index) => {
             const td = document.createElement("td");
             if (cell.highlight) td.classList.add("is-hot");
+            if (cell.late) td.classList.add("is-late");
             const pen = pens[index];
             if (pen) {
               const btn = document.createElement("button");
@@ -678,6 +679,7 @@
           (row.cells || []).forEach((cell) => {
             const td = document.createElement("td");
             if (cell.highlight) td.classList.add("is-hot");
+            if (cell.late) td.classList.add("is-late");
             td.textContent = cell.text;
             tr.appendChild(td);
           });
