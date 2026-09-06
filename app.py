@@ -310,6 +310,7 @@ def logout():
 def home():
     return render_template(
         "home.html",
+        farm_chart_colors=FARM_CHART_COLORS,
         **_page_context(active_nav="home"),
     )
 

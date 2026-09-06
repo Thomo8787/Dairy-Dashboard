@@ -165,6 +165,52 @@ def _annotate_volume_and_cows(trend: dict[str, list[dict[str, Any]]]) -> None:
                 point["litres_per_cow"] = None
 
 
+def _daily_metric_value(point: dict[str, Any] | None, key: str) -> int | None:
+    if point is None or point.get(key) is None:
+        return None
+    try:
+        return int(round(float(point[key])))
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_quality_chart(
+    trend: dict[str, list[dict[str, Any]]],
+    *,
+    window_end: dt.date,
+    key: str,
+    days: int = _SHORT_WINDOW_DAYS,
+) -> dict[str, Any]:
+    """Multi-farm daily series for the last ``days`` calendar days ending ``window_end``."""
+    start = window_end - dt.timedelta(days=days - 1)
+    dates = [start + dt.timedelta(days=offset) for offset in range(days)]
+
+    by_farm: dict[str, dict[dt.date, dict[str, Any]]] = {}
+    for farm in HERD_FARM_OPTIONS:
+        points_by_date: dict[dt.date, dict[str, Any]] = {}
+        for point in trend.get(farm) or []:
+            day = _parse_day(point.get("date"))
+            if day is None or day < start or day > window_end:
+                continue
+            points_by_date[day] = point
+        by_farm[farm] = points_by_date
+
+    series: dict[str, list[int | None]] = {}
+    for farm in HERD_FARM_OPTIONS:
+        points_by_date = by_farm.get(farm) or {}
+        series[farm] = [
+            _daily_metric_value(points_by_date.get(day), key) for day in dates
+        ]
+
+    return {
+        "dates": [d.isoformat() for d in dates],
+        "series": series,
+        "metric": key,
+        "window_days": days,
+        "completed_through": window_end.isoformat(),
+    }
+
+
 def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     """Return per-farm 7-day / 30-day production averages ending yesterday."""
     today = as_of or _uk_today()
@@ -197,4 +243,7 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         "completed_through": completed_through.isoformat(),
         "href": "/milk-quality/collections",
         "farms": farms_out,
+        "bactoscan_chart": _build_quality_chart(
+            trend, window_end=completed_through, key="bactoscan"
+        ),
     }

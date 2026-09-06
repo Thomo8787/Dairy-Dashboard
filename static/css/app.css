@@ -452,6 +452,45 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+.home-bactoscan-chart-card {
+  margin: 1.1rem 0 0;
+  padding: 0.85rem 1rem 0.75rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.home-bactoscan-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.home-bactoscan-chart-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+
+.home-bactoscan-chart-link {
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.home-bactoscan-chart-link:hover {
+  color: #1e3a5f;
+  text-decoration: underline;
+}
+
+.home-bactoscan-chart-wrap {
+  position: relative;
+  height: 480px;
+}
+
 .home-farm-block + .home-farm-block {
   margin-top: 0.85rem;
 }

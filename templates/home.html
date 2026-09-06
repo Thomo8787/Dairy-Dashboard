@@ -115,6 +115,15 @@
       </div>
     </div>
     {% endfor %}
+    <div class="home-bactoscan-chart-card">
+      <div class="home-bactoscan-chart-head">
+        <h3>BactoScan last 7 days (x1000/ml)</h3>
+        <a class="home-bactoscan-chart-link" href="{{ url_for('milk_quality_collections') }}">Open Milk Quality</a>
+      </div>
+      <div class="home-bactoscan-chart-wrap">
+        <canvas id="home-bactoscan-chart" aria-label="Daily BactoScan by farm for the last seven days"></canvas>
+      </div>
+    </div>
   </section>
   {% endif %}
 
@@ -165,11 +174,14 @@
 </script>
 {% endif %}
 {% if current_user and current_user.perm_milk_quality %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 (() => {
   const root = document.getElementById("home-production");
   if (!root) return;
   const farmBlocks = Array.from(root.querySelectorAll("[data-production-farm]"));
+  const FARM_COLORS = {{ farm_chart_colors | tojson }};
+  let bactoscanChart = null;
 
   function fmtInt(value) {
     const n = Number(value);
@@ -193,6 +205,13 @@
     }
     if (metric === "milk_per_cow" || metric === "milk_temp") return fmtFixed(value, 1);
     return fmtFixed(value, 2);
+  }
+
+  function formatDateLabel(iso) {
+    if (!iso) return "";
+    const d = new Date(iso + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   }
 
   function setStatus(widget, status) {
@@ -225,6 +244,71 @@
     });
   }
 
+  function renderBactoscanChart(chartPayload) {
+    const canvas = document.getElementById("home-bactoscan-chart");
+    if (!canvas || typeof Chart === "undefined") return;
+    if (bactoscanChart) {
+      bactoscanChart.destroy();
+      bactoscanChart = null;
+    }
+    const dates = (chartPayload && chartPayload.dates) || [];
+    const series = (chartPayload && chartPayload.series) || {};
+    const farms = Object.keys(series);
+    if (!dates.length || !farms.length) return;
+
+    const datasets = farms.map((farm) => {
+      const color = FARM_COLORS[farm] || "#555";
+      return {
+        label: farm,
+        data: series[farm] || [],
+        borderColor: color,
+        backgroundColor: color,
+        tension: 0.35,
+        spanGaps: true,
+        pointRadius: 3,
+        borderWidth: 2,
+      };
+    });
+
+    bactoscanChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: dates.map(formatDateLabel),
+        datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { boxWidth: 12, font: { size: 12 } },
+          },
+          tooltip: {
+            callbacks: {
+              title(items) {
+                const idx = items[0] && items[0].dataIndex;
+                return dates[idx] || "";
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+          },
+          y: {
+            min: 0,
+            max: 100,
+            title: { display: true, text: "BactoScan (x1000/ml)" },
+          },
+        },
+      },
+    });
+  }
+
   async function loadProduction() {
     try {
       const res = await fetch("/milk-quality/api/production-summary");
@@ -252,6 +336,7 @@
           );
         });
       });
+      renderBactoscanChart(data.bactoscan_chart || {});
     } catch (_err) {
       markError();
     }
