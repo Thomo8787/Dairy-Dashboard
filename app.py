@@ -124,7 +124,12 @@ from services.nml_results import (
 )
 from services.nml_statements import list_nml_statements
 from services.nml_sync import get_nml_import_status, start_nml_import_job
-from services.nml_manual import get_collection_day, save_collection_day, update_collection_load
+from services.nml_manual import (
+    delete_collection_load,
+    get_collection_day,
+    save_collection_day,
+    update_collection_load,
+)
 from services.navigation import filter_nav_items, parent_nav_id
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
@@ -929,11 +934,16 @@ def milk_quality_api_collections_save():
         return jsonify({"error": str(exc)}), 400
 
 
-@app.route("/milk-quality/api/collections/<int:row_id>", methods=["PATCH", "POST"])
+@app.route("/milk-quality/api/collections/<int:row_id>", methods=["PATCH", "POST", "DELETE"])
 def milk_quality_api_collections_update(row_id: int):
     user, error = _milk_quality_json_user()
     if error:
         return error
+    if request.method == "DELETE":
+        try:
+            return jsonify(delete_collection_load(row_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     payload = request.get_json(silent=True) or {}
     raw_date = (payload.get("date") or payload.get("sample_date") or "").strip()
     try:

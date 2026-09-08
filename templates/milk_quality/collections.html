@@ -216,9 +216,9 @@
           Each row is one tanker load. Quality comes from NML; litres and weighbridge
           tickets are from the farm collection sheet. Cows in milk is the herd count for
           that farm and date (lactating, not dry, DIM over 4). Rows with no sample number
-          are highlighted. Fetch NML emails matches the sample number exactly and links it
-          when the lab date is within one day of the date the milk was sold. A green tick
-          means that match succeeded; a red cross means it did not.
+          are highlighted. When NML arrives, quality is linked by sample number if entered,
+          otherwise onto unmatched loads for that farm within ±1 day (load order). A green
+          tick means linked; a red cross means not yet linked.
         </p>
       </aside>
     </div>
@@ -389,6 +389,7 @@
         </label>
         <p class="add-modal-error" id="edit-collection-error" hidden></p>
         <div class="add-modal-actions">
+          <button type="button" class="btn ghost" id="edit-collection-delete">Delete</button>
           <button type="button" class="btn ghost" id="edit-collection-cancel">Cancel</button>
           <button type="submit" class="btn" id="edit-collection-save">Save</button>
         </div>
@@ -1193,6 +1194,34 @@
     openEditModal(row);
   });
   document.getElementById("edit-collection-cancel").addEventListener("click", closeEditModal);
+  document.getElementById("edit-collection-delete").addEventListener("click", async () => {
+    const rowId = document.getElementById("edit-row-id").value;
+    if (!rowId) {
+      showEditError("Collection not found.");
+      return;
+    }
+    if (!window.confirm("Delete this milk collection?")) return;
+    showEditError("");
+    const deleteBtn = document.getElementById("edit-collection-delete");
+    const saveBtn = document.getElementById("edit-collection-save");
+    deleteBtn.disabled = true;
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/milk-quality/api/collections/" + encodeURIComponent(rowId), {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not delete collection");
+      closeEditModal();
+      showMessage("Deleted collection for " + (data.farm || "") + ".", false);
+      loadResults();
+    } catch (err) {
+      showEditError(err.message || String(err));
+    } finally {
+      deleteBtn.disabled = false;
+      saveBtn.disabled = false;
+    }
+  });
   editModal.addEventListener("click", (e) => {
     if (e.target.id === "edit-collection-modal") closeEditModal();
   });

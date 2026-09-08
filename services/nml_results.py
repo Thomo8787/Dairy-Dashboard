@@ -246,6 +246,10 @@ def list_nml_results(
     date_from: dt.date | None = None,
     date_to: dt.date | None = None,
 ) -> dict[str, Any]:
+    from services.nml_import import rematch_orphan_nml_results
+
+    # Link any lab-only NML rows onto farm tickets that were saved without sample numbers.
+    rematch = rematch_orphan_nml_results()
     selected_farms = _normalise_farms(farms)
     with get_session() as session:
         query = select(NmlMilkResult).where(NmlMilkResult.farm.in_(selected_farms))
@@ -266,6 +270,7 @@ def list_nml_results(
         "summary": _summary(rows),
         "trend": _build_trend(rows),
         "unmatched_nml": [],
+        "orphans_merged": rematch.get("orphans_merged", 0),
     }
 
 

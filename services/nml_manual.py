@@ -123,6 +123,7 @@ def save_collection_day(
     report_month = f"{calendar.month_name[sample_date.month]} {sample_date.year}"
     inserted = 0
     updated = 0
+    merged = 0
 
     with get_session() as session:
         existing = session.scalars(
@@ -199,7 +200,12 @@ def save_collection_day(
             row.imported_at = dt.datetime.now(dt.timezone.utc)
             updated += 1
 
-        session.commit()
+        session.flush()
+        from services.nml_import import _merge_orphan_nml, _row_index
+
+        merged = _merge_orphan_nml(
+            session, _row_index(list(session.scalars(select(NmlMilkResult)).all()))
+        )
 
     return {
         "farm": farm_key,
@@ -207,6 +213,7 @@ def save_collection_day(
         "loads_saved": len(cleaned),
         "rows_inserted": inserted,
         "rows_updated": updated,
+        "orphans_merged": merged,
     }
 
 
@@ -349,3 +356,18 @@ def update_collection_load(
             "sample_id": "" if row.sample_missing else (row.sample_id or ""),
             "nml_matched": bool(row.nml_matched),
         }
+
+
+def delete_collection_load(row_id: int) -> dict[str, Any]:
+    with get_session() as session:
+        row = session.get(NmlMilkResult, row_id)
+        if row is None:
+            raise ValueError("Collection not found.")
+        summary = {
+            "id": row.id,
+            "farm": row.farm,
+            "sample_date": row.sample_date.isoformat() if row.sample_date else "",
+        }
+        session.delete(row)
+        session.commit()
+        return summary
