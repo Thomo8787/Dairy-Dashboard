@@ -249,7 +249,11 @@ def list_nml_results(
     from services.nml_import import rematch_orphan_nml_results
 
     # Link any lab-only NML rows onto farm tickets that were saved without sample numbers.
-    rematch = rematch_orphan_nml_results()
+    # Never let rematch failures empty the Collections page.
+    try:
+        rematch = rematch_orphan_nml_results()
+    except Exception:
+        rematch = {"orphans_merged": 0}
     selected_farms = _normalise_farms(farms)
     with get_session() as session:
         query = select(NmlMilkResult).where(NmlMilkResult.farm.in_(selected_farms))

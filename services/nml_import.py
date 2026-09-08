@@ -343,20 +343,39 @@ def _attach_quality_to_collection(
     """Apply NML fields and adopt the real sample id when the ticket was a placeholder."""
     old_sample = row.sample_id
     new_sample = normalize_sample_id(record.get("sample_id") or old_sample)
-    # Drop any lab-only row that already owns this sample id before rekeying.
+    # Drop lab-only rows that own this sample id, and flush deletes before
+    # updating — otherwise UNIQUE(producer_ref, sample_date, sample_id) fails.
     if session is not None and new_sample:
         key = (row.producer_ref, new_sample)
+        deleted_any = False
         for other in list(index.get(key, [])):
             if other is row:
                 continue
             if not _has_volume(other):
                 _drop_orphan(session, index, other)
+                deleted_any = True
+        if deleted_any:
+            session.flush()
     _apply_quality(row, record)
     if new_sample and (
         row.sample_missing
         or _looks_like_placeholder_sample(old_sample)
         or normalize_sample_id(old_sample) != new_sample
     ):
+        # If another volume row already holds this sample on the same date, skip rekey.
+        if session is not None and row.sample_date is not None:
+            clash = next(
+                (
+                    other
+                    for other in (index.get((row.producer_ref, new_sample)) or [])
+                    if other is not row
+                    and other.sample_date == row.sample_date
+                    and _has_volume(other)
+                ),
+                None,
+            )
+            if clash is not None:
+                return
         row.sample_id = new_sample
         row.sample_missing = False
         _rekey_row(index, row, old_sample, new_sample)
@@ -420,11 +439,18 @@ def _merge_orphan_nml(
 
 def rematch_orphan_nml_results() -> dict[str, int]:
     """Link existing lab-only NML rows onto unmatched farm volume tickets."""
+    from sqlalchemy.exc import IntegrityError
+
     with get_session() as session:
-        rows = list(session.scalars(select(NmlMilkResult)).all())
-        index = _row_index(rows)
-        merged = _merge_orphan_nml(session, index)
-        session.flush()
+        try:
+            rows = list(session.scalars(select(NmlMilkResult)).all())
+            index = _row_index(rows)
+            merged = _merge_orphan_nml(session, index)
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            logger.exception("NML orphan rematch failed unique constraint; leaving rows unchanged")
+            return {"orphans_merged": 0}
     return {"orphans_merged": merged}
 
 
