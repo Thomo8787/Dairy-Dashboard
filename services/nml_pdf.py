@@ -13,7 +13,7 @@ currently use three layouts:
   Sample ID, Date, B/Fat, Protein, SCC, BactoScan, FPD, A/B, Urea.
 
 Reports often continue onto a second page without repeating the header.
-Antibiotic is assumed Pass unless the row says Fail.
+Antibiotic is Pass unless a row word is Fail (payment markers like 'Y' are ignored).
 """
 
 from __future__ import annotations
@@ -140,15 +140,6 @@ def _clean_number(token: str) -> str | None:
     return None
 
 
-def _detect_layout(full_text: str) -> str:
-    lowered = full_text.lower()
-    if "additional test results notification" in lowered:
-        return LAYOUT_BNK
-    if "additional test notification" in lowered:
-        return LAYOUT_PRK
-    return LAYOUT_ONGOING
-
-
 def _parse_metadata(lines: list[str], full_text: str) -> dict[str, Any]:
     producer_ref = None
     if match := _PRODUCER_RE.search(full_text):
@@ -202,14 +193,31 @@ def _parse_metadata(lines: list[str], full_text: str) -> dict[str, Any]:
 
 
 def _parse_antibiotic(tokens: list[str]) -> bool:
-    """Assume Pass unless the row explicitly says Fail."""
+    """Assume Pass unless the row explicitly says Fail.
+
+    Antibiotic cells often include a payment marker (e.g. 'Fail Y'), so check
+    each alphabetic word rather than the whole concatenated token.
+    """
     for token in tokens:
-        low = re.sub(r"[^a-z]", "", token.lower())
-        if low == "fail":
-            return False
-        if low == "pass":
-            return True
+        for word in re.findall(r"[A-Za-z]+", token or ""):
+            low = word.lower()
+            if low == "fail":
+                return False
+            if low == "pass":
+                return True
     return True
+
+
+def _detect_layout(full_text: str) -> str:
+    lowered = full_text.lower()
+    if "additional test results notification" in lowered:
+        return LAYOUT_BNK
+    if "additional test notification" in lowered:
+        return LAYOUT_PRK
+    # Müller "Results Notification" uses FPD before cell count / bacto (BNK bands).
+    if "results notification" in lowered:
+        return LAYOUT_BNK
+    return LAYOUT_ONGOING
 
 
 def _to_float(token: str | None) -> float | None:

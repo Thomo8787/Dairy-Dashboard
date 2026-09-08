@@ -90,7 +90,7 @@ services:
     branch: main
     schedule: "0 */3 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python scripts/sync_nml_emails.py --days 3
+    startCommand: python scripts/sync_nml_emails.py --days 7
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"

@@ -41,7 +41,7 @@ def _run_nml_sync() -> None:
         if not nml_is_configured():
             logger.info("NML email sync skipped — mailbox not configured")
             return
-        nml = import_nml_results(days=3)
+        nml = import_nml_results(days=7)
         logger.info("NML email sync: %s", format_nml_summary(nml))
     except Exception:
         logger.exception("NML email sync failed")

@@ -495,8 +495,10 @@
     const opts = months.map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join("");
     document.getElementById("date-from").innerHTML = opts;
     document.getElementById("date-to").innerHTML = opts;
-    document.getElementById("date-from").value = monthKey(new Date(boundStart.getFullYear(), boundStart.getMonth(), 1));
-    document.getElementById("date-to").value = monthKey(new Date(boundEnd.getFullYear(), boundEnd.getMonth(), 1));
+    const thisMonth = monthKey(current);
+    const lastMonth = monthKey(new Date(current.getFullYear(), current.getMonth() - 1, 1));
+    document.getElementById("date-from").value = months.includes(lastMonth) ? lastMonth : months[0];
+    document.getElementById("date-to").value = months.includes(thisMonth) ? thisMonth : months[months.length - 1];
   }
 
   function buildQuery() {

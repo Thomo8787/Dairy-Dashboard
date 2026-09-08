@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 NML_LOOKBACK_DAYS = 14
 _MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+# Default accept list; override with comma-separated NML_SENDER.
+_DEFAULT_SENDER_FRAGMENTS = (
+    "nationalmilklabs.com",
+    "nmrp.com",
+    "muller",
+    "müller",
+)
 
 
 def _parse_received(raw: str | None) -> datetime | None:
@@ -28,14 +35,20 @@ def _parse_received(raw: str | None) -> datetime | None:
         return None
 
 
+def _sender_fragments(raw: str | None) -> list[str]:
+    text = (raw or "").strip().lower()
+    if not text:
+        return list(_DEFAULT_SENDER_FRAGMENTS)
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    return parts or list(_DEFAULT_SENDER_FRAGMENTS)
+
+
 class NmlPdfEmailService:
     """Pull NML report PDFs from the same mailbox as DataFlow CSVs."""
 
     def __init__(self) -> None:
         self.mailbox = os.environ.get("OUTLOOK_MAILBOX", "").strip()
-        self.sender_filter = (
-            os.environ.get("NML_SENDER") or "nationalmilklabs.com"
-        ).strip().lower()
+        self.sender_fragments = _sender_fragments(os.environ.get("NML_SENDER"))
         self.subject_filter = (os.environ.get("NML_SUBJECT") or "").strip()
         if auth_mode() == "application" and not self.mailbox:
             raise RuntimeError("OUTLOOK_MAILBOX is not set")
@@ -45,12 +58,16 @@ class NmlPdfEmailService:
             return "me"
         return f"users/{quote(self.mailbox)}"
 
+    def _sender_ok(self, sender: str) -> bool:
+        return any(fragment in sender for fragment in self.sender_fragments)
+
     def _message_matches(
         self,
         message: dict,
         *,
         since: datetime | None,
         skip_message_ids: set[str],
+        require_sender: bool = True,
     ) -> bool:
         message_id = message.get("id") or ""
         if message_id in skip_message_ids:
@@ -69,22 +86,24 @@ class NmlPdfEmailService:
             .get("address", "")
             .lower()
         )
-        sender_ok = bool(self.sender_filter) and self.sender_filter in sender
-        if sender_ok:
+        if self._sender_ok(sender):
             return True
-        if self.subject_filter:
-            return self.subject_filter.lower() in subject
-        return False
+        if self.subject_filter and self.subject_filter.lower() in subject:
+            return True
+        # Broad attachment scan: keep candidates; fetch_pdfs drops non-NML PDFs.
+        return not require_sender
 
     def _list_messages(self, *, top: int, since: datetime, skip_message_ids: set[str]) -> list[dict]:
         root = self._mailbox_root()
         since_iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        sender = self.sender_filter.replace("'", "''")
+        # Prefer a tight Graph filter on the primary NML domain, then always
+        # merge a broader attachment scan so buyer-forwarded reports are not missed.
+        primary = (self.sender_fragments[0] if self.sender_fragments else "").replace("'", "''")
         subject = self.subject_filter.replace("'", "''")
-        if sender:
+        if primary:
             scoped = (
                 f"receivedDateTime ge {since_iso} and hasAttachments eq true "
-                f"and contains(from/emailAddress/address,'{sender}')"
+                f"and contains(from/emailAddress/address,'{primary}')"
             )
         elif subject:
             scoped = (
@@ -103,30 +122,42 @@ class NmlPdfEmailService:
         )
         url: str | None = f"{GRAPH_BASE}/{root}/messages?{query}"
         headers = {**graph_headers(), "ConsistencyLevel": "eventual"}
-        matches: list[dict] = []
+        by_id: dict[str, dict] = {}
         pages = 0
         max_pages = max(12, min(60, (top + 49) // 50 + 4))
         try:
-            while url and len(matches) < top and pages < max_pages:
+            while url and len(by_id) < top and pages < max_pages:
                 pages += 1
                 response = _request_with_retries("GET", url, timeout=60, headers=headers)
                 payload = response.json()
                 for message in payload.get("value", []):
                     if self._message_matches(
-                        message, since=since, skip_message_ids=skip_message_ids
+                        message,
+                        since=since,
+                        skip_message_ids=skip_message_ids,
+                        require_sender=True,
                     ):
-                        matches.append(message)
-                        if len(matches) >= top:
+                        message_id = message.get("id") or ""
+                        if message_id:
+                            by_id[message_id] = message
+                        if len(by_id) >= top:
                             break
                 url = payload.get("@odata.nextLink")
         except Exception:
-            logger.exception("NML subject-filtered Graph list failed; trying attachment scan")
-            return self._attachment_scan(root, top, since_iso, since, skip_message_ids)
+            logger.exception("NML sender-filtered Graph list failed; using attachment scan only")
 
-        if matches:
-            matches.sort(key=lambda m: m.get("receivedDateTime") or "", reverse=True)
-            return matches[:top]
-        return self._attachment_scan(root, top, since_iso, since, skip_message_ids)
+        # Always scan recent attachments too. Sender filter alone misses Müller /
+        # buyer forwards when other NML mail already filled the match list.
+        for message in self._attachment_scan(
+            root, top, since_iso, since, skip_message_ids, require_sender=False
+        ):
+            message_id = message.get("id") or ""
+            if message_id and message_id not in by_id:
+                by_id[message_id] = message
+
+        matches = list(by_id.values())
+        matches.sort(key=lambda m: m.get("receivedDateTime") or "", reverse=True)
+        return matches[:top]
 
     def _attachment_scan(
         self,
@@ -135,6 +166,8 @@ class NmlPdfEmailService:
         since_iso: str,
         since: datetime,
         skip_message_ids: set[str],
+        *,
+        require_sender: bool = True,
     ) -> list[dict]:
         query = urlencode(
             {
@@ -154,7 +187,10 @@ class NmlPdfEmailService:
             payload = response.json()
             for message in payload.get("value", []):
                 if self._message_matches(
-                    message, since=since, skip_message_ids=skip_message_ids
+                    message,
+                    since=since,
+                    skip_message_ids=skip_message_ids,
+                    require_sender=require_sender,
                 ):
                     matches.append(message)
                     if len(matches) >= top:

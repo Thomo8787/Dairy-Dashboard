@@ -101,9 +101,12 @@ def import_nml_results(
     fetch_top = min(2000, max(50, lookback * 8))
 
     if force or not local_dir:
-        # Cron/normal import skips Outlook message IDs already saved.
-        # The dashboard force button passes skip_ids=empty.
-        skip_ids: set[str] = set() if force else _known_message_ids()
+        # Short lookbacks (cron / Fetch NML) always re-read mail in the window so
+        # new PDFs and parser fixes are applied. Long backfills skip known IDs.
+        lookback_days = max(1, (dt.datetime.now(dt.timezone.utc) - since_at).days)
+        skip_ids: set[str] = set()
+        if not force and lookback_days > 21:
+            skip_ids = _known_message_ids()
         sources = NmlPdfEmailService().fetch_pdfs(
             since=since_at,
             skip_message_ids=skip_ids,
