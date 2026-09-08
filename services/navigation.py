@@ -24,7 +24,7 @@ NAV_ITEMS = [
     {
         "id": "parlours",
         "label": "Parlours",
-        "endpoint": "parlours",
+        "endpoint": "milking_efficiency",
         "permission": "perm_parlours",
         "children": [
             {

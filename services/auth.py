@@ -299,7 +299,7 @@ def first_allowed_endpoint(user: User) -> str:
     mapping = (
         ("perm_home", "home"),
         ("perm_office", "office"),
-        ("perm_parlours", "parlours"),
+        ("perm_parlours", "milking_efficiency"),
         ("perm_events", "events"),
         ("perm_stock", "stock_inventory"),
         ("perm_genetics", "genetics"),

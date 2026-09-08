@@ -408,10 +408,7 @@ def users_delete(user_id: int):
 @app.route("/parlours")
 @permission_required("perm_parlours")
 def parlours():
-    return render_template(
-        "parlours.html",
-        **_page_context(active_nav="parlours"),
-    )
+    return redirect(url_for("milking_efficiency"))
 
 
 @app.route("/parlours/milking-efficiency")
