@@ -215,6 +215,11 @@ def is_loxicom_only_mastitis_remark(remark: str | None) -> bool:
     return remark.strip().upper() == "LOXICOM"
 
 
+def is_loxicom_only_remark(remark: str | None) -> bool:
+    """SenseHub alias for Loxicom-only remarks (same rule as mastitis)."""
+    return is_loxicom_only_mastitis_remark(remark)
+
+
 def normalize_semen_types(semen_types: list[str] | None) -> list[str] | None:
     if not semen_types:
         return None

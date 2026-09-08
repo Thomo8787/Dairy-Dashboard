@@ -52,6 +52,12 @@ services:
         value: ""
       - key: ONEDRIVE_MAX_FILES
         value: "100"
+      - key: SENSEHUB_USERNAME
+        sync: false
+      - key: SENSEHUB_PASSWORD
+        sync: false
+      - key: SENSEHUB_FARM_ID
+        sync: false
 
   # Hourly DataFlow Milk Flow + Rotary Entry ID import (UTC).
   # Uses the same Azure + mailbox secrets as the web service.
@@ -211,6 +217,71 @@ services:
           type: web
           name: dairy-dashboard
           envVarKey: ONEDRIVE_FOLDER_PATH
+
+  # SenseHub young-stock health: hourly live reading, locked at 0/6/12/18 UK.
+  - type: cron
+    name: fetch-sensehub-youngstock
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "10 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/import_sensehub_youngstock.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: SENSEHUB_USERNAME
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_USERNAME
+      - key: SENSEHUB_PASSWORD
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_PASSWORD
+      - key: SENSEHUB_FARM_ID
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_FARM_ID
+
+  # SenseHub full report refresh once a day at 6am UK.
+  # Render cron is UTC-only, so run hourly and gate on Europe/London hour 6.
+  - type: cron
+    name: fetch-sensehub-reports
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "20 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/import_sensehub.py --only-at-uk-hours 6
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: SENSEHUB_USERNAME
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_USERNAME
+      - key: SENSEHUB_PASSWORD
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_PASSWORD
+      - key: SENSEHUB_FARM_ID
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: SENSEHUB_FARM_ID
 
 databases:
   - name: dairy-dashboard-db

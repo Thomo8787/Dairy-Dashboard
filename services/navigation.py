@@ -104,6 +104,44 @@ NAV_ITEMS = [
         ],
     },
     {
+        "id": "sensehub",
+        "label": "SenseHub",
+        "endpoint": "sensehub",
+        "permission": "perm_sensehub",
+        "children": [
+            {
+                "id": "sensehub",
+                "label": "Youngstock Health Report",
+                "endpoint": "sensehub",
+                "permission": "perm_sensehub",
+            },
+            {
+                "id": "sensehub-recently-treated",
+                "label": "Recently Treated Calves",
+                "endpoint": "sensehub_recently_treated",
+                "permission": "perm_sensehub",
+            },
+            {
+                "id": "sensehub-unassigned",
+                "label": "Calves Not Assigned",
+                "endpoint": "sensehub_unassigned",
+                "permission": "perm_sensehub",
+            },
+            {
+                "id": "sensehub-tags-to-remove",
+                "label": "Tags To Remove",
+                "endpoint": "sensehub_tags_to_remove",
+                "permission": "perm_sensehub",
+            },
+            {
+                "id": "sensehub-reports",
+                "label": "All reports",
+                "endpoint": "sensehub_reports",
+                "permission": "perm_sensehub",
+            },
+        ],
+    },
+    {
         "id": "genetics",
         "label": "Genetics",
         "endpoint": "genetics",

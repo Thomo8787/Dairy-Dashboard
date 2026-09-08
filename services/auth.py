@@ -22,9 +22,12 @@ PERMISSION_KEYS = (
     "perm_stock",
     "perm_genetics",
     "perm_milk_quality",
+    "perm_sensehub",
     "perm_sync_outlook",
     "perm_sync_onedrive",
     "perm_sync_dataflow",
+    "perm_sync_sensehub",
+    "perm_sync_sensehub_cull",
 )
 
 PERMISSION_LABELS = {
@@ -35,9 +38,12 @@ PERMISSION_LABELS = {
     "perm_stock": "Stock Inventory",
     "perm_genetics": "Genetics",
     "perm_milk_quality": "Milk Quality",
+    "perm_sensehub": "SenseHub",
     "perm_sync_outlook": "Sync Outlook",
     "perm_sync_onedrive": "Sync OneDrive",
     "perm_sync_dataflow": "Sync DataFlow",
+    "perm_sync_sensehub": "SenseHub — refresh reports",
+    "perm_sync_sensehub_cull": "SenseHub — cull Tags To Remove",
 }
 
 PUBLIC_ENDPOINTS = {
@@ -298,6 +304,7 @@ def first_allowed_endpoint(user: User) -> str:
         ("perm_stock", "stock_inventory"),
         ("perm_genetics", "genetics"),
         ("perm_milk_quality", "milk_quality"),
+        ("perm_sensehub", "sensehub"),
     )
     for perm, endpoint in mapping:
         if user_has_permission(user, perm):
@@ -347,6 +354,29 @@ def admin_required(view: Callable) -> Callable:
         return view(*args, **kwargs)
 
     return wrapped
+
+
+class PermissionContext:
+    """Template helper matching Cwrt Malle's perms.action() / perms.page()."""
+
+    _ACTION_MAP = {
+        "sensehub.import": "perm_sync_sensehub",
+        "sensehub.cull": "perm_sync_sensehub_cull",
+    }
+    _PAGE_MAP = {
+        "sensehub": "perm_sensehub",
+    }
+
+    def __init__(self, user: User | None) -> None:
+        self._user = user
+
+    def action(self, key: str) -> bool:
+        perm = self._ACTION_MAP.get(key)
+        return bool(perm and user_has_permission(self._user, perm))
+
+    def page(self, key: str) -> bool:
+        perm = self._PAGE_MAP.get(key)
+        return bool(perm and user_has_permission(self._user, perm))
 
 
 def user_to_template(user: User | None) -> dict[str, Any] | None:

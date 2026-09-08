@@ -89,9 +89,12 @@ class User(Base):
     perm_events = Column(Boolean, nullable=False, default=False)
     perm_genetics = Column(Boolean, nullable=False, default=False)
     perm_milk_quality = Column(Boolean, nullable=False, default=False)
+    perm_sensehub = Column(Boolean, nullable=False, default=False)
     perm_sync_outlook = Column(Boolean, nullable=False, default=False)
     perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
     perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
+    perm_sync_sensehub = Column(Boolean, nullable=False, default=False)
+    perm_sync_sensehub_cull = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -392,6 +395,60 @@ class StockPurchaseAnimal(Base):
     )
 
 
+class SenseHubReportSnapshot(Base):
+    """Latest SenseHub report snapshot imported from st.scrdairy.com."""
+
+    __tablename__ = "sensehub_report_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    report_key = Column(Integer, unique=True, index=True)
+    report_name = Column(String(128), index=True)
+    category = Column(String(64), index=True)
+    title = Column(String(128))
+    row_count = Column(Integer, default=0)
+    payload = Column(JSON)
+    fetched_at = Column(DateTime, index=True)
+
+
+class SenseHubYoungstockHealth(Base):
+    """Health-index snapshot for one animal at one SenseHub sample slot."""
+
+    __tablename__ = "sensehub_youngstock_health"
+    __table_args__ = (
+        UniqueConstraint("animal_id", "sampled_at", name="uq_sensehub_ys_animal_sampled"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    animal_id = Column(String(16), index=True)
+    raw_animal_id = Column(String(64))
+    sampled_at = Column(DateTime, index=True)
+    slot = Column(String(16), index=True)
+    health_index = Column(Float, index=True)
+    age_days = Column(Integer)
+    rumination = Column(Float)
+    eating = Column(Float)
+    group_name = Column(String(64))
+    created_at = Column(DateTime)
+
+
+class SenseHubCalfAssignment(Base):
+    """Saved SCR / SenseHub tag for a DairyComp calf, ready for a later send."""
+
+    __tablename__ = "sensehub_calf_assignments"
+    __table_args__ = (
+        UniqueConstraint("row_key", name="uq_sensehub_calf_assignment_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    row_key = Column(String(128), index=True)
+    farm = Column(String(8))
+    cow_id = Column(String(64), index=True)
+    etag = Column(String(64))
+    scr_tag = Column(String(64))
+    sent_to_sensehub = Column(Boolean, default=False)
+    updated_at = Column(DateTime)
+
+
 class GenomicResult(Base):
     """AHDB genomic evaluation traits from Genetics/animals_ahdb, keyed by last 12 eartag digits."""
 
@@ -537,6 +594,9 @@ def _ensure_user_permission_columns(engine) -> None:
         "perm_stock": "ALTER TABLE users ADD COLUMN perm_stock BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_genetics": "ALTER TABLE users ADD COLUMN perm_genetics BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_milk_quality": "ALTER TABLE users ADD COLUMN perm_milk_quality BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_sensehub": "ALTER TABLE users ADD COLUMN perm_sensehub BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_sync_sensehub": "ALTER TABLE users ADD COLUMN perm_sync_sensehub BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_sync_sensehub_cull": "ALTER TABLE users ADD COLUMN perm_sync_sensehub_cull BOOLEAN NOT NULL DEFAULT FALSE",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():
@@ -620,6 +680,12 @@ def ensure_auth_ready():
     from services.auth import seed_admin_user
 
     return seed_admin_user()
+
+
+def SessionLocal():
+    """Callable session factory for SenseHub background jobs and cron scripts."""
+    get_engine()
+    return _SessionLocal()
 
 
 @contextmanager

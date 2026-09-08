@@ -26,6 +26,7 @@ from services.auth import (
     update_user,
     user_has_permission,
     user_to_template,
+    PermissionContext,
 )
 from services.events_common import build_dairy_semen_30d, build_events_page_report
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
@@ -131,6 +132,7 @@ from services.nml_manual import (
     update_collection_load,
 )
 from services.navigation import filter_nav_items, parent_nav_id
+from services.sensehub_routes import register_sensehub_routes
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
     IMPORT_DAY_OPTIONS,
@@ -238,6 +240,7 @@ def _page_context(active_nav: str = "home", **extra):
         "can_sync_dataflow": user_has_permission(user, "perm_sync_dataflow"),
         "herd_import_on_web": herd_import_allowed_on_web(),
         "herd_import_status": get_herd_import_status(),
+        "perms": PermissionContext(user),
     }
     ctx.update(extra)
     return ctx
@@ -262,6 +265,7 @@ def require_login():
             or request.endpoint.startswith("parlour_api")
             or request.endpoint.startswith("milk_quality_api")
             or request.endpoint.startswith("stock_api")
+            or request.endpoint.startswith("api_sensehub")
         ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
@@ -1649,6 +1653,9 @@ def sync_herd_exports():
     started, message = start_herd_import_job(force=False)
     flash(message, "info" if started else "error")
     return redirect(next_path)
+
+
+register_sensehub_routes(app, _page_context)
 
 
 @app.route("/health")

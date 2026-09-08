@@ -1,0 +1,902 @@
+{% extends "base.html" %}
+
+{% block page_heading %}{{ page_heading }}{% endblock %}
+
+{% block extra_styles %}
+    main { max-width: none; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+      margin-bottom: 1rem;
+    }
+    .toolbar label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+    .toolbar input { margin: 0; width: 6rem; }
+    .toolbar .btn-compact {
+      padding: 0.28rem 0.5rem;
+      font-size: 0.75rem;
+      line-height: 1.2;
+    }
+    .toolbar .btn-icon {
+      width: 2.1rem;
+      height: 2.1rem;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .toolbar .btn-icon svg {
+      width: 1.1rem;
+      height: 1.1rem;
+      display: block;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+    .table-wrap {
+      display: inline-block;
+      max-width: 100%;
+      overflow: auto;
+      max-height: calc(100vh - 16rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #health-table {
+      width: max-content;
+      border-collapse: collapse;
+      table-layout: auto;
+    }
+    #health-table th, #health-table td {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      text-align: center;
+      white-space: nowrap;
+      width: 1%;
+    }
+    #health-table th:last-child,
+    #health-table td:last-child { border-right: none; }
+    #health-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      cursor: pointer;
+      user-select: none;
+      border-right-color: rgba(255, 255, 255, 0.28);
+    }
+    #health-table thead th[data-sort]::after { content: " ↕"; font-size: 0.7rem; opacity: 0.6; }
+    #health-table thead th.sort-asc::after { content: " ▲"; opacity: 1; }
+    #health-table thead th.sort-desc::after { content: " ▼"; opacity: 1; }
+    #health-table tbody tr { cursor: pointer; }
+    #health-table tbody tr:hover { background: #eef6fb; }
+    #health-table tbody tr.unmatched {
+      background: #fecaca;
+      color: #7f1d1d;
+    }
+    #health-table tbody tr.unmatched:hover { background: #fca5a5; }
+    #health-table tbody tr.recent-abx {
+      background: #e7f7ed;
+    }
+    #health-table tbody tr.recent-abx:hover { background: #d5f0df; }
+    .trend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+    }
+    .trend-dot {
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+      background: #e5e7eb;
+      border: 1px solid #d1d5db;
+    }
+    .trend-dot.green { background: #16a34a; border-color: #15803d; }
+    .trend-dot.blue { background: #2563eb; border-color: #1d4ed8; }
+    .trend-dot.yellow { background: #eab308; border-color: #ca8a04; }
+    .trend-dot.red { background: #dc2626; border-color: #b91c1c; }
+    .empty-state { padding: 1.5rem; color: var(--muted); text-align: center; }
+    .drawer {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+    }
+    .drawer[hidden] { display: none; }
+    .drawer-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+    }
+    .drawer-panel {
+      position: relative;
+      width: min(96vw, 100%);
+      height: calc(100vh - 1.5rem);
+      background: var(--card);
+      overflow: auto;
+      padding: 1.25rem 1.5rem;
+      border-radius: 10px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+    }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 0 0 0.5rem;
+    }
+    .drawer-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-width: 0;
+    }
+    .drawer-panel h2 { margin: 0; font-size: 1.15rem; }
+    .drawer-nav-btn,
+    .drawer-close {
+      width: 2.5rem;
+      height: 2.5rem;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #1f2937;
+      flex-shrink: 0;
+    }
+    .drawer-nav-btn svg,
+    .drawer-close svg {
+      display: block;
+      width: 1.25rem;
+      height: 1.25rem;
+    }
+    .drawer-nav-btn:hover:not(:disabled),
+    .drawer-close:hover { background: #f3f4f6; }
+    .drawer-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      gap: 0.6rem;
+      margin: 0.75rem 0 1rem;
+    }
+    .detail-grid div { background: #f3f4f6; border-radius: 6px; padding: 0.5rem 0.65rem; }
+    .detail-grid .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
+    .detail-grid .value { font-weight: 700; }
+    .detail-grid .count-warn .value { color: #b91c1c; }
+    .chart-block { margin: 0 0 1.25rem; }
+    .chart-block h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .chart-scroll { overflow-x: auto; }
+    .chart-wrap { position: relative; height: 320px; min-width: 100%; }
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin: 0.45rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .chart-legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .marker-key {
+      width: 1.1rem;
+      height: 1.1rem;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .marker-key.r { background: #b91c1c; }
+    .marker-key.s { background: #1d4ed8; }
+    .marker-key.i { background: #ea580c; }
+    .marker-key.v { background: #6d28d9; }
+    #events-table { width: 100%; border-collapse: collapse; }
+    #events-table th, #events-table td {
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 0.875rem;
+    }
+    #events-table th { background: #f3f4f6; }
+    .col-short { display: none; }
+    .print-only { display: none; }
+    @page { size: A4 portrait; margin: 8mm; }
+    @media print {
+      .sidebar, .topbar, .sidebar-backdrop, .no-print, .drawer, .toolbar, .meta-line {
+        display: none !important;
+      }
+      .app-shell { display: block; }
+      .main-panel, main {
+        max-width: none;
+        padding: 0;
+        width: auto;
+      }
+      .print-only { display: block !important; }
+      .print-title {
+        margin: 0 0 1mm;
+        font-size: 11pt;
+        font-weight: 700;
+      }
+      .print-meta {
+        margin: 0 0 2.5mm;
+        font-size: 8pt;
+        color: #333;
+      }
+      .col-full { display: none !important; }
+      .col-short { display: inline !important; }
+      .table-wrap {
+        display: block;
+        max-height: none;
+        overflow: visible;
+        border: none;
+        border-radius: 0;
+      }
+      #health-table {
+        width: 100%;
+        font-size: 7.5pt;
+        line-height: 1.1;
+      }
+      #health-table th,
+      #health-table td {
+        padding: 1.2pt 2.5pt;
+        text-align: center;
+        border-right: 0.4pt solid #c5cdd6;
+        line-height: 1.1;
+      }
+      #health-table thead {
+        display: table-header-group;
+      }
+      #health-table thead th {
+        position: static;
+        padding: 1.6pt 2.5pt;
+        background: #1e3a5f !important;
+        color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      #health-table thead th[data-sort]::after { display: none; }
+      #health-table tbody tr {
+        cursor: default;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        height: 6.8mm;
+      }
+      #health-table tbody tr.unmatched {
+        background: #fecaca !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      #health-table tbody tr.recent-abx {
+        background: #e7f7ed !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .trend { gap: 1px; }
+      .trend-dot {
+        width: 5pt;
+        height: 5pt;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+    @media (max-width: 768px) {
+      .col-full { display: none; }
+      .col-short { display: inline; }
+      .table-wrap { max-height: calc(100vh - 11rem); width: 100%; }
+      #health-table th,
+      #health-table td {
+        padding: 0.28rem 0.28rem;
+        font-size: 0.75rem;
+      }
+      #health-table thead th[data-sort]::after {
+        font-size: 0.55rem;
+      }
+      .trend { gap: 1px; }
+      .trend-dot {
+        width: 0.45rem;
+        height: 0.45rem;
+      }
+      .detail-grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.28rem;
+        margin: 0.35rem 0 0.55rem;
+      }
+      .detail-grid div { padding: 0.2rem 0.28rem; border-radius: 4px; }
+      .detail-grid .label {
+        font-size: 0.55rem;
+        letter-spacing: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .detail-grid .value { font-size: 0.8rem; }
+      .drawer { padding: 0; }
+      .drawer-panel {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        padding: 0.65rem 0.7rem;
+      }
+    }
+{% endblock %}
+
+{% block content %}
+  <div class="toolbar">
+    <label>
+      Health index at or below
+      <input id="threshold" type="number" min="0" max="100" step="1" value="{{ default_threshold | default(86) }}">
+    </label>
+    <button type="button" id="apply-btn">Show list</button>
+    {% if perms.action('sensehub.import') %}
+    <button type="button" class="btn-compact" id="refresh-btn" title="Refresh from SenseHub">Refresh</button>
+    <button type="button" class="btn-compact" id="backfill-btn" title="Re-download SenseHub history for every time slot. Use this after changing animal IDs in SenseHub.">Fill history</button>
+    {% endif %}
+    <button type="button" class="btn-icon" id="print-btn" title="Print table" aria-label="Print table">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 8V3h10v5M6 18H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1M7 14h10v7H7z"/>
+      </svg>
+    </button>
+  </div>
+  <p class="meta-line" id="meta-line">Loading…</p>
+  <div class="print-only">
+    <h2 class="print-title">{{ print_title | default("Youngstock health") }}</h2>
+    <p class="print-meta" id="print-meta"></p>
+  </div>
+  <div class="table-wrap">
+    <table id="health-table">
+      <thead>
+        <tr>
+          <th data-sort="animal_id"><span class="col-full">Animal ID</span><span class="col-short">ID</span></th>
+          <th data-sort="etag4">ETAG4</th>
+          <th data-sort="health_index"><span class="col-full">Health index</span><span class="col-short">HI</span></th>
+          <th>Trend</th>
+          <th data-sort="age_days"><span class="col-full">Age in days</span><span class="col-short">Age</span></th>
+          <th data-sort="days_since_last_treatment" title="Days since last treatment (ILL or RESP)">DSLT</th>
+          <th data-sort="resp_count" title="Respiratory episodes">xResp</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="empty-state" id="empty-state" hidden>{{ empty_message | default("No animals at or below that health index.") }}</p>
+
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer-backdrop" id="drawer-backdrop"></div>
+    <aside class="drawer-panel">
+      <div class="drawer-header">
+        <div class="drawer-nav">
+          <button type="button" class="drawer-nav-btn" id="calf-prev" aria-label="Previous calf">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/>
+            </svg>
+          </button>
+          <h2 id="detail-title">Calf</h2>
+          <button type="button" class="drawer-nav-btn" id="calf-next" aria-label="Next calf">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7"/>
+            </svg>
+          </button>
+        </div>
+        <button type="button" class="drawer-close" id="drawer-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="detail-grid" id="detail-grid"></div>
+      <div class="chart-block">
+        <h3>Health index</h3>
+        <div class="chart-scroll" id="chart-scroll">
+          <div class="chart-wrap" id="health-chart-wrap">
+            <canvas id="health-chart"></canvas>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <span><span class="marker-key r">R</span> Pneumonia (Resp)</span>
+          <span><span class="marker-key s">S</span> Scours</span>
+          <span><span class="marker-key i">I</span> Ill</span>
+          <span><span class="marker-key v">V</span> Vaccine</span>
+        </div>
+      </div>
+      <table id="events-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Event</th>
+            <th>Remark</th>
+            <th>Protocols</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty-state" id="events-empty" hidden>No DairyComp events since birth.</p>
+    </aside>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    const DEFAULT_THRESHOLD = {{ default_threshold | default(86) }};
+    const TREATED_WITHIN_DAYS = {{ treated_within_days | tojson }};
+    const thresholdEl = document.getElementById("threshold");
+    const applyBtn = document.getElementById("apply-btn");
+    const refreshBtn = document.getElementById("refresh-btn");
+    const backfillBtn = document.getElementById("backfill-btn");
+    const printBtn = document.getElementById("print-btn");
+    const metaEl = document.getElementById("meta-line");
+    const printMetaEl = document.getElementById("print-meta");
+    const tbody = document.querySelector("#health-table tbody");
+    const emptyEl = document.getElementById("empty-state");
+    const drawer = document.getElementById("drawer");
+    const detailTitle = document.getElementById("detail-title");
+    const detailGrid = document.getElementById("detail-grid");
+    const eventsBody = document.querySelector("#events-table tbody");
+    const eventsEmpty = document.getElementById("events-empty");
+    let animals = [];
+    let sortKey = "etag4";
+    let sortDir = "asc";
+    let healthChart = null;
+    let currentAnimalId = null;
+    let openToken = 0;
+    const prevBtn = document.getElementById("calf-prev");
+    const nextBtn = document.getElementById("calf-next");
+
+    const MARKER_COLORS = { R: "#b91c1c", S: "#1d4ed8", I: "#ea580c", V: "#6d28d9" };
+    const MARKER_LABELS = { R: "Pneumonia (Resp)", S: "Scours", I: "Ill", V: "Vaccine" };
+
+    function barColor(value) {
+      if (value == null || value === "") return "#9ca3af";
+      if (value < 80) return "#dc2626";
+      if (value < 85) return "#eab308";
+      if (value < 90) return "#2563eb";
+      return "#16a34a";
+    }
+
+    function sampleDate(point) {
+      return String(point && point.sampled_at ? point.sampled_at : "").slice(0, 10);
+    }
+
+    function markerPositions(history, markers) {
+      const points = history || [];
+      const byDate = {};
+      points.forEach((point, index) => {
+        const date = sampleDate(point);
+        if (!date) return;
+        (byDate[date] ||= []).push(index);
+      });
+      const placed = [];
+      (markers || []).forEach((marker) => {
+        const indexes = byDate[marker.date];
+        if (!indexes || !indexes.length) return;
+        const mid = indexes[Math.floor((indexes.length - 1) / 2)];
+        placed.push({
+          index: mid,
+          letter: marker.letter,
+          color: MARKER_COLORS[marker.letter] || "#374151",
+          label: MARKER_LABELS[marker.letter] || marker.event || marker.letter,
+          date: marker.date,
+        });
+      });
+      return placed;
+    }
+
+    const eventMarkerPlugin = {
+      id: "eventMarkers",
+      afterDatasetsDraw(chart, _args, options) {
+        const items = (options && options.items) || [];
+        if (!items.length) return;
+        const { ctx, chartArea, scales } = chart;
+        const xScale = scales.x;
+        const grouped = {};
+        items.forEach((item) => {
+          if (item.index == null) return;
+          (grouped[item.index] ||= []).push(item);
+        });
+        ctx.save();
+        Object.entries(grouped).forEach(([index, list]) => {
+          const px = xScale.getPixelForValue(Number(index));
+          const py = chartArea.top - 14;
+          list.forEach((item, offset) => {
+            const cx = px + (offset - (list.length - 1) / 2) * 20;
+            ctx.beginPath();
+            ctx.arc(cx, py, 9, 0, Math.PI * 2);
+            ctx.fillStyle = item.color;
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 11px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(item.letter, cx, py + 0.5);
+          });
+        });
+        ctx.restore();
+      },
+    };
+
+    function dayBands(points) {
+      const bands = [];
+      let currentDate = null;
+      let start = 0;
+      let dayIndex = -1;
+      (points || []).forEach((point, index) => {
+        const date = sampleDate(point) || `row-${index}`;
+        if (date !== currentDate) {
+          if (currentDate != null) {
+            bands.push({ start, end: index - 1, odd: dayIndex % 2 === 1 });
+          }
+          currentDate = date;
+          start = index;
+          dayIndex += 1;
+        }
+      });
+      if (currentDate != null) {
+        bands.push({ start, end: (points || []).length - 1, odd: dayIndex % 2 === 1 });
+      }
+      return bands;
+    }
+
+    const dayBandPlugin = {
+      id: "dayBands",
+      beforeDraw(chart, _args, options) {
+        const bands = (options && options.bands) || [];
+        if (!bands.length) return;
+        const { ctx, chartArea, scales } = chart;
+        const xScale = scales.x;
+        if (!xScale) return;
+        const lastIndex = (chart.data.labels || []).length - 1;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+        ctx.clip();
+        bands.forEach((band) => {
+          const leftCenter = xScale.getPixelForValue(band.start);
+          const rightCenter = xScale.getPixelForValue(band.end);
+          const prev = band.start > 0 ? xScale.getPixelForValue(band.start - 1) : null;
+          const next = band.end < lastIndex ? xScale.getPixelForValue(band.end + 1) : null;
+          const left = prev == null ? chartArea.left : (prev + leftCenter) / 2;
+          const right = next == null ? chartArea.right : (rightCenter + next) / 2;
+          ctx.fillStyle = band.odd ? "#e5e7eb" : "#ffffff";
+          ctx.fillRect(left, chartArea.top, Math.max(0, right - left), chartArea.bottom - chartArea.top);
+        });
+        ctx.restore();
+      },
+    };
+
+    function trendHtml(trend) {
+      const dots = Array.isArray(trend) ? trend.slice(-12) : [];
+      while (dots.length < 12) dots.unshift({ band: null });
+      return `<span class="trend">${dots.slice(-12).map((dot) => {
+        const band = dot && dot.band ? dot.band : "";
+        const title = dot && dot.health_index != null ? `Health index ${dot.health_index}` : "No sample";
+        return `<span class="trend-dot ${band}" title="${title}"></span>`;
+      }).join("")}</span>`;
+    }
+
+    function renderHealthChart(history, markers) {
+      const canvas = document.getElementById("health-chart");
+      if (healthChart) {
+        healthChart.destroy();
+        healthChart = null;
+      }
+      if (typeof Chart === "undefined" || !canvas) return;
+      const points = history || [];
+      const scroll = document.getElementById("chart-scroll");
+      const wrap = document.getElementById("health-chart-wrap");
+      if (scroll && wrap) {
+        wrap.style.width = `${Math.max(scroll.clientWidth, points.length * 16)}px`;
+        scroll.scrollLeft = 0;
+      }
+      const placed = markerPositions(points, markers);
+      const byIndex = {};
+      placed.forEach((item) => {
+        (byIndex[item.index] ||= []).push(item);
+      });
+      healthChart = new Chart(canvas, {
+        type: "bar",
+        plugins: [dayBandPlugin, eventMarkerPlugin],
+        data: {
+          labels: points.map((point) => point.label || point.slot || ""),
+          datasets: [{
+            label: "Health index",
+            data: points.map((point) => point.health_index),
+            backgroundColor: points.map((point) => barColor(point.health_index)),
+            borderWidth: 0,
+            skipNull: true,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 22 } },
+          plugins: {
+            legend: { display: false },
+            dayBands: { bands: dayBands(points) },
+            eventMarkers: { items: placed },
+            tooltip: {
+              callbacks: {
+                label: (item) => `Health index: ${item.raw}`,
+                afterBody: (items) => {
+                  const extra = byIndex[items[0].dataIndex] || [];
+                  return extra.map((item) => `${item.letter}: ${item.label}`);
+                },
+              },
+            },
+          },
+          scales: {
+            y: {
+              min: 30,
+              max: 105,
+              grace: 0,
+              ticks: {
+                stepSize: 10,
+                includeBounds: false,
+                callback(value) {
+                  return value > 100 ? undefined : value;
+                },
+              },
+              title: { display: true, text: "Health index" },
+            },
+            x: {
+              ticks: { maxRotation: 60, minRotation: 45 },
+            },
+          },
+        },
+      });
+      scrollChartToLatest();
+      setTimeout(scrollChartToLatest, 80);
+      setTimeout(scrollChartToLatest, 250);
+    }
+
+    function scrollChartToLatest() {
+      const scroll = document.getElementById("chart-scroll");
+      if (!scroll) return;
+      const go = () => { scroll.scrollLeft = scroll.scrollWidth; };
+      requestAnimationFrame(() => requestAnimationFrame(go));
+    }
+
+    function calfIndex(animalId) {
+      return sortedAnimals().findIndex((row) => String(row.animal_id) === String(animalId));
+    }
+
+    function updateNavButtons() {
+      const rows = sortedAnimals();
+      const index = calfIndex(currentAnimalId);
+      prevBtn.disabled = index <= 0;
+      nextBtn.disabled = index < 0 || index >= rows.length - 1;
+    }
+
+    function stepCalf(delta) {
+      const rows = sortedAnimals();
+      const next = calfIndex(currentAnimalId) + delta;
+      if (next < 0 || next >= rows.length) return;
+      openCalf(rows[next].animal_id);
+    }
+
+    function fmtWhen(iso) {
+      if (!iso) return "unknown";
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const match = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) return iso;
+      return `${match[3]}/${match[2]}/${match[1].slice(2)}`;
+    }
+
+    function sortValue(row, key) {
+      const value = row[key];
+      if (value == null || value === "") return sortDir === "asc" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+      if (key === "etag4" || key === "health_index" || key === "age_days" || key === "days_since_last_treatment" || key === "resp_count") {
+        const number = Number(value);
+        return Number.isNaN(number) ? value : number;
+      }
+      return String(value).toLowerCase();
+    }
+
+    function sortedAnimals() {
+      return [...animals].sort((a, b) => {
+        const av = sortValue(a, sortKey);
+        const bv = sortValue(b, sortKey);
+        if (av < bv) return sortDir === "asc" ? -1 : 1;
+        if (av > bv) return sortDir === "asc" ? 1 : -1;
+        return String(a.animal_id).localeCompare(String(b.animal_id));
+      });
+    }
+
+    function renderTable() {
+      const rows = sortedAnimals();
+      tbody.innerHTML = rows.map(row => {
+        const unmatched = row.has_dairycomp === false;
+        const recentAbx = !unmatched && row.recent_antibiotic;
+        const classes = [
+          unmatched ? "unmatched" : "",
+          recentAbx ? "recent-abx" : "",
+        ].filter(Boolean).join(" ");
+        const title = unmatched
+          ? "No DairyComp match — check the SenseHub calf ID"
+          : recentAbx === "fenflor"
+            ? "Fenflor in the last 2 days"
+            : recentAbx
+              ? "Draxxin in the last 7 days"
+              : "";
+        return `
+        <tr data-id="${row.animal_id}" class="${classes}" title="${title}">
+          <td>${row.animal_id}</td>
+          <td>${row.etag4 || "—"}</td>
+          <td>${row.health_index ?? "—"}</td>
+          <td>${trendHtml(row.trend)}</td>
+          <td>${row.age_days ?? "—"}</td>
+          <td>${row.days_since_last_treatment ?? "—"}</td>
+          <td>${row.resp_count ?? 0}</td>
+        </tr>`;
+      }).join("");
+      emptyEl.hidden = rows.length > 0;
+      document.querySelectorAll("#health-table th[data-sort]").forEach((th) => {
+        th.classList.toggle("sort-asc", th.dataset.sort === sortKey && sortDir === "asc");
+        th.classList.toggle("sort-desc", th.dataset.sort === sortKey && sortDir === "desc");
+      });
+    }
+
+    async function loadList() {
+      const threshold = thresholdEl.value || String(DEFAULT_THRESHOLD);
+      const params = new URLSearchParams({ threshold });
+      if (TREATED_WITHIN_DAYS != null) {
+        params.set("treated_within_days", String(TREATED_WITHIN_DAYS));
+      }
+      const res = await fetch(`/api/sensehub/youngstock?${params}`);
+      const payload = await res.json();
+      const treatedBit = TREATED_WITHIN_DAYS != null
+        ? ` treated in the last ${TREATED_WITHIN_DAYS} days`
+        : "";
+      metaEl.textContent = payload.sampled_at
+        ? `${payload.count} animal(s) at or below ${payload.threshold}${treatedBit} · ${payload.slot || ""} ${fmtWhen(payload.sampled_at)}`
+        : "No young-stock health samples yet. Click Refresh from SenseHub.";
+      if (printMetaEl) printMetaEl.textContent = metaEl.textContent;
+      animals = payload.animals || [];
+      sortKey = "etag4";
+      sortDir = "asc";
+      renderTable();
+    }
+
+    async function openCalf(animalId) {
+      const token = ++openToken;
+      currentAnimalId = animalId;
+      drawer.hidden = false;
+      updateNavButtons();
+      detailTitle.textContent = `Animal ${animalId}`;
+      detailGrid.innerHTML = "<div>Loading…</div>";
+      eventsBody.innerHTML = "";
+      const res = await fetch(`/api/sensehub/youngstock/${encodeURIComponent(animalId)}/events`);
+      const payload = await res.json();
+      if (token !== openToken) return;
+      const respCount = payload.resp_count ?? 0;
+      const scoursCount = payload.scours_count ?? 0;
+      const illCount = payload.ill_count ?? 0;
+      const cells = [
+        ["Health index", payload.health_index ?? "—", ""],
+        ["Age in days", payload.age_days ?? "—", ""],
+        ["Pneumonia (Resp)", respCount, respCount > 0 ? "count-warn" : ""],
+        ["Scours", scoursCount, scoursCount > 0 ? "count-warn" : ""],
+        ["Ill", illCount, illCount > 0 ? "count-warn" : ""],
+      ];
+      detailGrid.innerHTML = cells.map(([label, value, extraClass]) => `
+        <div class="${extraClass}"><div class="label">${label}</div><div class="value">${value}</div></div>
+      `).join("");
+      const events = payload.events || [];
+      eventsBody.innerHTML = events.map(event => `
+        <tr>
+          <td>${fmtDate(event.event_date)}</td>
+          <td>${event.event || "—"}</td>
+          <td>${event.remark || "—"}</td>
+          <td>${event.protocols || "—"}</td>
+        </tr>
+      `).join("");
+      eventsEmpty.hidden = events.length > 0;
+      renderHealthChart(payload.health_history || [], payload.chart_markers || []);
+    }
+
+    printBtn.addEventListener("click", () => {
+      if (printMetaEl) printMetaEl.textContent = metaEl.textContent || "";
+      window.print();
+    });
+    applyBtn.addEventListener("click", loadList);
+    thresholdEl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") loadList();
+    });
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        if (backfillBtn) backfillBtn.disabled = true;
+        metaEl.textContent = "Refreshing from SenseHub and filling any missing slots…";
+        try {
+          const res = await fetch("/api/sensehub/youngstock/import", { method: "POST" });
+          const body = await res.json();
+          if (!res.ok) {
+            metaEl.textContent = body.detail || "Refresh failed.";
+          }
+          await loadList();
+        } finally {
+          refreshBtn.disabled = false;
+          if (backfillBtn) backfillBtn.disabled = false;
+        }
+      });
+    }
+    async function pollBackfill() {
+      const res = await fetch("/api/sensehub/youngstock/job");
+      const status = await res.json();
+      metaEl.textContent = status.message || status.status || "";
+      if (status.status === "running") {
+        setTimeout(pollBackfill, 2000);
+        return;
+      }
+      if (backfillBtn) backfillBtn.disabled = false;
+      if (refreshBtn) refreshBtn.disabled = false;
+      await loadList();
+    }
+    if (backfillBtn) {
+      backfillBtn.addEventListener("click", async () => {
+        backfillBtn.disabled = true;
+        if (refreshBtn) refreshBtn.disabled = true;
+        metaEl.textContent = "Re-downloading SenseHub history for every time slot…";
+        const res = await fetch("/api/sensehub/youngstock/backfill", { method: "POST" });
+        const body = await res.json();
+        metaEl.textContent = body.message || "";
+        pollBackfill();
+      });
+    }
+    document.querySelectorAll("#health-table th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortKey === key) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortKey = key;
+          sortDir = "asc";
+        }
+        renderTable();
+      });
+    });
+    tbody.addEventListener("click", (ev) => {
+      const row = ev.target.closest("tr[data-id]");
+      if (row) openCalf(row.dataset.id);
+    });
+    function closeDrawer() {
+      drawer.hidden = true;
+      currentAnimalId = null;
+    }
+    prevBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      stepCalf(-1);
+    });
+    nextBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      stepCalf(1);
+    });
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+    document.getElementById("drawer-backdrop").addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", (ev) => {
+      if (drawer.hidden) return;
+      if (ev.key === "Escape") closeDrawer();
+      if (ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        stepCalf(-1);
+      }
+      if (ev.key === "ArrowRight") {
+        ev.preventDefault();
+        stepCalf(1);
+      }
+    });
+
+    loadList();
+  </script>
+{% endblock %}

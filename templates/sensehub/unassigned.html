@@ -1,0 +1,424 @@
+{% extends "base.html" %}
+
+{% block page_heading %}{{ page_heading }}{% endblock %}
+
+{% block extra_styles %}
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(180px, 14rem) minmax(0, 1fr);
+      gap: 1.25rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .section-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+    }
+    .slicer-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
+      min-height: 3rem;
+      padding: 0.45rem 0.35rem;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      width: 1.4rem;
+      height: 1.4rem;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #e5e7eb;
+      font-size: 0.75rem;
+    }
+    .slicer-btn[data-value="Dairy"].selected {
+      background: #e8f5e9;
+      border-color: #2ca02c;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="Dairy"].selected .slicer-icon {
+      background: #a5d6a7;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="Beef"].selected {
+      background: #f5e6d3;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="Beef"].selected .slicer-icon {
+      background: #c9a66b;
+      color: #5c2e0a;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .table-wrap {
+      display: inline-block;
+      max-width: 100%;
+      overflow: auto;
+      max-height: calc(100vh - 14rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #unassigned-table {
+      width: max-content;
+      border-collapse: collapse;
+    }
+    #unassigned-table th,
+    #unassigned-table td {
+      padding: 0.45rem 0.55rem;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      text-align: center;
+      white-space: nowrap;
+    }
+    #unassigned-table th:last-child,
+    #unassigned-table td:last-child { border-right: none; }
+    #unassigned-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      border-right-color: rgba(255,255,255,0.28);
+    }
+    #unassigned-table thead th[data-sort] {
+      cursor: pointer;
+      user-select: none;
+    }
+    #unassigned-table thead th[data-sort]:hover { background: #274b73; }
+    #unassigned-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    #unassigned-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    #unassigned-table tbody tr.wrong-scr td {
+      background: #fecaca;
+      color: #7f1d1d;
+    }
+    .empty-state { padding: 1.5rem; color: var(--muted); text-align: center; }
+    .scr-edit {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    #unassigned-table td:has(.scr-input) { text-align: left; }
+    #unassigned-table .scr-input {
+      width: 7.5rem;
+      max-width: 7.5rem;
+      margin: 0;
+      padding: 0.25rem 0.4rem;
+      font-size: 0.8rem;
+      text-align: left;
+    }
+    .scr-save {
+      padding: 0.22rem 0.45rem;
+      font-size: 0.72rem;
+    }
+    .scr-status {
+      font-size: 0.7rem;
+      min-width: 2.6rem;
+      color: var(--muted);
+    }
+    .scr-status.ok { color: #15803d; }
+    .scr-status.err { color: #b91c1c; }
+    .btn-compact {
+      padding: 0.28rem 0.5rem;
+      font-size: 0.75rem;
+      line-height: 1.2;
+    }
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <aside class="filter-panel">
+      <h2>Filters</h2>
+      <div class="filter-section">
+        <span class="section-label">Category</span>
+        <div class="slicer-group category-slicer" role="group" aria-label="Category">
+          <button type="button" class="slicer-btn selected" data-value="Dairy" aria-pressed="true">
+            <span class="slicer-icon" aria-hidden="true">D</span>
+            Dairy
+          </button>
+          <button type="button" class="slicer-btn" data-value="Beef" aria-pressed="false">
+            <span class="slicer-icon" aria-hidden="true">B</span>
+            Beef
+          </button>
+        </div>
+      </div>
+      <p class="help-text" style="margin-top:1rem">
+        Pen 110 calves not found on SenseHub. Matching uses the stored
+        <strong>Animals in Herd</strong> list from the hourly SenseHub job
+        (including newly tagged calves that have not built health data yet).
+        Names like <strong>535666 - PT</strong> are matched on the leading cow ID.
+        Use Refresh to fetch from SCR now.
+      </p>
+    </aside>
+    <div>
+      <div class="toolbar">
+        <p class="meta-line" id="meta-line" style="margin:0;flex:1">Loading…</p>
+        {% if perms.action('sensehub.import') %}
+        <button type="button" class="btn-compact" id="refresh-btn" title="Refresh from SenseHub">Refresh</button>
+        {% endif %}
+      </div>
+      <div class="table-wrap">
+        <table id="unassigned-table">
+          <thead>
+            <tr>
+              <th data-sort="cow_id">Cow ID</th>
+              <th data-sort="scr_tag">SCR Tag</th>
+              <th data-sort="etag4">ETAG4</th>
+              <th data-sort="age_days">Age (days)</th>
+              <th data-sort="reason">Reason</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty-state" id="empty-state" hidden>No unassigned calves for the selected filters.</p>
+    </div>
+  </div>
+
+  <script>
+    const tbody = document.querySelector("#unassigned-table tbody");
+    const metaEl = document.getElementById("meta-line");
+    const emptyEl = document.getElementById("empty-state");
+    const NUM_COLS = new Set(["cow_id", "etag4", "age_days"]);
+    let animals = [];
+    let sortKey = "etag4";
+    let sortDir = "desc";
+
+    function escAttr(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;");
+    }
+
+    function selectedCategories() {
+      return [...document.querySelectorAll(".category-slicer .slicer-btn.selected")]
+        .map((btn) => btn.dataset.value)
+        .filter(Boolean);
+    }
+
+    function sortValue(row, key) {
+      const value = row[key];
+      if (value === null || value === undefined || value === "") return null;
+      if (NUM_COLS.has(key)) {
+        const num = Number(value);
+        return Number.isNaN(num) ? value : num;
+      }
+      return value;
+    }
+
+    function compareRows(a, b) {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      const aEmpty = av === null;
+      const bEmpty = bv === null;
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      let result;
+      if (typeof av === "number" && typeof bv === "number") {
+        result = av - bv;
+      } else {
+        result = String(av).localeCompare(String(bv), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      }
+      return sortDir === "asc" ? result : -result;
+    }
+
+    function sortedAnimals() {
+      return [...animals].sort(compareRows);
+    }
+
+    function markSortHeaders() {
+      document.querySelectorAll("#unassigned-table thead th[data-sort]").forEach((th) => {
+        th.classList.remove("sorted-asc", "sorted-desc");
+        if (th.dataset.sort === sortKey) {
+          th.classList.add(sortDir === "asc" ? "sorted-asc" : "sorted-desc");
+        }
+      });
+    }
+
+    function renderRows(rows) {
+      tbody.innerHTML = (rows || []).map((row) => `
+        <tr${row.reason === "Calf ID probably wrong on SCR" ? ' class="wrong-scr"' : ""}>
+          <td>${row.cow_id || "—"}</td>
+          <td>
+            <span class="scr-edit">
+              <input class="scr-input" value="${escAttr(row.scr_tag || "")}" data-key="${escAttr(row.row_key)}" data-farm="${escAttr(row.farm)}" data-cow="${escAttr(row.cow_id)}" data-etag="${escAttr(row.etag)}" aria-label="SCR monitoring tag">
+              <button type="button" class="scr-save">Save</button>
+              <span class="scr-status"></span>
+            </span>
+          </td>
+          <td>${row.etag4 || "—"}</td>
+          <td>${row.age_days ?? "—"}</td>
+          <td>${row.reason || "—"}</td>
+        </tr>
+      `).join("");
+      emptyEl.hidden = (animals || []).length > 0;
+    }
+
+    async function loadList() {
+      const categories = selectedCategories();
+      const query = categories.map((item) => `category=${encodeURIComponent(item)}`).join("&");
+      const res = await fetch(`/api/sensehub/unassigned${query ? `?${query}` : ""}`);
+      const payload = await res.json();
+      animals = payload.animals || [];
+      metaEl.textContent = `${payload.count ?? animals.length} calf(s) not assigned (missing SCR tag, or SenseHub ID not in inventory).`;
+      markSortHeaders();
+      renderRows(sortedAnimals());
+    }
+
+    async function saveScrTag(input, statusEl) {
+      if (!input || !input.dataset.key) return;
+      statusEl.textContent = "Saving…";
+      statusEl.className = "scr-status";
+      const res = await fetch("/api/sensehub/unassigned/scr-tag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          row_key: input.dataset.key,
+          farm: input.dataset.farm || null,
+          cow_id: input.dataset.cow || null,
+          etag: input.dataset.etag || null,
+          scr_tag: input.value,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = payload.detail;
+        statusEl.textContent = typeof detail === "string" ? detail : "Failed";
+        statusEl.classList.add("err");
+        return;
+      }
+      input.value = payload.scr_tag || "";
+      if (payload.created_on_sensehub) {
+        statusEl.textContent = "Created on SenseHub";
+      } else if (payload.assigned_on_sensehub) {
+        statusEl.textContent = "Tag assigned on SenseHub";
+      } else {
+        statusEl.textContent = "Saved";
+      }
+      statusEl.classList.add("ok");
+      if (payload.created_on_sensehub || payload.assigned_on_sensehub) {
+        loadList();
+      }
+    }
+
+    tbody.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".scr-save");
+      if (!btn) return;
+      const wrap = btn.closest(".scr-edit");
+      saveScrTag(wrap.querySelector(".scr-input"), wrap.querySelector(".scr-status"));
+    });
+    tbody.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      const input = ev.target.closest(".scr-input");
+      if (!input) return;
+      ev.preventDefault();
+      const wrap = input.closest(".scr-edit");
+      saveScrTag(input, wrap.querySelector(".scr-status"));
+    });
+
+    document.querySelectorAll("#unassigned-table thead th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortKey === key) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortKey = key;
+          sortDir = key === "etag4" || NUM_COLS.has(key) ? "desc" : "asc";
+        }
+        markSortHeaders();
+        renderRows(sortedAnimals());
+      });
+    });
+
+    document.querySelectorAll(".category-slicer .slicer-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const selected = btn.classList.contains("selected");
+        const selectedCount = document.querySelectorAll(".category-slicer .slicer-btn.selected").length;
+        if (selected && selectedCount === 1) return;
+        btn.classList.toggle("selected");
+        btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+        loadList();
+      });
+    });
+
+    const refreshBtn = document.getElementById("refresh-btn");
+    async function pollReportImport() {
+      const res = await fetch("/api/sensehub/import/status");
+      const status = await res.json();
+      if (status.status === "running") {
+        metaEl.textContent = status.message || "Importing SenseHub reports…";
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return pollReportImport();
+      }
+    }
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        metaEl.textContent = "Refreshing young-stock health from SenseHub…";
+        try {
+          const healthRes = await fetch("/api/sensehub/youngstock/import", { method: "POST" });
+          const healthBody = await healthRes.json().catch(() => ({}));
+          if (!healthRes.ok) {
+            metaEl.textContent = healthBody.detail || "Young-stock refresh failed.";
+            return;
+          }
+          metaEl.textContent = "Refreshing SenseHub reports…";
+          const reportRes = await fetch("/api/sensehub/import", { method: "POST" });
+          const reportBody = await reportRes.json().catch(() => ({}));
+          if (!reportRes.ok) {
+            metaEl.textContent = reportBody.detail || "Report refresh failed.";
+            await loadList();
+            return;
+          }
+          await pollReportImport();
+          await loadList();
+        } catch (err) {
+          metaEl.textContent = err.message || "Refresh failed.";
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      });
+    }
+
+    loadList();
+  </script>
+{% endblock %}

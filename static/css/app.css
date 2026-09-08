@@ -1,9 +1,12 @@
 :root {
   --bg: #eef2ec;
   --panel: #ffffff;
+  --card: var(--panel);
   --ink: #1a2a1f;
+  --text: var(--ink);
   --muted: #5d6f63;
   --line: #d5ddd6;
+  --border: var(--line);
   --sidebar: #1f3a2c;
   --sidebar-ink: #e7efe9;
   --sidebar-muted: #a9beB0;
