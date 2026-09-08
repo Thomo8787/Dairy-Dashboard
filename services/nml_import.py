@@ -211,15 +211,22 @@ def _looks_like_placeholder_sample(sample_id: str | None) -> bool:
     return bool(text) and text[0] == "L" and text[1:].isdigit()
 
 
-def _is_unmatched_volume(row: NmlMilkResult) -> bool:
-    """Farm ticket with volume that still needs NML quality linked."""
+def _needs_sample_autofill(row: NmlMilkResult) -> bool:
+    """True when volume exists but the worker left sample blank (or L1/L2 placeholder)."""
     if not _has_volume(row):
-        return False
-    if _has_quality(row):
         return False
     if row.sample_missing:
         return True
     return _looks_like_placeholder_sample(row.sample_id)
+
+
+def _has_manual_sample(row: NmlMilkResult) -> bool:
+    """Worker-entered sample number — never overwritten by volume pairing."""
+    return _has_volume(row) and not _needs_sample_autofill(row)
+
+
+def _quality_fingerprint(row: NmlMilkResult) -> tuple[Any, ...]:
+    return tuple(getattr(row, field) for field in _SAMPLE_FIELDS)
 
 
 def _row_index(rows: list[NmlMilkResult]) -> dict[tuple[str, str], list[NmlMilkResult]]:
@@ -228,6 +235,12 @@ def _row_index(rows: list[NmlMilkResult]) -> dict[tuple[str, str], list[NmlMilkR
         key = (row.producer_ref, normalize_sample_id(row.sample_id))
         index.setdefault(key, []).append(row)
     return index
+
+
+def _iter_index_rows(
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+) -> list[NmlMilkResult]:
+    return [row for rows in index.values() for row in list(rows)]
 
 
 def _rekey_row(
@@ -245,6 +258,29 @@ def _rekey_row(
     if not index[old_key]:
         index.pop(old_key, None)
     index.setdefault(new_key, []).append(row)
+
+
+def _sample_sort_key(value: str) -> tuple[int, int | str]:
+    key = normalize_sample_id(value) or "0"
+    try:
+        return (0, int(key))
+    except ValueError:
+        return (1, key)
+
+
+def _pair_samples_to_loads_by_volume(
+    volumes: list[float],
+    samples: list[str],
+) -> list[str] | None:
+    """Lowest sample number → highest volume. None unless counts match (all-or-nothing)."""
+    if not volumes or len(volumes) != len(samples):
+        return None
+    ranked_samples = sorted(samples, key=_sample_sort_key)
+    load_order = sorted(range(len(volumes)), key=lambda i: (-volumes[i], i))
+    assigned = [""] * len(volumes)
+    for rank, load_idx in enumerate(load_order):
+        assigned[load_idx] = ranked_samples[rank]
+    return assigned
 
 
 def _best_collection(
@@ -278,41 +314,12 @@ def _best_collection(
     )
 
 
-def _best_unmatched_volume(
-    index: dict[tuple[str, str], list[NmlMilkResult]],
-    *,
-    producer_ref: str,
-    sample_date: dt.date,
-    exclude: NmlMilkResult | None = None,
-) -> NmlMilkResult | None:
-    """
-    When the farm ticket had no sample number yet (stored as L1/L2), match NML
-    quality onto the next unmatched volume row for that producer within ±1 day.
-    """
-    candidates: list[NmlMilkResult] = []
-    for rows in index.values():
-        for row in rows:
-            if exclude is not None and row is exclude:
-                continue
-            if row.producer_ref != producer_ref:
-                continue
-            if row.sample_date is None:
-                continue
-            if abs((row.sample_date - sample_date).days) > DATE_WINDOW_DAYS:
-                continue
-            if not _is_unmatched_volume(row):
-                continue
-            candidates.append(row)
-    if not candidates:
-        return None
-    return min(
-        candidates,
-        key=lambda row: (
-            abs((row.sample_date - sample_date).days),
-            row.load_number if row.load_number is not None else 999,
-            row.id or 0,
-        ),
-    )
+def _orphan_record(orphan: NmlMilkResult) -> dict[str, Any]:
+    record = {field: getattr(orphan, field) for field in (*_SAMPLE_FIELDS, *_META_FIELDS)}
+    record["sample_id"] = orphan.sample_id
+    record["source_message_id"] = orphan.source_message_id
+    record["source_file"] = orphan.source_file
+    return record
 
 
 def _apply_quality(row: NmlMilkResult, record: dict[str, Any]) -> None:
@@ -333,16 +340,57 @@ def _apply_quality(row: NmlMilkResult, record: dict[str, Any]) -> None:
     row.imported_at = dt.datetime.now(dt.timezone.utc)
 
 
+def _volume_holds_sample(
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+    *,
+    producer_ref: str,
+    sample_date: dt.date | None,
+    sample_id: str,
+    exclude: NmlMilkResult,
+) -> NmlMilkResult | None:
+    if sample_date is None or not sample_id:
+        return None
+    for other in index.get((producer_ref, normalize_sample_id(sample_id))) or []:
+        if other is exclude:
+            continue
+        if other.sample_date != sample_date:
+            continue
+        if _has_volume(other) and _has_manual_sample(other):
+            return other
+    return None
+
+
 def _attach_quality_to_collection(
     index: dict[tuple[str, str], list[NmlMilkResult]],
     row: NmlMilkResult,
     record: dict[str, Any],
     *,
     session=None,
-) -> None:
-    """Apply NML fields and adopt the real sample id when the ticket was a placeholder."""
+) -> bool:
+    """Apply NML fields; adopt sample id only when the ticket was blank/placeholder.
+
+    Manual sample numbers are never overwritten. Returns False if attach was skipped.
+    """
     old_sample = row.sample_id
     new_sample = normalize_sample_id(record.get("sample_id") or old_sample)
+    adopt_sample = bool(
+        new_sample
+        and (
+            row.sample_missing
+            or _looks_like_placeholder_sample(old_sample)
+            or normalize_sample_id(old_sample) != new_sample
+        )
+    )
+    # Never steal a sample id already held by a manually entered volume row.
+    if adopt_sample and _volume_holds_sample(
+        index,
+        producer_ref=row.producer_ref,
+        sample_date=row.sample_date,
+        sample_id=new_sample,
+        exclude=row,
+    ):
+        return False
+
     # Drop lab-only rows that own this sample id, and flush deletes before
     # updating — otherwise UNIQUE(producer_ref, sample_date, sample_id) fails.
     if session is not None and new_sample:
@@ -356,29 +404,13 @@ def _attach_quality_to_collection(
                 deleted_any = True
         if deleted_any:
             session.flush()
+
     _apply_quality(row, record)
-    if new_sample and (
-        row.sample_missing
-        or _looks_like_placeholder_sample(old_sample)
-        or normalize_sample_id(old_sample) != new_sample
-    ):
-        # If another volume row already holds this sample on the same date, skip rekey.
-        if session is not None and row.sample_date is not None:
-            clash = next(
-                (
-                    other
-                    for other in (index.get((row.producer_ref, new_sample)) or [])
-                    if other is not row
-                    and other.sample_date == row.sample_date
-                    and _has_volume(other)
-                ),
-                None,
-            )
-            if clash is not None:
-                return
+    if adopt_sample:
         row.sample_id = new_sample
         row.sample_missing = False
         _rekey_row(index, row, old_sample, new_sample)
+    return True
 
 
 def _drop_orphan(
@@ -396,19 +428,39 @@ def _drop_orphan(
         index.pop(key, None)
 
 
-def _merge_orphan_nml(
+def _still_in_index(
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+    orphan: NmlMilkResult,
+) -> bool:
+    key = (orphan.producer_ref, normalize_sample_id(orphan.sample_id))
+    return orphan in (index.get(key) or [])
+
+
+def _link_orphan_to_row(
+    session,
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+    orphan: NmlMilkResult,
+    match: NmlMilkResult,
+) -> bool:
+    if match is None or match is orphan or not _has_volume(match):
+        return False
+    if not _attach_quality_to_collection(
+        index, match, _orphan_record(orphan), session=session
+    ):
+        return False
+    if _still_in_index(index, orphan):
+        _drop_orphan(session, index, orphan)
+    return True
+
+
+def _merge_by_exact_sample(
     session,
     index: dict[tuple[str, str], list[NmlMilkResult]],
 ) -> int:
-    """Copy leftover lab-only rows onto a matching collection and remove the orphan."""
     merged = 0
-    orphans = [
-        row
-        for rows in index.values()
-        for row in list(rows)
-        if not _has_volume(row)
-    ]
-    for orphan in orphans:
+    for orphan in [row for row in _iter_index_rows(index) if not _has_volume(row)]:
+        if not _still_in_index(index, orphan):
+            continue
         match = _best_collection(
             index,
             producer_ref=orphan.producer_ref,
@@ -416,25 +468,104 @@ def _merge_orphan_nml(
             sample_id=orphan.sample_id,
             exclude=orphan,
         )
-        if match is None or match is orphan or not _has_volume(match):
-            match = _best_unmatched_volume(
-                index,
-                producer_ref=orphan.producer_ref,
-                sample_date=orphan.sample_date,
-                exclude=orphan,
-            )
-        if match is None or match is orphan or not _has_volume(match):
+        if match is None or not _has_volume(match):
             continue
-        record = {field: getattr(orphan, field) for field in (*_SAMPLE_FIELDS, *_META_FIELDS)}
-        record["sample_id"] = orphan.sample_id
-        record["source_message_id"] = orphan.source_message_id
-        record["source_file"] = orphan.source_file
-        # Adopting the orphan's sample id also deletes this lab-only row.
-        _attach_quality_to_collection(index, match, record, session=session)
-        if orphan in (index.get((orphan.producer_ref, normalize_sample_id(orphan.sample_id))) or []):
-            _drop_orphan(session, index, orphan)
-        merged += 1
+        # Exact sample match may update a manual ticket; do not require autofill.
+        if _link_orphan_to_row(session, index, orphan, match):
+            merged += 1
     return merged
+
+
+def _merge_by_quality_fingerprint(
+    session,
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+) -> int:
+    """Repair half-merges: blank volume already has this orphan's quality values."""
+    merged = 0
+    for orphan in [row for row in _iter_index_rows(index) if not _has_volume(row)]:
+        if not _still_in_index(index, orphan) or not _has_quality(orphan):
+            continue
+        fingerprint = _quality_fingerprint(orphan)
+        if all(value is None for value in fingerprint):
+            continue
+        candidates = [
+            row
+            for row in _iter_index_rows(index)
+            if row is not orphan
+            and _needs_sample_autofill(row)
+            and row.producer_ref == orphan.producer_ref
+            and row.sample_date == orphan.sample_date
+            and _has_quality(row)
+            and _quality_fingerprint(row) == fingerprint
+        ]
+        if len(candidates) != 1:
+            continue
+        if _link_orphan_to_row(session, index, orphan, candidates[0]):
+            merged += 1
+    return merged
+
+
+def _merge_by_volume_pairing(
+    session,
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+) -> int:
+    """GAD rule: same farm/date, blank loads only, lowest sample → highest litres."""
+    from collections import defaultdict
+
+    by_day: dict[tuple[str, dt.date], list[NmlMilkResult]] = defaultdict(list)
+    for row in _iter_index_rows(index):
+        if row.producer_ref and row.sample_date is not None:
+            by_day[(row.producer_ref, row.sample_date)].append(row)
+
+    merged = 0
+    for (_producer_ref, _day), rows in by_day.items():
+        blanks = [row for row in rows if _needs_sample_autofill(row)]
+        if not blanks:
+            continue
+        used_samples = {
+            normalize_sample_id(row.sample_id)
+            for row in rows
+            if _has_manual_sample(row)
+        }
+        available = [
+            row
+            for row in rows
+            if not _has_volume(row)
+            and normalize_sample_id(row.sample_id) not in used_samples
+            and _still_in_index(index, row)
+        ]
+        assigned = _pair_samples_to_loads_by_volume(
+            [float(row.litres_load or 0) for row in blanks],
+            [row.sample_id for row in available],
+        )
+        if not assigned:
+            continue
+        orphan_by_sample = {
+            normalize_sample_id(row.sample_id): row for row in available
+        }
+        for load, sample_id in zip(blanks, assigned):
+            orphan = orphan_by_sample.get(normalize_sample_id(sample_id))
+            if orphan is None or not _still_in_index(index, orphan):
+                continue
+            if _link_orphan_to_row(session, index, orphan, load):
+                merged += 1
+    return merged
+
+
+def _merge_orphan_nml(
+    session,
+    index: dict[tuple[str, str], list[NmlMilkResult]],
+) -> int:
+    """Link lab-only NML rows onto farm collections.
+
+    Order: exact sample number (manual wins) → fingerprint repair → GAD volume pair.
+    Volume pairing is all-or-nothing for blank loads on the same calendar day.
+    """
+    return (
+        _merge_by_exact_sample(session, index)
+        + _merge_by_quality_fingerprint(session, index)
+        + _merge_by_volume_pairing(session, index)
+    )
 
 
 def rematch_orphan_nml_results() -> dict[str, int]:
@@ -469,30 +600,24 @@ def _upsert(
         producer_ref = record["producer_ref"]
         sample_date = record["sample_date"]
         sample_id = record["sample_id"]
+        # Only link by exact sample number here. Blank tickets are filled later
+        # by volume pairing so we never half-assign one sample at a time.
         row = _best_collection(
             index,
             producer_ref=producer_ref,
             sample_date=sample_date,
             sample_id=sample_id,
         )
-        linked_via_placeholder = False
-        if row is None:
-            row = _best_unmatched_volume(
-                index,
-                producer_ref=producer_ref,
-                sample_date=sample_date,
-            )
-            linked_via_placeholder = row is not None
         if row is None:
             new_row = NmlMilkResult(**record)
             session.add(new_row)
             index.setdefault((producer_ref, normalize_sample_id(sample_id)), []).append(new_row)
             inserted += 1
             continue
-        _attach_quality_to_collection(index, row, record, session=session)
-        updated += 1
-        if row.nml_matched or linked_via_placeholder:
-            linked += 1
+        if _attach_quality_to_collection(index, row, record, session=session):
+            updated += 1
+            if row.nml_matched:
+                linked += 1
         key = (producer_ref, normalize_sample_id(sample_id))
         for other in list(index.get(key, [])):
             if other is row or other.sample_date is None:
