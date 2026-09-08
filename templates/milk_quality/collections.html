@@ -745,9 +745,9 @@
 
   function nmlCell(row) {
     if (row.matched || row.nml_status === "matched") {
-      return '<span class="nml-mark ok" title="NML sample number matched this collection (±1 day)" aria-label="Matched to NML">✓</span>';
+      return '<span class="nml-mark ok" title="This load has volume and NML quality" aria-label="Matched to NML">✓</span>';
     }
-    return '<span class="nml-mark bad" title="No matching NML sample number within ±1 day" aria-label="Not matched to NML">✕</span>';
+    return '<span class="nml-mark bad" title="This load is missing NML quality" aria-label="Not matched to NML">✕</span>';
   }
 
   function sortRows(data) {

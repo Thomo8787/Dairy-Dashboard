@@ -226,20 +226,14 @@ _QUALITY_FIELDS = (
     "antibiotic_pass",
     "urea_pct",
 )
-_DATE_WINDOW_DAYS = 1
 
 
 def _has_volume(row: NmlMilkResult) -> bool:
     return row.litres_load is not None and float(row.litres_load) > 0
 
 
-def _copy_quality(target: NmlMilkResult, source: NmlMilkResult) -> None:
-    for field in _QUALITY_FIELDS:
-        value = getattr(source, field)
-        if value is not None:
-            setattr(target, field, value)
-    target.nml_matched = True
-
+def _has_quality(row: NmlMilkResult) -> bool:
+    return any(getattr(row, field) is not None for field in _QUALITY_FIELDS)
 
 def update_collection_load(
     row_id: int,
@@ -265,11 +259,6 @@ def update_collection_load(
             f"L{row.load_number}" if row.load_number else f"L{row.id}"
         )
         old_date = row.sample_date
-        old_sample = row.sample_id
-        sample_or_date_changed = (
-            old_date != sample_date
-            or normalize_sample_id(old_sample) != normalize_sample_id(stored_sample)
-        )
 
         clash = session.scalars(
             select(NmlMilkResult).where(
@@ -281,30 +270,6 @@ def update_collection_load(
         ).first()
         if clash is not None and _has_volume(clash):
             raise ValueError("Another load already uses that sample number on that date.")
-
-        rematched = False
-        if typed_sample:
-            orphans = session.scalars(
-                select(NmlMilkResult).where(
-                    NmlMilkResult.id != row.id,
-                    NmlMilkResult.producer_ref == row.producer_ref,
-                )
-            ).all()
-            for orphan in orphans:
-                if _has_volume(orphan):
-                    continue
-                if normalize_sample_id(orphan.sample_id) != normalize_sample_id(typed_sample):
-                    continue
-                if orphan.sample_date is None:
-                    continue
-                if abs((orphan.sample_date - sample_date).days) > _DATE_WINDOW_DAYS:
-                    continue
-                _copy_quality(row, orphan)
-                session.delete(orphan)
-                rematched = True
-                break
-            if rematched:
-                session.flush()
 
         if old_date != sample_date:
             taken = {
@@ -328,17 +293,20 @@ def update_collection_load(
         row.sample_id = stored_sample
         row.sample_missing = sample_missing
         row.imported_at = dt.datetime.now(dt.timezone.utc)
+        session.flush()
 
-        if sample_or_date_changed and not rematched:
-            if sample_missing:
-                row.nml_matched = False
-            elif old_date is not None and abs((old_date - sample_date).days) <= _DATE_WINDOW_DAYS:
-                if normalize_sample_id(old_sample) == normalize_sample_id(stored_sample):
-                    pass
-                else:
-                    row.nml_matched = False
-            else:
-                row.nml_matched = False
+        # Re-link from NML rows already in the DB (no email reimport needed).
+        from services.nml_import import _merge_orphan_nml, _row_index
+
+        merged = _merge_orphan_nml(
+            session, _row_index(list(session.scalars(select(NmlMilkResult)).all()))
+        )
+        session.refresh(row)
+
+        if _has_volume(row) and _has_quality(row) and not sample_missing:
+            row.nml_matched = True
+        elif _has_volume(row) and not _has_quality(row):
+            row.nml_matched = False
 
         try:
             session.commit()
@@ -355,6 +323,7 @@ def update_collection_load(
             "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
             "sample_id": "" if row.sample_missing else (row.sample_id or ""),
             "nml_matched": bool(row.nml_matched),
+            "orphans_merged": merged,
         }
 
 

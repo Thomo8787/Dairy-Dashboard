@@ -58,12 +58,43 @@ def _ab_label(value: bool | None) -> str:
     return ""
 
 
+def _row_has_volume(row: NmlMilkResult) -> bool:
+    return row.litres_load is not None and float(row.litres_load) > 0
+
+
+def _row_has_quality(row: NmlMilkResult) -> bool:
+    return any(
+        getattr(row, field) is not None
+        for field in ("butterfat_pct", "protein_pct", "scc", "bactoscan", "fpd", "urea_pct")
+    )
+
+
 def _is_nml_matched(row: NmlMilkResult) -> bool:
-    return bool(row.nml_matched)
+    """Green tick when this load has volume and lab quality on the same row.
+
+    Older imports sometimes left quality on the load but never set nml_matched.
+    """
+    if bool(row.nml_matched):
+        return True
+    return _row_has_volume(row) and _row_has_quality(row)
 
 
 def _nml_status(row: NmlMilkResult, *, today: dt.date | None = None) -> str:
     return "matched" if _is_nml_matched(row) else "unmatched"
+
+
+def _backfill_nml_matched_flags(session: Any) -> int:
+    """Persist nml_matched for volume rows that already carry quality."""
+    updated = 0
+    rows = session.scalars(
+        select(NmlMilkResult).where(NmlMilkResult.nml_matched.is_(False))
+    ).all()
+    for row in rows:
+        if _row_has_volume(row) and _row_has_quality(row):
+            row.nml_matched = True
+            updated += 1
+    return updated
+
 
 
 def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[str, Any]:
@@ -256,6 +287,7 @@ def list_nml_results(
         rematch = {"orphans_merged": 0}
     selected_farms = _normalise_farms(farms)
     with get_session() as session:
+        _backfill_nml_matched_flags(session)
         query = select(NmlMilkResult).where(NmlMilkResult.farm.in_(selected_farms))
         if date_from is not None:
             query = query.where(NmlMilkResult.sample_date >= date_from)
