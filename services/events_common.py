@@ -34,13 +34,15 @@ EVENT_PAGE_TYPES: dict[str, tuple[str, ...]] = {
     "sales": ("SOLD",),
     "deaths": ("DIED",),
     "breedings": ("BRED",),
-    "disease": ("ILL", "SCOURS", "LAME", "MAST", "METR", "RP", "RESP", "INJURY", "ABORT", "DA", "MF"),
+    "disease": ("ILL", "SCOURS", "SCOUR", "PNEU", "NAVAL", "NAVEL", "LAME", "MAST", "METR", "RP", "RESP", "INJURY", "ABORT", "DA", "MF"),
     "hooftrimming": ("FOOTRIM", "LAME"),
 }
 
 DISEASE_EVENT_LABELS: dict[str, str] = {
     "ILL": "Illness",
     "SCOURS": "Scours",
+    "PNEU": "Pneumonia",
+    "NAVEL": "Naval",
     "LAME": "Lameness",
     "MAST": "Mastitis (all)",
     "MAST_ABX": "Mastitis - Abx",
@@ -62,6 +64,8 @@ DISEASE_VIRTUAL_EVENT_MAP: dict[str, str] = {
 DISEASE_FILTER_OPTIONS: tuple[str, ...] = (
     "ILL",
     "SCOURS",
+    "PNEU",
+    "NAVEL",
     "LAME",
     "MAST",
     "MAST_ABX",

@@ -199,9 +199,9 @@
       align-items: center;
       justify-content: center;
     }
-    .marker-key.r { background: #b91c1c; }
+    .marker-key.p { background: #b91c1c; }
     .marker-key.s { background: #1d4ed8; }
-    .marker-key.i { background: #ea580c; }
+    .marker-key.n { background: #ea580c; }
     .marker-key.v { background: #6d28d9; }
     #events-table { width: 100%; border-collapse: collapse; }
     #events-table th, #events-table td {
@@ -364,8 +364,8 @@
           <th data-sort="health_index"><span class="col-full">Health index</span><span class="col-short">HI</span></th>
           <th>Trend</th>
           <th data-sort="age_days"><span class="col-full">Age in days</span><span class="col-short">Age</span></th>
-          <th data-sort="days_since_last_treatment" title="Days since last treatment (ILL or RESP)">DSLT</th>
-          <th data-sort="resp_count" title="Respiratory episodes">xResp</th>
+          <th data-sort="days_since_last_treatment" title="Days since last treatment (PNEU, SCOURS, or NAVAL)">DSLT</th>
+          <th data-sort="resp_count" title="Pneumonia (PNEU) episodes">xResp</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -401,9 +401,9 @@
           </div>
         </div>
         <div class="chart-legend">
-          <span><span class="marker-key r">R</span> Pneumonia (Resp)</span>
+          <span><span class="marker-key p">P</span> Pneumonia (PNEU)</span>
           <span><span class="marker-key s">S</span> Scours</span>
-          <span><span class="marker-key i">I</span> Ill</span>
+          <span><span class="marker-key n">N</span> Naval</span>
           <span><span class="marker-key v">V</span> Vaccine</span>
         </div>
       </div>
@@ -449,8 +449,8 @@
     const prevBtn = document.getElementById("calf-prev");
     const nextBtn = document.getElementById("calf-next");
 
-    const MARKER_COLORS = { R: "#b91c1c", S: "#1d4ed8", I: "#ea580c", V: "#6d28d9" };
-    const MARKER_LABELS = { R: "Pneumonia (Resp)", S: "Scours", I: "Ill", V: "Vaccine" };
+    const MARKER_COLORS = { P: "#b91c1c", S: "#1d4ed8", N: "#ea580c", V: "#6d28d9" };
+    const MARKER_LABELS = { P: "Pneumonia (PNEU)", S: "Scours", N: "Naval", V: "Vaccine" };
 
     function barColor(value) {
       if (value == null || value === "") return "#9ca3af";
@@ -781,13 +781,13 @@
       if (token !== openToken) return;
       const respCount = payload.resp_count ?? 0;
       const scoursCount = payload.scours_count ?? 0;
-      const illCount = payload.ill_count ?? 0;
+      const navalCount = payload.naval_count ?? 0;
       const cells = [
         ["Health index", payload.health_index ?? "—", ""],
         ["Age in days", payload.age_days ?? "—", ""],
-        ["Pneumonia (Resp)", respCount, respCount > 0 ? "count-warn" : ""],
+        ["Pneumonia (PNEU)", respCount, respCount > 0 ? "count-warn" : ""],
         ["Scours", scoursCount, scoursCount > 0 ? "count-warn" : ""],
-        ["Ill", illCount, illCount > 0 ? "count-warn" : ""],
+        ["Naval", navalCount, navalCount > 0 ? "count-warn" : ""],
       ];
       detailGrid.innerHTML = cells.map(([label, value, extraClass]) => `
         <div class="${extraClass}"><div class="label">${label}</div><div class="value">${value}</div></div>

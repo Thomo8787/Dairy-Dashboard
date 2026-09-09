@@ -70,13 +70,15 @@ MAX_BACKFILL_DAYS = 730
 EMPTY_SLOT_STOP = 28
 TREND_DOTS = 12
 CHART_EVENT_LETTERS: dict[str, str] = {
-    "RESP": "R",
+    "PNEU": "P",
     "SCOURS": "S",
-    "ILL": "I",
+    "SCOUR": "S",
+    "NAVAL": "N",
+    "NAVEL": "N",
     "VACC": "V",
 }
-TREATMENT_EVENTS = frozenset({"RESP", "SCOURS", "ILL"})
-LAST_TREATMENT_EVENTS = frozenset({"RESP", "ILL"})
+TREATMENT_EVENTS = frozenset({"PNEU", "SCOURS", "SCOUR", "NAVAL", "NAVEL"})
+LAST_TREATMENT_EVENTS = frozenset({"PNEU", "SCOURS", "SCOUR", "NAVAL", "NAVEL"})
 
 
 def health_band(value: float | None) -> str | None:
@@ -144,13 +146,13 @@ def _is_counted_treatment_event(event: CowEvent) -> bool:
     code = _event_code(event.event)
     if code not in TREATMENT_EVENTS:
         return False
-    if code == "RESP" and is_loxicom_only_remark(event.remark):
+    if code == "PNEU" and is_loxicom_only_remark(event.remark):
         return False
     return True
 
 
 def treatment_episodes(events: list[CowEvent]) -> list[dict[str, Any]]:
-    """RESP, SCOURS, and ILL events after the shared disease episode gap."""
+    """PNEU, SCOURS, and NAVAL events after the shared disease episode gap."""
     records = [
         {
             "cow_id": event.cow_id,
@@ -170,13 +172,13 @@ def days_since_last_treatment(
     *,
     today: dt.date | None = None,
 ) -> int | None:
-    """Days since the most recent ILL or RESP event."""
+    """Days since the most recent PNEU, SCOURS, or NAVAL event."""
     today = today or dt.date.today()
     latest: dt.date | None = None
     for event in events:
         if _event_code(event.event) not in LAST_TREATMENT_EVENTS:
             continue
-        if _event_code(event.event) == "RESP" and is_loxicom_only_remark(event.remark):
+        if _event_code(event.event) == "PNEU" and is_loxicom_only_remark(event.remark):
             continue
         if event.event_date is None:
             continue
@@ -245,16 +247,16 @@ def _events_for_animals(
 
 
 def treatment_counts(events: list[CowEvent]) -> dict[str, int]:
-    """Count pneumonia, scours, and illness episodes, not repeat treatments."""
-    counts = {"resp_count": 0, "scours_count": 0, "ill_count": 0}
+    """Count pneumonia, scours, and naval episodes, not repeat treatments."""
+    counts = {"resp_count": 0, "scours_count": 0, "naval_count": 0}
     for record in treatment_episodes(events):
         code = record["event"]
-        if code == "RESP":
+        if code == "PNEU":
             counts["resp_count"] += 1
-        elif code == "SCOURS":
+        elif code in {"SCOURS", "SCOUR"}:
             counts["scours_count"] += 1
-        elif code == "ILL":
-            counts["ill_count"] += 1
+        elif code in {"NAVAL", "NAVEL"}:
+            counts["naval_count"] += 1
     return counts
 
 
@@ -295,7 +297,7 @@ def recent_antibiotic_highlight(
 
 
 def chart_event_markers(events: list[CowEvent]) -> list[dict[str, str]]:
-    """One R/S/I/V icon for every event date. Counts still use the episode gap."""
+    """One P/S/N/V icon for every event date. Counts still use the episode gap."""
     seen: set[tuple[str, str]] = set()
     markers: list[dict[str, str]] = []
     for event in events:
