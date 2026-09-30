@@ -402,17 +402,19 @@ def _baseline_month_for_farm(db: Session, farm: str) -> dt.date | None:
 
 
 def ensure_stock_opening_baselines(db: Session) -> dict[str, Any]:
-    """Seed missing openings by reverse-rolling current inventory through events."""
+    """Reverse-roll current inventory through events and store that opening.
+
+    Existing openings are replaced. The roll only anchors the latest closing to
+    today's inventory; earlier months stay a running total and may be negative.
+    """
     today = dt.date.today()
     created = 0
+    updated = 0
     for farm in HERD_FARM_OPTIONS:
         baseline_month = _baseline_month_for_farm(db, farm)
         if baseline_month is None:
             continue
         for stock_group in STOCK_GROUP_OPTIONS:
-            existing = _get_baseline(db, farm, stock_group)
-            if existing is not None:
-                continue
             inventory = _inventory_count(db, farm, stock_group)
             movements = _movement_totals(
                 db,
@@ -428,18 +430,29 @@ def ensure_stock_opening_baselines(db: Session) -> dict[str, Any]:
                 + movements["calvings"]
                 + movements["purchases"]
             )
-            db.add(
-                StockOpeningBaseline(
-                    farm=farm,
-                    stock_group=stock_group,
-                    month_start=baseline_month,
-                    opening_count=inventory - net,
+            opening_count = inventory - net
+            existing = _get_baseline(db, farm, stock_group)
+            if existing is None:
+                db.add(
+                    StockOpeningBaseline(
+                        farm=farm,
+                        stock_group=stock_group,
+                        month_start=baseline_month,
+                        opening_count=opening_count,
+                    )
                 )
-            )
-            created += 1
-    if created:
+                created += 1
+                continue
+            if (
+                _month_start(existing.month_start) != baseline_month
+                or int(existing.opening_count) != opening_count
+            ):
+                existing.month_start = baseline_month
+                existing.opening_count = opening_count
+                updated += 1
+    if created or updated:
         db.flush()
-    return {"created": created}
+    return {"created": created, "updated": updated}
 
 
 def _compute_farm_rows(
@@ -742,7 +755,11 @@ def _ensure_accrual_logic_version(db: Session) -> None:
 
 
 def rebuild_stock_accrual_snapshots(db: Session) -> dict[str, Any]:
-    """Recompute and persist stock accrual rows for all farms and stock groups."""
+    """Recompute openings from current inventory, then persist accrual rows.
+
+    Called on every herd import, including repeat runs of fetch-one-drive-data
+    on the same day. There is no once-a-day skip.
+    """
     ensure_stock_purchases(db)
     ensure_stock_opening_baselines(db)
 
@@ -844,7 +861,6 @@ def build_stock_accruals_report(
         return _empty_report(group, fiscal_year)
 
     ensure_stock_purchases(db)
-    ensure_stock_opening_baselines(db)
     _ensure_accrual_logic_version(db)
 
     baselines = list(

@@ -47,6 +47,7 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
         purchases = {"skipped": True, "error": str(exc), "rows_imported": 0}
 
     try:
+        # Fresh reverse roll on every import, including several cron runs in one day.
         accruals = rebuild_stock_accrual_snapshots(db)
     except Exception as exc:
         logger.exception("Stock accrual snapshot rebuild failed")
