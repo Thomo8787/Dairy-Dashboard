@@ -34,6 +34,29 @@ def _run_incremental_sync() -> None:
         logger.exception("Hourly parlour sync failed")
 
 
+def _run_cattle_sales_sync() -> None:
+    try:
+        from services.cattle_sales_email import outlook_cattle_sales_configured
+        from services.cattle_sales_import import sync_outlook_cattle_sales
+        from services.database import get_session
+
+        if not outlook_cattle_sales_configured():
+            logger.info("Cattle-sale email sync skipped — mailbox not configured")
+            return
+        with get_session() as session:
+            result = sync_outlook_cattle_sales(session)
+        if not result:
+            logger.info("Cattle-sale email sync: no new Payment Advice PDFs")
+            return
+        logger.info(
+            "Cattle-sale email sync: %s file(s), %s row(s)",
+            result.get("files_processed", 0),
+            result.get("rows_total", 0),
+        )
+    except Exception:
+        logger.exception("Cattle-sale email sync failed")
+
+
 def _run_nml_sync() -> None:
     try:
         from services.nml_import import format_nml_summary, import_nml_results, nml_is_configured
@@ -90,6 +113,7 @@ def start_parlour_hourly_sync(app: Flask) -> None:
     def nml_job() -> None:
         with app_ref.app_context():
             _run_nml_sync()
+            _run_cattle_sales_sync()
 
     scheduler.add_job(
         nml_job,
@@ -101,7 +125,7 @@ def start_parlour_hourly_sync(app: Flask) -> None:
     )
     scheduler.start()
     logger.info("Parlour hourly email sync started (every 1 hour)")
-    logger.info("NML email sync started (every 3 hours)")
+    logger.info("NML and cattle-sale email sync started (every 3 hours)")
 
     # Keep a reference on the app so it isn't garbage-collected.
     app.extensions["parlour_scheduler"] = scheduler

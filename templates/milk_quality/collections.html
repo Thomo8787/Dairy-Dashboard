@@ -92,8 +92,27 @@
       gap: 0.5rem; margin-bottom: 0.5rem;
     }
     .chart-card h3 { margin: 0; font-size: 0.95rem; }
+    .chart-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+    .chart-btn, .chart-expand {
+      border: 1px solid var(--line); background: #f3f4f6; color: var(--muted);
+      border-radius: 6px; width: 1.9rem; height: 1.9rem; line-height: 1;
+      font-size: 1rem; cursor: pointer; flex-shrink: 0; padding: 0;
+    }
+    .chart-btn:hover, .chart-expand:hover { background: #e5e7eb; color: var(--text); }
     .chart-wrap { position: relative; height: 240px; }
     .chart-hint { font-size: 0.75rem; color: var(--muted); margin: -0.25rem 0 1rem; }
+    .chart-modal { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; }
+    .chart-modal[hidden] { display: none; }
+    .chart-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
+    .chart-modal-body {
+      position: relative; background: var(--panel); border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3); width: 96vw; max-width: 1200px;
+      height: 90vh; display: flex; flex-direction: column; padding: 1rem;
+    }
+    .chart-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+    .chart-modal-head h3 { margin: 0; font-size: 1.1rem; }
+    .chart-modal-actions { display: flex; gap: 0.5rem; }
+    .chart-modal-canvas { position: relative; flex: 1 1 auto; min-height: 0; }
     .action-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
     .import-scope { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
     .import-scope select { margin: 0; padding: 0.25rem 0.4rem; font-size: 0.8rem; }
@@ -244,35 +263,90 @@
       </div>
       <div class="charts-grid">
         <div class="chart-card">
-          <div class="chart-head"><h3>Milk / cow (L)</h3></div>
+          <div class="chart-head">
+            <h3>Milk / cow (L)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-per-cow" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-per-cow" data-title="Milk / cow (L)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-per-cow"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>Butterfat (%)</h3></div>
+          <div class="chart-head">
+            <h3>Butterfat (%)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-butterfat" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-butterfat" data-title="Butterfat (%)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-butterfat"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>Protein (%)</h3></div>
+          <div class="chart-head">
+            <h3>Protein (%)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-protein" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-protein" data-title="Protein (%)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-protein"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>Urea</h3></div>
+          <div class="chart-head">
+            <h3>Urea</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-urea" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-urea" data-title="Urea" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-urea"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>SCC (x1000/ml)</h3></div>
+          <div class="chart-head">
+            <h3>SCC (x1000/ml)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-scc" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-scc" data-title="SCC (x1000/ml)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-scc"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>BactoScan (x1000/ml)</h3></div>
+          <div class="chart-head">
+            <h3>BactoScan (x1000/ml)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-bactoscan" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-bactoscan" data-title="BactoScan (x1000/ml)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-bactoscan"></canvas></div>
         </div>
         <div class="chart-card">
-          <div class="chart-head"><h3>Milk temp (°C)</h3></div>
+          <div class="chart-head">
+            <h3>Milk temp (°C)</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-btn chart-reset" data-canvas="chart-temp" title="Reset zoom">⟲</button>
+              <button type="button" class="chart-expand" data-canvas="chart-temp" data-title="Milk temp (°C)" title="View larger">⤢</button>
+            </div>
+          </div>
           <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
         </div>
       </div>
-      <p class="chart-hint">Scroll to zoom, drag to box-zoom, hold Ctrl and drag to pan, double-click to reset.</p>
+      <div id="chart-modal" class="chart-modal" hidden>
+        <div class="chart-modal-backdrop" data-close="1"></div>
+        <div class="chart-modal-body" role="dialog" aria-modal="true" aria-labelledby="chart-modal-title">
+          <div class="chart-modal-head">
+            <h3 id="chart-modal-title">Chart</h3>
+            <div class="chart-modal-actions">
+              <button type="button" class="secondary small" id="chart-modal-reset">Reset zoom</button>
+              <button type="button" class="secondary small" data-close="1">Close</button>
+            </div>
+          </div>
+          <div class="chart-modal-canvas"><canvas id="chart-modal-canvas"></canvas></div>
+        </div>
+      </div>
+      <p class="chart-hint">Scroll to zoom, drag to box-zoom, hold Ctrl and drag to pan, double-click to reset. Click ⤢ to enlarge.</p>
 
       <div class="action-bar">
         <button type="button" class="btn ghost" id="download-csv-btn">Export CSV</button>
@@ -413,11 +487,23 @@
   let sortKey = "sample_date";
   let sortDir = -1;
   const charts = {};
+  const chartSpecs = {};
+  let modalChart = null;
+  let openModalCanvasId = null;
   let smoothingMode = "avg";
   let excludeOutliers = true;
   let baseSummary = {};
   const IQR_FACTOR = 1.5;
   const IQR_METRICS = new Set(["scc", "bactoscan"]);
+  const CHART_DEFS = [
+    ["chart-per-cow", "litres_per_cow", "Milk / cow", "Milk / cow (L)"],
+    ["chart-butterfat", "butterfat_pct", "Butterfat", "Butterfat (%)"],
+    ["chart-protein", "protein_pct", "Protein", "Protein (%)"],
+    ["chart-urea", "urea_pct", "Urea", "Urea"],
+    ["chart-scc", "scc", "SCC", "SCC (x1000/ml)"],
+    ["chart-bactoscan", "bactoscan", "BactoScan", "BactoScan (x1000/ml)"],
+    ["chart-temp", "temp_c", "Milk temp", "Milk temp (°C)"],
+  ];
 
   function showMessage(text, isError) {
     const el = document.getElementById("status-message");
@@ -686,21 +772,66 @@
     if (charts[key]) { charts[key].destroy(); delete charts[key]; }
   }
 
+  function cloneDatasets(datasets) {
+    return JSON.parse(JSON.stringify(datasets));
+  }
+
+  function buildLineConfig(datasets, labels) {
+    return {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
+          zoom: {
+            pan: { enabled: true, mode: "xy", modifierKey: "ctrl" },
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: { enabled: true, backgroundColor: "rgba(30,58,95,0.15)", borderColor: "rgba(30,58,95,0.6)", borderWidth: 1 },
+              mode: "xy",
+            },
+          },
+        },
+        scales: { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
+      },
+    };
+  }
+
+  function renderModalChart(canvasId) {
+    const spec = chartSpecs[canvasId];
+    if (!spec || typeof Chart === "undefined") return;
+    if (modalChart) { modalChart.destroy(); modalChart = null; }
+    modalChart = new Chart(
+      document.getElementById("chart-modal-canvas"),
+      buildLineConfig(cloneDatasets(spec.datasets), spec.labels.slice())
+    );
+  }
+
+  function openChartModal(canvasId, title) {
+    if (!chartSpecs[canvasId]) return;
+    openModalCanvasId = canvasId;
+    document.getElementById("chart-modal-title").textContent = title || chartSpecs[canvasId].title || "Chart";
+    document.getElementById("chart-modal").hidden = false;
+    renderModalChart(canvasId);
+  }
+
+  function closeChartModal() {
+    document.getElementById("chart-modal").hidden = true;
+    if (modalChart) { modalChart.destroy(); modalChart = null; }
+    openModalCanvasId = null;
+  }
+
   function renderCharts() {
     const labels = allDates();
+    const displayLabels = labels.map(formatDate);
     const mode = smoothingMode;
     const tag = mode === "avg" ? " (rolling avg)" : mode === "avg30" ? " (30-day avg)" : "";
-    const defs = [
-      ["chart-per-cow", "litres_per_cow", "Milk / cow"],
-      ["chart-butterfat", "butterfat_pct", "Butterfat"],
-      ["chart-protein", "protein_pct", "Protein"],
-      ["chart-urea", "urea_pct", "Urea"],
-      ["chart-scc", "scc", "SCC"],
-      ["chart-bactoscan", "bactoscan", "BactoScan"],
-      ["chart-temp", "temp_c", "Milk temp"],
-    ];
-    defs.forEach(([canvasId, metric, suffix]) => {
-      destroyChart(canvasId);
+    CHART_DEFS.forEach(([canvasId, metric, suffix, title]) => {
       const datasets = selectedFarms().map((farm) => {
         const color = FARM_COLORS[farm] || "#555";
         return {
@@ -713,30 +844,16 @@
           pointRadius: mode === "raw" ? 2 : 0,
         };
       });
-      charts[canvasId] = new Chart(document.getElementById(canvasId), {
-        type: "line",
-        data: { labels: labels.map(formatDate), datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
-            zoom: {
-              pan: { enabled: true, mode: "xy", modifierKey: "ctrl" },
-              zoom: {
-                wheel: { enabled: true },
-                pinch: { enabled: true },
-                drag: { enabled: true, backgroundColor: "rgba(30,58,95,0.15)", borderColor: "rgba(30,58,95,0.6)", borderWidth: 1 },
-                mode: "xy",
-              },
-            },
-          },
-          scales: { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
-        },
-      });
+      chartSpecs[canvasId] = { title, labels: displayLabels, datasets };
+      destroyChart(canvasId);
+      charts[canvasId] = new Chart(
+        document.getElementById(canvasId),
+        buildLineConfig(cloneDatasets(datasets), displayLabels.slice())
+      );
     });
+    if (openModalCanvasId && chartSpecs[openModalCanvasId]) {
+      renderModalChart(openModalCanvasId);
+    }
   }
 
   function abCell(value) {
@@ -752,23 +869,68 @@
     return '<span class="nml-mark bad" title="This load is missing NML quality" aria-label="Not matched to NML">✕</span>';
   }
 
+  function sampleSortValue(row) {
+    const raw = row.sample_id == null ? "" : String(row.sample_id).trim();
+    if (!raw) return null;
+    const asNum = Number(raw.replace(/^0+/, "") || raw);
+    if (!Number.isNaN(asNum) && raw.replace(/\./g, "").match(/^\d+$/)) return asNum;
+    return raw.toLowerCase();
+  }
+
+  function cmpValues(av, bv, dir) {
+    const aEmpty = av == null || av === "";
+    const bEmpty = bv == null || bv === "";
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1;
+    if (bEmpty) return -1;
+    if (av < bv) return -1 * dir;
+    if (av > bv) return dir;
+    return 0;
+  }
+
   function sortRows(data) {
+    // Default / tie-break: date newest→oldest, farm A→Z, sample high→low.
     return [...data].sort((a, b) => {
-      let av = a[sortKey], bv = b[sortKey];
+      let primary = 0;
       if (sortKey === "nml_status") {
-        av = a.matched ? 1 : 0;
-        bv = b.matched ? 1 : 0;
-      } else if (typeof av === "boolean" || typeof bv === "boolean") {
-        av = av === true ? 1 : av === false ? 0 : -1;
-        bv = bv === true ? 1 : bv === false ? 0 : -1;
-      } else if (typeof av === "string" || typeof bv === "string") {
-        av = av == null ? "" : String(av).toLowerCase();
-        bv = bv == null ? "" : String(bv).toLowerCase();
+        primary = cmpValues(a.matched ? 1 : 0, b.matched ? 1 : 0, sortDir);
+      } else if (sortKey === "sample_id") {
+        primary = cmpValues(sampleSortValue(a), sampleSortValue(b), sortDir);
+      } else if (sortKey === "farm") {
+        primary = cmpValues(
+          (a.farm || "").toLowerCase(),
+          (b.farm || "").toLowerCase(),
+          sortDir
+        );
+      } else if (sortKey === "sample_date") {
+        primary = cmpValues(a.sample_date || "", b.sample_date || "", sortDir);
+      } else {
+        let av = a[sortKey], bv = b[sortKey];
+        if (typeof av === "boolean" || typeof bv === "boolean") {
+          av = av === true ? 1 : av === false ? 0 : -1;
+          bv = bv === true ? 1 : bv === false ? 0 : -1;
+        } else if (typeof av === "string" || typeof bv === "string") {
+          av = av == null ? "" : String(av).toLowerCase();
+          bv = bv == null ? "" : String(bv).toLowerCase();
+        }
+        primary = cmpValues(av, bv, sortDir);
       }
-      if (av == null || av === "") return 1;
-      if (bv == null || bv === "") return -1;
-      if (av < bv) return -1 * sortDir;
-      if (av > bv) return sortDir;
+      if (primary) return primary;
+      if (sortKey !== "sample_date") {
+        const byDate = cmpValues(a.sample_date || "", b.sample_date || "", -1);
+        if (byDate) return byDate;
+      }
+      if (sortKey !== "farm") {
+        const byFarm = cmpValues(
+          (a.farm || "").toLowerCase(),
+          (b.farm || "").toLowerCase(),
+          1
+        );
+        if (byFarm) return byFarm;
+      }
+      if (sortKey !== "sample_id") {
+        return cmpValues(sampleSortValue(a), sampleSortValue(b), -1);
+      }
       return 0;
     });
   }
@@ -865,6 +1027,28 @@
       refreshSummary();
       renderCharts();
     });
+  });
+
+  document.querySelectorAll(".chart-expand").forEach((btn) => {
+    btn.addEventListener("click", () => openChartModal(btn.dataset.canvas, btn.dataset.title));
+  });
+  document.querySelectorAll(".chart-reset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.canvas;
+      if (charts[id] && typeof charts[id].resetZoom === "function") charts[id].resetZoom();
+    });
+  });
+  document.querySelectorAll("#chart-modal [data-close]").forEach((el) => {
+    el.addEventListener("click", closeChartModal);
+  });
+  document.getElementById("chart-modal-reset").addEventListener("click", () => {
+    if (modalChart && typeof modalChart.resetZoom === "function") modalChart.resetZoom();
+  });
+  document.getElementById("chart-modal-canvas").addEventListener("dblclick", () => {
+    if (modalChart && typeof modalChart.resetZoom === "function") modalChart.resetZoom();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !document.getElementById("chart-modal").hidden) closeChartModal();
   });
 
   document.querySelectorAll("#coll-table thead th[data-sort]").forEach((th) => {

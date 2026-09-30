@@ -30,6 +30,14 @@ from services.auth import (
 )
 from services.events_common import build_dairy_semen_30d, build_events_page_report
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
+from services.cattle_sales_import import ensure_local_cattle_sales
+from services.sales_payments import (
+    confirm_payments,
+    list_dest_filter_options as list_sales_dest_filter_options,
+    list_sales_payments,
+    normalize_sales_reasons,
+    unarchive_payments,
+)
 from services.births_report import build_births_report
 from services.stp_report import build_stp_report
 from services.urine_ph_report import build_urine_ph_report
@@ -68,6 +76,8 @@ from services.beef_inventory import (
 from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
+from services.ahdb_bulls import AhdbBullsError, ensure_imported, list_bulls, refresh_bulls
+from services.custom_indexes import reset_index_settings, save_index_settings
 from services.genomic_progress import (
     build_genomic_progress,
     build_genomic_scatter,
@@ -266,6 +276,7 @@ def require_login():
             or request.endpoint.startswith("milk_quality_api")
             or request.endpoint.startswith("stock_api")
             or request.endpoint.startswith("api_sensehub")
+            or request.endpoint.startswith("genetics_api")
         ):
             return jsonify({"error": "Authentication required."}), 401
         return redirect(url_for("login", next=request.path))
@@ -331,6 +342,146 @@ def office():
         "office.html",
         **_page_context(active_nav="office"),
     )
+
+
+def _render_office_placeholder(nav_id: str, title: str):
+    return render_template(
+        "office/placeholder.html",
+        page_heading=title,
+        **_page_context(active_nav=nav_id),
+    )
+
+
+def _office_json_user():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Authentication required."}), 401)
+    if not user_has_permission(user, "perm_office"):
+        return None, (jsonify({"error": "Permission denied."}), 403)
+    return user, None
+
+
+def _parse_bool_arg(name: str) -> bool | None:
+    raw = (request.args.get(name) or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+@app.route("/office/sales-payments")
+@permission_required("perm_office")
+def office_sales_payments():
+    with get_session() as session:
+        ensure_local_cattle_sales(session)
+    return render_template(
+        "office/sales_payments.html",
+        page_heading="Sales Payments",
+        farm_options=list(HERD_FARM_OPTIONS),
+        **_page_context(active_nav="office_sales_payments"),
+    )
+
+
+@app.route("/office/fallen-stock")
+@permission_required("perm_office")
+def office_fallen_stock():
+    return _render_office_placeholder("office_fallen_stock", "Fallen Stock")
+
+
+@app.route("/office/stock-valuations")
+@permission_required("perm_office")
+def office_stock_valuations():
+    return _render_office_placeholder("office_stock_valuations", "Stock Valuations")
+
+
+@app.route("/office/purchases")
+@permission_required("perm_office")
+def office_purchases():
+    return _render_office_placeholder("office_purchases", "Purchases")
+
+
+@app.route("/office/api/sales-payments")
+def office_api_sales_payments():
+    user, error = _office_json_user()
+    if error:
+        return error
+    status = (request.args.get("status") or "active").strip().lower()
+    if status not in {"active", "archived"}:
+        status = "active"
+    farms = request.args.getlist("farm") or None
+    reasons = normalize_sales_reasons(request.args.getlist("reason") or None)
+    dest = request.args.get("dest") or None
+    include_date_bounds = _parse_bool_arg("include_date_bounds")
+    if include_date_bounds is None:
+        include_date_bounds = True
+    with get_session() as session:
+        ensure_local_cattle_sales(session)
+        return jsonify(
+            list_sales_payments(
+                session,
+                status=status,
+                farms=farms,
+                reasons=reasons,
+                dest=dest,
+                event_from=_parse_date_arg("event_from"),
+                event_to=_parse_date_arg("event_to"),
+                include_date_bounds=include_date_bounds,
+                has_amount=_parse_bool_arg("has_amount"),
+            )
+        )
+
+
+@app.route("/office/api/sales-payments/filter-options")
+def office_api_sales_payments_filter_options():
+    user, error = _office_json_user()
+    if error:
+        return error
+    status = (request.args.get("status") or "active").strip().lower()
+    if status not in {"active", "archived"}:
+        status = "active"
+    farms = request.args.getlist("farm") or None
+    reasons = normalize_sales_reasons(request.args.getlist("reason") or None)
+    with get_session() as session:
+        options = list_sales_dest_filter_options(
+            session,
+            status=status,
+            farms=farms,
+            reasons=reasons,
+        )
+        return jsonify(
+            {
+                "dest_options": options["dest_options"],
+                "reason_options": list(normalize_sales_reasons(None)),
+                "date_bounds": options["date_bounds"],
+            }
+        )
+
+
+@app.route("/office/api/sales-payments/confirm", methods=["POST"])
+def office_api_confirm_sales_payments():
+    user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return jsonify({"error": "items must be a list."}), 400
+    with get_session() as session:
+        return jsonify(confirm_payments(session, items, user))
+
+
+@app.route("/office/api/sales-payments/unarchive", methods=["POST"])
+def office_api_unarchive_sales_payments():
+    user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return jsonify({"error": "items must be a list."}), 400
+    with get_session() as session:
+        return jsonify(unarchive_payments(session, items, user))
 
 
 @app.route("/users")
@@ -1102,6 +1253,67 @@ def genetics_api_scatter():
             )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/genetics/bull-search")
+@permission_required("perm_genetics")
+def genetics_bull_search():
+    return render_template(
+        "genetics/bull_search.html",
+        **_page_context(active_nav="genetics_bull_search", page_heading="Bull Search"),
+    )
+
+
+@app.route("/genetics/api/bull-search")
+def genetics_api_bull_search():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    try:
+        with get_session() as session:
+            return jsonify(ensure_imported(session))
+    except AhdbBullsError as exc:
+        with get_session() as session:
+            existing = list_bulls(session)
+        if existing["count"]:
+            existing["warning"] = str(exc)
+            return jsonify(existing)
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/genetics/api/bull-search/refresh", methods=["POST"])
+def genetics_api_bull_search_refresh():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    try:
+        with get_session() as session:
+            return jsonify(refresh_bulls(session))
+    except AhdbBullsError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/genetics/api/bull-search/index-settings", methods=["PUT"])
+def genetics_api_bull_index_settings():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Index settings must be a JSON object."}), 400
+    with get_session() as session:
+        save_index_settings(session, body)
+        return jsonify(list_bulls(session))
+
+
+@app.route("/genetics/api/bull-search/index-settings/reset", methods=["POST"])
+def genetics_api_bull_index_reset():
+    user, error = _genetics_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        reset_index_settings(session)
+        return jsonify(list_bulls(session))
 
 
 def _selected_stock_farms() -> list[str]:

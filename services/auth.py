@@ -362,6 +362,7 @@ class PermissionContext:
     _ACTION_MAP = {
         "sensehub.import": "perm_sync_sensehub",
         "sensehub.cull": "perm_sync_sensehub_cull",
+        "office_admin.sales_payment": "perm_office",
     }
     _PAGE_MAP = {
         "sensehub": "perm_sensehub",

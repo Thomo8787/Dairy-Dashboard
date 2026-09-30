@@ -93,7 +93,13 @@ SALES_REASON_ORDER: tuple[str, ...] = ("OFS", "TB", "Beef", "Dairy", "CULL")
 SALES_TABLE_REASON_ORDER: tuple[str, ...] = ("CULL", "TB", "OFS", "Beef", "Dairy")
 SALES_DAIRY_REMARKS: tuple[str, ...] = ("CAR18", "CAR19")
 SALES_TB_REMARKS: tuple[str, ...] = ("CAR11", "TB")
-SALES_MAPPED_REMARKS: tuple[str, ...] = ("OFS", *SALES_TB_REMARKS, "CAR16", *SALES_DAIRY_REMARKS)
+SALES_BEEF_REMARKS: tuple[str, ...] = ("CAR16", "BLADE", "DRAYTON", "WARREN")
+SALES_MAPPED_REMARKS: tuple[str, ...] = (
+    "OFS",
+    *SALES_TB_REMARKS,
+    *SALES_BEEF_REMARKS,
+    *SALES_DAIRY_REMARKS,
+)
 # DairyComp DIED + these remarks used to be rewritten to SOLD on import for sales
 # reporting. We now keep the original DIED event for BCMS, and still treat them as
 # sales in reporting via sales_classified_event_clause().
@@ -368,7 +374,7 @@ def _sales_reason_expression():
     return case(
         (or_(ofs_sales_clause(), died_cert_clause()), literal("OFS")),
         (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
-        (CowEvent.remark == "CAR16", literal("Beef")),
+        (CowEvent.remark.in_(list(SALES_BEEF_REMARKS)), literal("Beef")),
         (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),
         else_=literal("CULL"),
     )

@@ -19,7 +19,32 @@ NAV_ITEMS = [
         "label": "Office",
         "endpoint": "office",
         "permission": "perm_office",
-        "children": [],
+        "children": [
+            {
+                "id": "office_sales_payments",
+                "label": "Sales Payments",
+                "endpoint": "office_sales_payments",
+                "permission": "perm_office",
+            },
+            {
+                "id": "office_fallen_stock",
+                "label": "Fallen Stock",
+                "endpoint": "office_fallen_stock",
+                "permission": "perm_office",
+            },
+            {
+                "id": "office_stock_valuations",
+                "label": "Stock Valuations",
+                "endpoint": "office_stock_valuations",
+                "permission": "perm_office",
+            },
+            {
+                "id": "office_purchases",
+                "label": "Purchases",
+                "endpoint": "office_purchases",
+                "permission": "perm_office",
+            },
+        ],
     },
     {
         "id": "parlours",
@@ -151,6 +176,12 @@ NAV_ITEMS = [
                 "id": "genetics_genomic_progress",
                 "label": "Genomic Progress",
                 "endpoint": "genetics_genomic_progress",
+                "permission": "perm_genetics",
+            },
+            {
+                "id": "genetics_bull_search",
+                "label": "Bull Search",
+                "endpoint": "genetics_bull_search",
                 "permission": "perm_genetics",
             },
         ],

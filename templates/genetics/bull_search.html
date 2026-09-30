@@ -1,0 +1,932 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+      max-height: calc(100vh - 8rem);
+      overflow: auto;
+    }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-group.supplier-slicer { grid-template-columns: 1fr 1fr 1fr; }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-group.supplier-slicer .slicer-btn {
+      min-height: 2.2rem;
+      padding: 0.3rem 0.2rem;
+      font-size: 0.75rem;
+    }
+    .slicer-btn.selected { background: #e8eef5; border-color: #8aa4c2; color: #1e3a5f; }
+    .slicer-btn[data-value="genomic"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="proven"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .search-input { width: 100%; margin: 0; }
+    .slicer-actions {
+      display: flex;
+      gap: 0.6rem;
+      margin-bottom: 0.4rem;
+    }
+    .slicer-actions button {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #1e3a5f;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .trait-filters { display: grid; gap: 0.3rem; }
+    .trait-filter-head,
+    .trait-filter-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 4.4rem 4.4rem;
+      gap: 0.3rem;
+      align-items: center;
+    }
+    .trait-filter-head {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .trait-filter-head span:not(:first-child) { text-align: center; }
+    .trait-filter-row label { font-size: 0.78rem; color: var(--text); }
+    .trait-filter-row input {
+      width: 100%;
+      margin: 0;
+      padding: 0.22rem 0.3rem;
+      font-size: 0.78rem;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .action-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .gear-btn {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: #4ba3e3;
+      width: 2.2rem;
+      height: 2.2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .gear-btn:hover,
+    .gear-btn[aria-expanded="true"] {
+      color: #2f86c9;
+      background: #eef6fc;
+      border-color: #9ec9ea;
+    }
+    .gear-btn svg { width: 1.3rem; height: 1.3rem; display: block; }
+    .settings-panel {
+      display: none;
+      margin-bottom: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fafafa;
+      padding: 1rem;
+    }
+    .settings-panel.open { display: block; }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1rem;
+    }
+    .settings-col h3 {
+      margin: 0 0 0.6rem;
+      font-size: 0.9rem;
+    }
+    .settings-fields {
+      display: grid;
+      gap: 0.4rem;
+    }
+    .settings-fields label {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 6.2rem;
+      gap: 0.4rem;
+      align-items: center;
+      font-size: 0.78rem;
+    }
+    .settings-fields input[type="number"] {
+      width: 100%;
+      margin: 0;
+      padding: 0.22rem 0.35rem;
+      font-size: 0.78rem;
+    }
+    .settings-check {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.78rem;
+      margin-top: 0.35rem;
+    }
+    .settings-check input { margin: 0; }
+    .settings-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.85rem;
+    }
+    .pager {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
+    }
+    .pager span { font-size: 0.8125rem; color: var(--muted); }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 16rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #bulls-table { width: max-content; border-collapse: collapse; font-size: 0.8125rem; }
+    #bulls-table th, #bulls-table td {
+      padding: 0.4rem 0.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    #bulls-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    #bulls-table thead th[data-sort] { cursor: pointer; user-select: none; }
+    #bulls-table thead th[data-sort]:hover { background: #274b73; }
+    #bulls-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    #bulls-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    #bulls-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #bulls-table td.negative-pct {
+      background: #fecaca;
+      color: #991b1b;
+      font-weight: 700;
+    }
+    #bulls-table th.num { text-align: right; }
+    #bulls-table th.bull-name,
+    #bulls-table td.bull-name {
+      width: 1%;
+      max-width: 12rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #bulls-table .list-pill {
+      display: inline-block;
+      min-width: 1.4rem;
+      text-align: center;
+      padding: 0.1rem 0.35rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    #bulls-table .list-pill.genomic { background: #dceaf7; color: #1e3a5f; }
+    #bulls-table .list-pill.proven { background: #ffecd9; color: #b45309; }
+    .empty-state { padding: 1.5rem; color: var(--muted); }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .message { margin-bottom: 0.75rem; }
+    .message.ok { color: #047857; }
+    .message.err { color: #b91c1c; }
+    a.ext-link { color: inherit; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Search</span>
+          <input type="search" id="search-input" class="search-input" placeholder="Bull, sire, HBN, supplier…" autocomplete="off">
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Proof</span>
+          <div class="slicer-group list-slicer">
+            <button type="button" class="slicer-btn selected" data-value="genomic" aria-pressed="true">G</button>
+            <button type="button" class="slicer-btn selected" data-value="proven" aria-pressed="true">P</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Supplier</span>
+          <div class="slicer-actions">
+            <button type="button" id="supplier-all">All</button>
+            <button type="button" id="supplier-none">None</button>
+          </div>
+          <div class="slicer-group supplier-slicer" id="supplier-slicer"></div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Trait filters</span>
+          <div class="trait-filter-head"><span></span><span>Min</span><span>Max</span></div>
+          <div class="trait-filters" id="trait-filters"></div>
+        </div>
+        <div class="filter-section">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear trait filters</button>
+        </div>
+      </aside>
+      <aside class="filter-panel">
+        <h2>About</h2>
+        <p class="help-text">
+          Holstein bull proofs from
+          <a href="https://breedingdairy.ahdb.org.uk/bull-and-cow-reports/tables" target="_blank" rel="noopener">AHDB Dairy Breeding</a>.
+          <strong>G</strong> is marketed genomic; <strong>P</strong> is proven (UK marketed and top international, one row per bull).
+          Click a column heading to sort. Use this list to compare animals — do not republish the dataset.
+        </p>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <div id="status-message" class="message"></div>
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <div class="action-bar">
+        <button type="button" class="secondary small" id="refresh-btn">Refresh from AHDB</button>
+        <button type="button" class="gear-btn" id="settings-toggle" aria-expanded="false"
+          aria-controls="index-settings-panel" title="Change how £DP, £FW and £CM indexes are calculated">
+          <svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+            <g transform="translate(32 32)">
+              <path d="M-2.4-19.5h4.8l1.2 5c1.8.4 3.5 1.2 5 2.3l4.6-2.4 3.4 3.4-2.4 4.6c1.1 1.5 1.9 3.2 2.3 5l5 1.2v4.8l-5 1.2c-.4 1.8-1.2 3.5-2.3 5l2.4 4.6-3.4 3.4-4.6-2.4c-1.5 1.1-3.2 1.9-5 2.3l-1.2 5h-4.8l-1.2-5c-1.8-.4-3.5-1.2-5-2.3l-4.6 2.4-3.4-3.4 2.4-4.6c-1.1-1.5-1.9-3.2-2.3-5l-5-1.2v-4.8l5-1.2c.4-1.8 1.2-3.5 2.3-5l-2.4-4.6 3.4-3.4 4.6 2.4c1.5-1.1 3.2-1.9 5-2.3l1.2-5z"/>
+              <circle cx="0" cy="0" r="6.2" fill="#fff"/>
+            </g>
+          </svg>
+        </button>
+        <div class="pager" id="pager">
+          <button type="button" class="secondary small" id="page-prev">Previous</button>
+          <span id="page-label">Page 1</span>
+          <button type="button" class="secondary small" id="page-next">Next</button>
+        </div>
+      </div>
+      <div class="settings-panel" id="index-settings-panel">
+        <p class="help-text" style="margin-bottom:0.85rem;">
+          These inputs are the same as the breeding spreadsheet. Save to recalculate £DP, £FW and £CM for every bull.
+          For £DP and £FW, mastitis is not in the total unless you tick it. £CM uses mastitis instead of SCC.
+        </p>
+        <form id="index-settings-form">
+          <div class="settings-grid">
+            <div class="settings-col">
+              <h3>Shared</h3>
+              <div class="settings-fields">
+                <label>EBV conversion <input type="number" step="any" id="idx-ebv_conv" required></label>
+                <label>Fertility weight <input type="number" step="any" id="idx-fertility_weight" required></label>
+                <label>Lifespan weight <input type="number" step="any" id="idx-lifespan_weight" required></label>
+                <label>SCC value <input type="number" step="any" id="idx-scc_value" required></label>
+                <label>Mastitis weight <input type="number" step="any" id="idx-mastitis_weight" required></label>
+              </div>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-include_mastitis"> Include mastitis in £DP and £FW
+              </label>
+            </div>
+            <div class="settings-col">
+              <h3>£DP Index</h3>
+              <div class="settings-fields">
+                <label>Fat % base <input type="number" step="any" id="idx-dp-fat_pct_base" required></label>
+                <label>Protein % base <input type="number" step="any" id="idx-dp-protein_pct_base" required></label>
+                <label>Milk volume base <input type="number" step="any" id="idx-dp-milk_volume_base" required></label>
+                <label>Fat price <input type="number" step="any" id="idx-dp-fat_price" required></label>
+                <label>Protein price <input type="number" step="any" id="idx-dp-protein_price" required></label>
+                <label>Volume price <input type="number" step="any" id="idx-dp-volume_price" required></label>
+                <label>Lameness weight <input type="number" step="any" id="idx-dp-lameness_weight" required></label>
+              </div>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-dp-include_lameness"> Include lameness
+              </label>
+            </div>
+            <div class="settings-col">
+              <h3>£FW Index</h3>
+              <div class="settings-fields">
+                <label>Fat % base <input type="number" step="any" id="idx-fw-fat_pct_base" required></label>
+                <label>Protein % base <input type="number" step="any" id="idx-fw-protein_pct_base" required></label>
+                <label>Milk volume base <input type="number" step="any" id="idx-fw-milk_volume_base" required></label>
+                <label>Fat price <input type="number" step="any" id="idx-fw-fat_price" required></label>
+                <label>Protein price <input type="number" step="any" id="idx-fw-protein_price" required></label>
+                <label>Volume price <input type="number" step="any" id="idx-fw-volume_price" required></label>
+                <label>Lameness weight <input type="number" step="any" id="idx-fw-lameness_weight" required></label>
+              </div>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-fw-include_lameness"> Include lameness
+              </label>
+            </div>
+            <div class="settings-col">
+              <h3>£CM Index</h3>
+              <div class="settings-fields">
+                <label>Fat % base <input type="number" step="any" id="idx-cm-fat_pct_base" required></label>
+                <label>Protein % base <input type="number" step="any" id="idx-cm-protein_pct_base" required></label>
+                <label>Milk volume base <input type="number" step="any" id="idx-cm-milk_volume_base" required></label>
+                <label>Fat price <input type="number" step="any" id="idx-cm-fat_price" required></label>
+                <label>Protein price <input type="number" step="any" id="idx-cm-protein_price" required></label>
+                <label>Volume price <input type="number" step="any" id="idx-cm-volume_price" required></label>
+                <label>Lameness weight <input type="number" step="any" id="idx-cm-lameness_weight" required></label>
+                <label>Mastitis weight <input type="number" step="any" id="idx-cm-mastitis_weight" required></label>
+              </div>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-cm-include_lameness"> Include lameness
+              </label>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-cm-include_mastitis"> Include mastitis
+              </label>
+              <label class="settings-check">
+                <input type="checkbox" id="idx-cm-include_scc"> Include SCC
+              </label>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button type="submit">Save indexes</button>
+            <button type="button" class="secondary small" id="reset-index-btn">Reset to spreadsheet defaults</button>
+          </div>
+        </form>
+      </div>
+      <div class="table-wrap">
+        <table id="bulls-table">
+          <thead>
+            <tr id="bulls-head"></tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td class="empty-state">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const BULLS_URL = {{ url_for('genetics_api_bull_search') | tojson }};
+    const BULLS_REFRESH_URL = {{ url_for('genetics_api_bull_search_refresh') | tojson }};
+    const BULLS_INDEX_URL = {{ url_for('genetics_api_bull_index_settings') | tojson }};
+    const BULLS_INDEX_RESET_URL = {{ url_for('genetics_api_bull_index_reset') | tojson }};
+    const COLUMNS = [
+      { key: "proof", label: "Proof", type: "text" },
+      { key: "supplier_gb", label: "Supplier", type: "text" },
+      { key: "rank", label: "Rank", type: "num", digits: 0 },
+      { key: "bull_name", label: "Bull Name", type: "text" },
+      { key: "pli", label: "£PLI", type: "num", digits: 0 },
+      { key: "dp_index", label: "£DP Index", type: "num", digits: 0 },
+      { key: "fw_index", label: "£FW Index", type: "num", digits: 0 },
+      { key: "cm_index", label: "£CM Index", type: "num", digits: 0 },
+      { key: "milk_kg", label: "Milk", type: "num", digits: 0 },
+      { key: "fat_kg", label: "Fat kg", type: "num", digits: 1 },
+      { key: "protein_kg", label: "Prot kg", type: "num", digits: 1 },
+      { key: "fat_pct", label: "Fat %", type: "num", digits: 2 },
+      { key: "protein_pct", label: "Prot %", type: "num", digits: 2 },
+      { key: "fertility_index", label: "FI", type: "num", digits: 1 },
+      { key: "lifespan_days", label: "LS", type: "num", digits: 0 },
+      { key: "scc", label: "SCC", type: "num", digits: 0 },
+      { key: "lameness", label: "Lame", type: "num", digits: 1 },
+      { key: "healthycow", label: "HealthyCow", type: "num", digits: 0 },
+      { key: "envirocow", label: "EnviroCow", type: "num", digits: 1 },
+      { key: "calf_survival", label: "Calf Surv", type: "num", digits: 1 },
+      { key: "mastitis", label: "Mast", type: "num", digits: 0 },
+      { key: "digital_dermatitis", label: "DD", type: "num", digits: 1 },
+      { key: "gestation_length", label: "GL", type: "num", digits: 0 },
+      { key: "dairy_carcass_index", label: "DCI", type: "num", digits: 1 },
+      { key: "maintenance", label: "Maint", type: "num", digits: 0 },
+      { key: "feed_advantage", label: "Feed Adv", type: "num", digits: 0 },
+      { key: "direct_ce", label: "dCE", type: "num", digits: 1 },
+      { key: "maternal_ce", label: "mCE", type: "num", digits: 1 },
+      { key: "tb_advantage", label: "TB", type: "num", digits: 1 },
+      { key: "legs", label: "Legs", type: "num", digits: 2 },
+      { key: "udder", label: "Udder", type: "num", digits: 2 },
+      { key: "type_merit", label: "TM", type: "num", digits: 2 },
+      { key: "hbn", label: "HBN", type: "text" },
+      { key: "sire_name", label: "Sire", type: "text" },
+      { key: "grandsire_name", label: "MGS", type: "text" },
+    ];
+    const SEARCH_KEYS = [
+      "bull_name", "bull_name_full", "sire_name", "grandsire_name",
+      "hbn", "supplier_gb", "proof",
+    ];
+    const TRAIT_FILTERS = [
+      { key: "pli", label: "£PLI", step: "1" },
+      { key: "dp_index", label: "£DP", step: "1" },
+      { key: "fw_index", label: "£FW", step: "1" },
+      { key: "cm_index", label: "£CM", step: "1" },
+      { key: "milk_kg", label: "Milk", step: "1" },
+      { key: "fat_kg", label: "Fat kg", step: "0.1" },
+      { key: "protein_kg", label: "Prot kg", step: "0.1" },
+      { key: "fat_pct", label: "Fat %", step: "0.01" },
+      { key: "protein_pct", label: "Prot %", step: "0.01" },
+      { key: "fertility_index", label: "FI", step: "0.1" },
+      { key: "lifespan_days", label: "LS", step: "1" },
+      { key: "scc", label: "SCC", step: "1" },
+      { key: "lameness", label: "Lame", step: "0.1" },
+      { key: "healthycow", label: "HealthyCow", step: "1" },
+      { key: "mastitis", label: "Mast", step: "1" },
+      { key: "tb_advantage", label: "TB", step: "0.1" },
+    ];
+    const BLANK_SUPPLIER = "";
+    const PAGE_SIZE = 100;
+    const SHARED_FIELDS = [
+      "ebv_conv", "fertility_weight", "lifespan_weight", "scc_value", "mastitis_weight",
+    ];
+    const SCHEMES = ["dp", "fw", "cm"];
+    const SCHEME_FIELDS = [
+      "fat_pct_base", "protein_pct_base", "milk_volume_base",
+      "fat_price", "protein_price", "volume_price", "lameness_weight",
+      "mastitis_weight",
+    ];
+    const SCHEME_CHECKS = ["include_lameness", "include_scc", "include_mastitis"];
+
+    let rows = [];
+    let fetchedAt = null;
+    const sortState = { key: "rank", dir: 1 };
+    let selectedSuppliers = null;
+    let currentPage = 1;
+    let renderTimer = 0;
+
+    function showMessage(text, kind) {
+      const el = document.getElementById("status-message");
+      el.textContent = text || "";
+      el.className = "message" + (kind ? " " + kind : "");
+    }
+
+    function applyPayload(data) {
+      rows = data.rows || [];
+      fetchedAt = data.fetched_at || null;
+      fillIndexForm(data.index_settings);
+      renderSupplierSlicers();
+      renderTable();
+    }
+
+    function fillIndexForm(settings) {
+      if (!settings) return;
+      SHARED_FIELDS.forEach((key) => {
+        const el = document.getElementById("idx-" + key);
+        if (el && settings[key] != null) el.value = settings[key];
+      });
+      const mast = document.getElementById("idx-include_mastitis");
+      if (mast) mast.checked = !!settings.include_mastitis;
+      SCHEMES.forEach((scheme) => {
+        const cfg = settings[scheme] || {};
+        SCHEME_FIELDS.forEach((key) => {
+          const el = document.getElementById("idx-" + scheme + "-" + key);
+          if (el && cfg[key] != null) el.value = cfg[key];
+        });
+        SCHEME_CHECKS.forEach((key) => {
+          const el = document.getElementById("idx-" + scheme + "-" + key);
+          if (el) el.checked = !!cfg[key];
+        });
+      });
+    }
+
+    function readIndexForm() {
+      const payload = { include_mastitis: document.getElementById("idx-include_mastitis").checked };
+      SHARED_FIELDS.forEach((key) => {
+        payload[key] = Number(document.getElementById("idx-" + key).value);
+      });
+      SCHEMES.forEach((scheme) => {
+        const cfg = {};
+        SCHEME_FIELDS.forEach((key) => {
+          const el = document.getElementById("idx-" + scheme + "-" + key);
+          if (el) cfg[key] = Number(el.value);
+        });
+        SCHEME_CHECKS.forEach((key) => {
+          const el = document.getElementById("idx-" + scheme + "-" + key);
+          if (el) cfg[key] = el.checked;
+        });
+        payload[scheme] = cfg;
+      });
+      return payload;
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function selectedLists() {
+      return [...document.querySelectorAll(".list-slicer .slicer-btn.selected")]
+        .map((btn) => btn.dataset.value);
+    }
+
+    function supplierKey(row) {
+      return (row.supplier_gb || "").trim();
+    }
+
+    function currentSuppliers() {
+      if (selectedSuppliers) return selectedSuppliers;
+      return [...document.querySelectorAll("#supplier-slicer .slicer-btn.selected")]
+        .map((btn) => btn.dataset.value);
+    }
+
+    function searchQuery() {
+      return document.getElementById("search-input").value.trim().toLowerCase();
+    }
+
+    function readTraitBounds() {
+      const bounds = [];
+      TRAIT_FILTERS.forEach((trait) => {
+        const minInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="min"]');
+        const maxInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="max"]');
+        const min = minInput && minInput.value !== "" ? Number(minInput.value) : null;
+        const max = maxInput && maxInput.value !== "" ? Number(maxInput.value) : null;
+        if (Number.isFinite(min) || Number.isFinite(max)) {
+          bounds.push({
+            key: trait.key,
+            min: Number.isFinite(min) ? min : null,
+            max: Number.isFinite(max) ? max : null,
+          });
+        }
+      });
+      return bounds;
+    }
+
+    function passesTraitFilters(row, bounds) {
+      return bounds.every((bound) => {
+        const value = Number(row[bound.key]);
+        if (!Number.isFinite(value)) return false;
+        if (bound.min !== null && value < bound.min) return false;
+        if (bound.max !== null && value > bound.max) return false;
+        return true;
+      });
+    }
+
+    function fmtNum(value, digits) {
+      if (value === null || value === undefined || value === "") return "—";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "—";
+      return num.toFixed(digits);
+    }
+
+    function sortValue(row, key) {
+      const value = row[key];
+      if (value === null || value === undefined || value === "") return key === "proof" ? "" : -Infinity;
+      if (typeof value === "number") return value;
+      const num = Number(value);
+      if (value !== "" && Number.isFinite(num) && String(value).trim() !== "") {
+        const col = COLUMNS.find((c) => c.key === key);
+        if (col && col.type === "num") return num;
+      }
+      return String(value).toLowerCase();
+    }
+
+    function filteredRows() {
+      const lists = selectedLists();
+      const suppliers = new Set(currentSuppliers());
+      const q = searchQuery();
+      const bounds = readTraitBounds();
+      return rows.filter((row) => {
+        if (lists.length && !lists.includes(row.list_type)) return false;
+        if (!suppliers.has(supplierKey(row))) return false;
+        if (!passesTraitFilters(row, bounds)) return false;
+        if (!q) return true;
+        return SEARCH_KEYS.some((key) => String(row[key] || "").toLowerCase().includes(q));
+      });
+    }
+
+    function scheduleRender(resetPage) {
+      if (resetPage) currentPage = 1;
+      window.clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(renderTable, 80);
+    }
+
+    function sortedRows(source) {
+      const copy = source.slice();
+      copy.sort((a, b) => {
+        const av = sortValue(a, sortState.key);
+        const bv = sortValue(b, sortState.key);
+        if (av < bv) return -1 * sortState.dir;
+        if (av > bv) return 1 * sortState.dir;
+        const an = String(a.bull_name || "");
+        const bn = String(b.bull_name || "");
+        return an.localeCompare(bn);
+      });
+      return copy;
+    }
+
+    function formatFetched(iso) {
+      if (!iso) return "";
+      const dt = new Date(iso);
+      if (Number.isNaN(dt.getTime())) return "";
+      return "Updated " + dt.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    function cellHtml(row, col) {
+      if (col.key === "proof") {
+        return '<span class="list-pill ' + escapeHtml(row.list_type) + '">' +
+          escapeHtml(row.proof || row.list_label) + "</span>";
+      }
+      if (col.key === "supplier_gb" && row.supplier_url) {
+        return '<a class="ext-link" href="' + escapeHtml(row.supplier_url) +
+          '" target="_blank" rel="noopener">' + escapeHtml(row.supplier_gb || "Link") + "</a>";
+      }
+      if (col.type === "num") return fmtNum(row[col.key], col.digits || 0);
+      const text = row[col.key];
+      return escapeHtml(text == null || text === "" ? "—" : text);
+    }
+
+    function uniqueSuppliers() {
+      const found = new Set(rows.map(supplierKey));
+      return [...found].sort((a, b) => {
+        if (a === BLANK_SUPPLIER) return 1;
+        if (b === BLANK_SUPPLIER) return -1;
+        return a.localeCompare(b);
+      });
+    }
+
+    function renderSupplierSlicers() {
+      const host = document.getElementById("supplier-slicer");
+      const keep = selectedSuppliers ? new Set(selectedSuppliers) : null;
+      const suppliers = uniqueSuppliers();
+      host.innerHTML = suppliers.map((code) => {
+        const selected = !keep || keep.has(code);
+        const label = code || "None";
+        return '<button type="button" class="slicer-btn' + (selected ? " selected" : "") +
+          '" data-value="' + escapeHtml(code) + '" aria-pressed="' + selected + '">' +
+          escapeHtml(label) + "</button>";
+      }).join("");
+      selectedSuppliers = [...host.querySelectorAll(".slicer-btn.selected")].map((btn) => btn.dataset.value);
+    }
+
+    function renderTraitFilters() {
+      const host = document.getElementById("trait-filters");
+      if (host.dataset.ready === "1") return;
+      host.innerHTML = TRAIT_FILTERS.map((trait) => {
+        return '<div class="trait-filter-row">' +
+          "<label>" + escapeHtml(trait.label) + "</label>" +
+          '<input type="number" data-key="' + trait.key + '" data-bound="min" step="' + trait.step + '" placeholder="—">' +
+          '<input type="number" data-key="' + trait.key + '" data-bound="max" step="' + trait.step + '" placeholder="—">' +
+          "</div>";
+      }).join("");
+      host.dataset.ready = "1";
+      host.addEventListener("input", () => scheduleRender(true));
+    }
+
+    function renderHead() {
+      const head = document.getElementById("bulls-head");
+      head.innerHTML = COLUMNS.map((col) => {
+        const cls = [
+          col.type === "num" ? "num" : "",
+          col.key === "bull_name" ? "bull-name" : "",
+          sortState.key === col.key ? (sortState.dir > 0 ? "sorted-asc" : "sorted-desc") : "",
+        ].filter(Boolean).join(" ");
+        return '<th data-sort="' + col.key + '" class="' + cls + '">' + escapeHtml(col.label) + "</th>";
+      }).join("");
+    }
+
+    function renderTable() {
+      renderHead();
+      const visible = sortedRows(filteredRows());
+      const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+      if (currentPage > pageCount) currentPage = pageCount;
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const pageRows = visible.slice(start, start + PAGE_SIZE);
+      const body = document.getElementById("table-body");
+      const meta = document.getElementById("meta-line");
+      const parts = [visible.length.toLocaleString("en-GB") + " bull" + (visible.length === 1 ? "" : "s")];
+      if (visible.length !== rows.length) {
+        parts.push("of " + rows.length.toLocaleString("en-GB"));
+      }
+      if (visible.length) {
+        parts.push("showing " + (start + 1) + "–" + (start + pageRows.length));
+      }
+      const fetched = formatFetched(fetchedAt);
+      if (fetched) parts.push(fetched);
+      meta.textContent = parts.join(" · ");
+      document.getElementById("page-label").textContent = "Page " + currentPage + " of " + pageCount;
+      document.getElementById("page-prev").disabled = currentPage <= 1;
+      document.getElementById("page-next").disabled = currentPage >= pageCount;
+
+      if (!visible.length) {
+        body.innerHTML = '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">No bulls match the current filters.</td></tr>';
+        return;
+      }
+      body.innerHTML = pageRows.map((row) => {
+        return "<tr>" + COLUMNS.map((col) => {
+          const classes = [
+            col.type === "num" ? "num" : "",
+            col.key === "bull_name" ? "bull-name" : "",
+            (col.key === "fat_pct" || col.key === "protein_pct" || col.key === "fertility_index") &&
+              Number.isFinite(Number(row[col.key])) && Number(row[col.key]) < 0
+              ? "negative-pct"
+              : "",
+          ].filter(Boolean);
+          const cls = classes.length ? ' class="' + classes.join(" ") + '"' : "";
+          const title = col.key === "bull_name" && row.bull_name
+            ? ' title="' + escapeHtml(row.bull_name) + '"'
+            : "";
+          return "<td" + cls + title + ">" + cellHtml(row, col) + "</td>";
+        }).join("") + "</tr>";
+      }).join("");
+    }
+
+    async function loadRows() {
+      document.getElementById("meta-line").textContent = "Loading…";
+      document.getElementById("table-body").innerHTML =
+        '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">Loading AHDB bull lists…</td></tr>';
+      try {
+        const res = await fetch(BULLS_URL);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.detail || "Failed to load bull lists");
+        applyPayload(data);
+        if (data.warning) showMessage(data.warning, "err");
+      } catch (err) {
+        rows = [];
+        document.getElementById("table-body").innerHTML =
+          '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">Could not load bull lists.</td></tr>';
+        document.getElementById("meta-line").textContent = "";
+        showMessage(err.message, "err");
+      }
+    }
+
+    function bindFilters() {
+      document.getElementById("search-input").addEventListener("input", () => scheduleRender(true));
+      document.querySelectorAll(".list-slicer .slicer-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(".list-slicer .slicer-btn.selected").length;
+          if (selected && count <= 1) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected"));
+          scheduleRender(true);
+        });
+      });
+      document.getElementById("supplier-slicer").addEventListener("click", (event) => {
+        const btn = event.target.closest(".slicer-btn");
+        if (!btn) return;
+        btn.classList.toggle("selected");
+        btn.setAttribute("aria-pressed", btn.classList.contains("selected"));
+        selectedSuppliers = [...document.querySelectorAll("#supplier-slicer .slicer-btn.selected")]
+          .map((item) => item.dataset.value);
+        scheduleRender(true);
+      });
+      document.getElementById("supplier-all").addEventListener("click", () => {
+        document.querySelectorAll("#supplier-slicer .slicer-btn").forEach((btn) => {
+          btn.classList.add("selected");
+          btn.setAttribute("aria-pressed", "true");
+        });
+        selectedSuppliers = [...document.querySelectorAll("#supplier-slicer .slicer-btn")]
+          .map((btn) => btn.dataset.value);
+        scheduleRender(true);
+      });
+      document.getElementById("supplier-none").addEventListener("click", () => {
+        document.querySelectorAll("#supplier-slicer .slicer-btn").forEach((btn) => {
+          btn.classList.remove("selected");
+          btn.setAttribute("aria-pressed", "false");
+        });
+        selectedSuppliers = [];
+        scheduleRender(true);
+      });
+      document.getElementById("clear-filters-btn").addEventListener("click", () => {
+        document.querySelectorAll("#trait-filters input").forEach((input) => { input.value = ""; });
+        scheduleRender(true);
+      });
+      document.getElementById("page-prev").addEventListener("click", () => {
+        if (currentPage <= 1) return;
+        currentPage -= 1;
+        renderTable();
+      });
+      document.getElementById("page-next").addEventListener("click", () => {
+        currentPage += 1;
+        renderTable();
+      });
+      document.getElementById("bulls-head").addEventListener("click", (event) => {
+        const th = event.target.closest("th[data-sort]");
+        if (!th) return;
+        const key = th.dataset.sort;
+        if (sortState.key === key) {
+          sortState.dir *= -1;
+        } else {
+          sortState.key = key;
+          const col = COLUMNS.find((c) => c.key === key);
+          sortState.dir = col && col.type === "num" ? -1 : 1;
+        }
+        currentPage = 1;
+        renderTable();
+      });
+      document.getElementById("settings-toggle").addEventListener("click", () => {
+        const panel = document.getElementById("index-settings-panel");
+        const btn = document.getElementById("settings-toggle");
+        const open = !panel.classList.contains("open");
+        panel.classList.toggle("open", open);
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      document.getElementById("index-settings-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const btn = event.submitter || document.querySelector("#index-settings-form button[type='submit']");
+        if (btn) btn.disabled = true;
+        showMessage("Saving index settings…");
+        try {
+          const res = await fetch(BULLS_INDEX_URL, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(readIndexForm()),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || data.detail || "Could not save index settings");
+          applyPayload(data);
+          showMessage("£DP, £FW and £CM indexes updated.", "ok");
+        } catch (err) {
+          showMessage(err.message, "err");
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      });
+      document.getElementById("reset-index-btn").addEventListener("click", async () => {
+        if (!window.confirm("Reset £DP, £FW and £CM to the original spreadsheet formula?")) return;
+        const btn = document.getElementById("reset-index-btn");
+        btn.disabled = true;
+        showMessage("Resetting index settings…");
+        try {
+          const res = await fetch(BULLS_INDEX_RESET_URL, { method: "POST" });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || data.detail || "Could not reset index settings");
+          applyPayload(data);
+          showMessage("Indexes restored to spreadsheet defaults.", "ok");
+        } catch (err) {
+          showMessage(err.message, "err");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        if (!window.confirm("Download the latest AHDB genomic and proven bull lists? This takes a few seconds.")) {
+          return;
+        }
+        const btn = document.getElementById("refresh-btn");
+        btn.disabled = true;
+        showMessage("Refreshing from AHDB…");
+        try {
+          const res = await fetch(BULLS_REFRESH_URL, { method: "POST" });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || data.detail || "Refresh failed");
+          applyPayload(data);
+          showMessage("Loaded " + (data.rows_imported || rows.length).toLocaleString("en-GB") + " bulls from AHDB.", "ok");
+        } catch (err) {
+          showMessage(err.message, "err");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+
+    bindFilters();
+    renderTraitFilters();
+    renderHead();
+    loadRows();
+  </script>
+{% endblock %}

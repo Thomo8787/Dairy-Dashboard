@@ -1,9 +1,11 @@
 """PostgreSQL storage for dairy dashboard data."""
 
 import os
+import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import (
@@ -250,6 +252,59 @@ class CowEvent(Base):
     import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
+class SalesPaymentRecord(Base):
+    """Confirmed payment for a sold animal; survives herd event reimports."""
+
+    __tablename__ = "sales_payment_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "farm",
+            "cow_id",
+            "etag",
+            "event_date",
+            name="uq_sales_payment_natural_key",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    cow_id = Column(String(64), nullable=False, default="", index=True)
+    etag = Column(String(64), nullable=False, default="", index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    paid_at = Column(DateTime)
+    archived_at = Column(DateTime)
+    unarchived_at = Column(DateTime)
+    confirmed_by_user_id = Column(Integer, ForeignKey("users.id"))
+
+
+class CattleSaleLine(Base):
+    """Per-animal line from a cattle remittance PDF (Pickstock FPF, etc.)."""
+
+    __tablename__ = "cattle_sale_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "farm",
+            "etag",
+            "sale_date",
+            name="uq_cattle_sale_farm_etag_date",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    etag = Column(String(64), nullable=False, index=True)
+    sale_date = Column(Date, nullable=False, index=True)
+    cold_weight_kg = Column(Float, nullable=False)
+    reject_kg = Column(Float)
+    kill_date = Column(Date)
+    amount_gbp = Column(Float, nullable=False)
+    buyer = Column(String(64), index=True)
+    source_message_id = Column(String(256))
+    source_file = Column(String(256))
+    source_received = Column(DateTime)
+    imported_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class HerdBirth(Base):
     """Birth records from DairyComp DCEXPORT *BORN.CSV files."""
 
@@ -479,6 +534,142 @@ class GenomicResult(Base):
     body_depth = Column(Float)
     mature_weight = Column(Float)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AhdbBull(Base):
+    """AHDB Holstein bull proofs (genomic, marketed proven, and top international)."""
+
+    __tablename__ = "ahdb_bulls"
+    __table_args__ = (UniqueConstraint("hbn", name="uq_ahdb_bull_hbn"),)
+
+    id = Column(Integer, primary_key=True)
+    list_type = Column(String(16), index=True, nullable=False)
+    hbn = Column(String(32), index=True, nullable=False)
+    rank = Column(Integer)
+    bull_name = Column(String(128))
+    bull_name_full = Column(String(512))
+    breed_code = Column(String(16))
+    pli = Column(Float)
+    pli_reliability = Column(Float)
+    milk_kg = Column(Float)
+    fat_kg = Column(Float)
+    protein_kg = Column(Float)
+    fat_pct = Column(Float)
+    protein_pct = Column(Float)
+    healthycow = Column(Float)
+    envirocow = Column(Float)
+    fertility_index = Column(Float)
+    calf_survival = Column(Float)
+    lifespan_days = Column(Float)
+    scc = Column(Float)
+    mastitis = Column(Float)
+    lameness = Column(Float)
+    digital_dermatitis = Column(Float)
+    gestation_length = Column(Float)
+    dairy_carcass_index = Column(Float)
+    maintenance = Column(Float)
+    feed_advantage = Column(Float)
+    direct_ce = Column(Float)
+    maternal_ce = Column(Float)
+    tb_advantage = Column(Float)
+    legs = Column(Float)
+    udder = Column(Float)
+    type_merit = Column(Float)
+    supplier_gb = Column(String(64))
+    supplier_ni = Column(String(64))
+    genomic_indicator = Column(String(16))
+    sexed_gb = Column(String(16))
+    uk_proven = Column(String(16))
+    sire_name = Column(String(128))
+    grandsire_name = Column(String(128))
+    supplier_url = Column(String(256))
+    fetched_at = Column(DateTime, index=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "list_type": "proven" if self.list_type != "genomic" else "genomic",
+            "proof": "G" if self.list_type == "genomic" else "P",
+            "list_label": "G" if self.list_type == "genomic" else "P",
+            "hbn": self.hbn,
+            "rank": self.rank,
+            "bull_name": _clean_bull_name(self.bull_name),
+            "bull_name_full": self.bull_name_full,
+            "breed_code": self.breed_code,
+            "pli": self.pli,
+            "pli_reliability": self.pli_reliability,
+            "milk_kg": self.milk_kg,
+            "fat_kg": self.fat_kg,
+            "protein_kg": self.protein_kg,
+            "fat_pct": self.fat_pct,
+            "protein_pct": self.protein_pct,
+            "healthycow": self.healthycow,
+            "envirocow": self.envirocow,
+            "fertility_index": self.fertility_index,
+            "calf_survival": self.calf_survival,
+            "lifespan_days": self.lifespan_days,
+            "scc": self.scc,
+            "mastitis": self.mastitis,
+            "lameness": self.lameness,
+            "digital_dermatitis": self.digital_dermatitis,
+            "gestation_length": self.gestation_length,
+            "dairy_carcass_index": self.dairy_carcass_index,
+            "maintenance": self.maintenance,
+            "feed_advantage": self.feed_advantage,
+            "direct_ce": self.direct_ce,
+            "maternal_ce": self.maternal_ce,
+            "tb_advantage": self.tb_advantage,
+            "legs": self.legs,
+            "udder": self.udder,
+            "type_merit": self.type_merit,
+            "supplier_gb": self.supplier_gb,
+            "supplier_ni": self.supplier_ni,
+            "genomic_indicator": self.genomic_indicator,
+            "sexed_gb": self.sexed_gb,
+            "uk_proven": self.uk_proven,
+            "sire_name": self.sire_name,
+            "grandsire_name": self.grandsire_name,
+            "supplier_url": self.supplier_url,
+            "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
+        }
+
+
+def _str_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value if text_value else None
+
+
+_BULL_NAME_CODES = re.compile(r"\s+A[12]A[12]\b.*$", re.IGNORECASE)
+
+
+def _clean_bull_name(name: str | None) -> str | None:
+    """Drop AHDB haplotype / kappa-casein codes from the display name."""
+    cleaned = _str_or_none(name)
+    if cleaned is None:
+        return None
+    stripped = _BULL_NAME_CODES.sub("", cleaned).strip()
+    return stripped or cleaned
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 class NmlMilkResult(Base):

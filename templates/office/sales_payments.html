@@ -1,0 +1,1071 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_heading }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+    }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-actions {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--line);
+    }
+    .filter-actions button { width: 100%; margin: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .filter-select { width: 100%; margin: 0; }
+    .slicer-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .reason-slicer { grid-template-columns: 1fr 1fr; }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .slicer-btn[data-value="CULL"].selected {
+      background: #eef2f6;
+      border-color: #64748b;
+      color: #334155;
+    }
+    .slicer-btn[data-value="TB"].selected {
+      background: #fee2e2;
+      border-color: #ef4444;
+      color: #991b1b;
+    }
+    .slicer-btn[data-value="OFS"].selected {
+      background: #fef3c7;
+      border-color: #f59e0b;
+      color: #92400e;
+    }
+    .slicer-btn[data-value="Beef"].selected {
+      background: #f5e6d3;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="Dairy"].selected {
+      background: #dbeafe;
+      border-color: #3b82f6;
+      color: #1e40af;
+    }
+    .amount-slicer .slicer-btn:not(.selected) {
+      background: #f3f4f6;
+      border-color: #e5e7eb;
+      color: #9ca3af;
+      opacity: 0.85;
+    }
+    .slicer-btn[data-value="all"].selected {
+      background: #eef2f6;
+      border-color: #64748b;
+      color: #334155;
+    }
+    .slicer-btn[data-value="has_amount"].selected {
+      background: #ecfdf5;
+      border-color: #10b981;
+      color: #065f46;
+    }
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label {
+      font-weight: 600;
+      min-width: 4.5rem;
+      text-align: right;
+    }
+    .content-panel { min-width: 0; }
+    .meta-line {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .meta-line.is-loading { font-style: italic; }
+    .view-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .view-tab {
+      padding: 0.45rem 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .view-tab.active {
+      background: #1e3a5f;
+      border-color: #1e3a5f;
+      color: #fff;
+    }
+    .action-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .action-bar .selection-count {
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+    button.primary {
+      appearance: none;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+    }
+    button.primary.small,
+    button.secondary.small { font-size: 0.85rem; }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    #sales-payments-table {
+      width: 100%;
+      table-layout: auto;
+    }
+    #sales-payments-table th,
+    #sales-payments-table td {
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      white-space: nowrap;
+    }
+    #sales-payments-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    #sales-payments-table tbody tr.row-selected { background: #dcfce7; }
+    #sales-payments-table tbody tr.row-has-amount { background: #ecfdf5; }
+    #sales-payments-table tbody tr.row-has-amount.row-highlight {
+      outline: 2px solid #10b981;
+      outline-offset: -2px;
+    }
+    #sales-payments-table tbody tr:hover { background: #f8fafc; }
+    #sales-payments-table tbody tr.row-has-amount:hover { background: #d1fae5; }
+    #sales-payments-table tbody tr.row-selected:hover { background: #bbf7d0; }
+    #sales-payments-table td.amount-cell {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #sales-payments-table .amount-rejected {
+      color: #dc2626;
+      font-weight: 700;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 16rem);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .empty-state {
+      padding: 2rem;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .reason-pill {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .reason-pill-CULL { background: #eef2f6; color: #334155; }
+    .reason-pill-TB { background: #fee2e2; color: #991b1b; }
+    .reason-pill-OFS { background: #fef3c7; color: #92400e; }
+    .reason-pill-Beef { background: #f5e6d3; color: #5c2e0a; }
+    .reason-pill-Dairy { background: #dbeafe; color: #1e40af; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Reason</span>
+          <div class="slicer-group reason-slicer" role="group" aria-label="Sales reason">
+            <button type="button" class="slicer-btn selected" data-value="CULL" aria-pressed="true">CULL</button>
+            <button type="button" class="slicer-btn selected" data-value="TB" aria-pressed="true">TB</button>
+            <button type="button" class="slicer-btn selected" data-value="OFS" aria-pressed="true">OFS</button>
+            <button type="button" class="slicer-btn selected" data-value="Beef" aria-pressed="true">Beef</button>
+            <button type="button" class="slicer-btn selected" data-value="Dairy" aria-pressed="true">Dairy</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">DEST</span>
+          <select id="dest-select" class="filter-select">
+            <option value="">Any</option>
+          </select>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Sale amount</span>
+          <div class="slicer-group amount-slicer" role="group" aria-label="Sale amount filter">
+            <button type="button" class="slicer-btn selected" data-value="all" aria-pressed="true">All</button>
+            <button type="button" class="slicer-btn" data-value="has_amount" aria-pressed="false">With amount</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Date sold</span>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="min-date-label">—</span></label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0">
+            <label>To <span class="month-label" id="max-date-label">—</span></label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0">
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
+        </div>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      <p class="meta-line" id="meta-line"></p>
+      <div class="view-tabs" role="tablist" aria-label="Payment list">
+        <button type="button" class="view-tab active" data-status="active" role="tab" aria-selected="true">Active</button>
+        <button type="button" class="view-tab" data-status="archived" role="tab" aria-selected="false">Archive</button>
+      </div>
+      <div class="action-bar" id="action-bar">
+        <span class="selection-count" id="selection-count">0 selected</span>
+        {% if perms.action('office_admin.sales_payment') %}
+        <button type="button" class="primary small" id="confirm-btn" disabled>Confirm payment</button>
+        <button type="button" class="secondary small" id="select-amount-btn" disabled hidden>Select all with amount</button>
+        <button type="button" class="secondary small" id="unarchive-btn" disabled hidden>Unarchive</button>
+        {% endif %}
+      </div>
+      <div id="empty-state" class="empty-state" style="display:none;"></div>
+      <div class="table-wrap" id="table-wrap" style="display:none;">
+        <table id="sales-payments-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const CAN_EDIT = {{ 'true' if perms.action('office_admin.sales_payment') else 'false' }};
+    const REASONS = ["CULL", "TB", "OFS", "Beef", "Dairy"];
+    const DEFAULT_MONTH_SPAN = 12;
+    let currentStatus = "active";
+    let rows = [];
+    let selectedKeys = new Set();
+    let monthList = [];
+    let dateBounds = null;
+    let loadController = null;
+    let dateLoadTimer = null;
+    let loadingCount = 0;
+    let highlightEtag = null;
+
+    function fmtNum(v, dp = 2) {
+      if (v == null || v === "") return "—";
+      const n = Number(v);
+      if (Number.isNaN(n)) return "—";
+      return n.toLocaleString("en-GB", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const [y, m, d] = String(iso).split("-").map(Number);
+      if (!y || !m || !d) return iso;
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB");
+    }
+
+    function rowHasSaleAmount(row) {
+      return Boolean(row.has_sale_amount || row.sale_rejected);
+    }
+
+    function formatAmountCell(row) {
+      if (row.sale_rejected) return '<span class="amount-rejected">Rejected</span>';
+      if (row.amount_gbp != null && row.amount_gbp > 0) return `£${fmtNum(row.amount_gbp)}`;
+      return "—";
+    }
+
+    function rowKey(row) { return JSON.stringify(row.payment_key); }
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")].map(btn => btn.dataset.value);
+    }
+
+    function selectedReasons() {
+      return [...document.querySelectorAll(".reason-slicer .slicer-btn.selected")].map(btn => btn.dataset.value);
+    }
+
+    function amountFilterValue() {
+      const selected = document.querySelector(".amount-slicer .slicer-btn.selected");
+      return selected?.dataset.value === "has_amount" ? "has_amount" : "all";
+    }
+
+    function bindAmountSlicer() {
+      document.querySelectorAll(".amount-slicer .slicer-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (btn.classList.contains("selected")) return;
+          document.querySelectorAll(".amount-slicer .slicer-btn").forEach(other => {
+            const active = other === btn;
+            other.classList.toggle("selected", active);
+            other.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+          refreshFilters(false);
+        });
+      });
+    }
+
+    function resetAmountSlicer() {
+      document.querySelectorAll(".amount-slicer .slicer-btn").forEach(btn => {
+        const active = btn.dataset.value === "all";
+        btn.classList.toggle("selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function applySlicerSelection(selector, values) {
+      if (!values.length) return;
+      const valueSet = new Set(values);
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        const active = valueSet.has(btn.dataset.value);
+        btn.classList.toggle("selected", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function bindSlicers(selector, minSelected = 1) {
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        btn.addEventListener("click", () => {
+          const selected = btn.classList.contains("selected");
+          const count = document.querySelectorAll(`${selector} .slicer-btn.selected`).length;
+          if (selected && count <= minSelected) return;
+          btn.classList.toggle("selected", !selected);
+          btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+          refreshFilters(true);
+        });
+      });
+    }
+
+    function resetSlicers(selector) {
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed", "true");
+      });
+    }
+
+    function parseIsoDate(iso) {
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function buildMonthList(minIso, maxIso) {
+      const months = [];
+      let d = parseIsoDate(minIso);
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = parseIsoDate(maxIso);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(new Date(d));
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      return months;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      const yr = String(date.getFullYear()).slice(-2);
+      return `${mon}-${yr}`;
+    }
+
+    function toIsoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function lastDayOfMonth(date) {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    }
+
+    function updateDateLabels() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      const minLabel = document.getElementById("min-date-label");
+      const maxLabel = document.getElementById("max-date-label");
+      if (!monthList.length) {
+        minLabel.textContent = "—";
+        maxLabel.textContent = "—";
+        return;
+      }
+      minLabel.textContent = monthList[parseInt(minRange.value, 10)]
+        ? formatMonthLabel(monthList[parseInt(minRange.value, 10)]) : "—";
+      maxLabel.textContent = monthList[parseInt(maxRange.value, 10)]
+        ? formatMonthLabel(monthList[parseInt(maxRange.value, 10)]) : "—";
+    }
+
+    function setLoading(isLoading) {
+      loadingCount = Math.max(0, loadingCount + (isLoading ? 1 : -1));
+      const meta = document.getElementById("meta-line");
+      meta.classList.toggle("is-loading", loadingCount > 0);
+      if (loadingCount > 0 && !rows.length) meta.textContent = "Loading sales payments…";
+    }
+
+    function defaultSliderIndices(maxIdx) {
+      return { minIdx: Math.max(0, maxIdx - (DEFAULT_MONTH_SPAN - 1)), maxIdx };
+    }
+
+    function monthKey(date) { return `${date.getFullYear()}-${date.getMonth()}`; }
+
+    function findMonthIndex(date) {
+      return monthList.findIndex(month => monthKey(month) === monthKey(date));
+    }
+
+    function syncDateBounds(bounds, resetToFull = false, useLastTwelveMonths = false) {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      let preservedFrom = null;
+      let preservedTo = null;
+      if (!resetToFull && monthList.length) {
+        const lo = parseInt(minRange.value, 10);
+        const hi = parseInt(maxRange.value, 10);
+        if (!Number.isNaN(lo) && monthList[lo]) preservedFrom = monthList[lo];
+        if (!Number.isNaN(hi) && monthList[hi]) preservedTo = monthList[hi];
+      }
+      if (!bounds?.min || !bounds?.max) {
+        monthList = [];
+        dateBounds = null;
+        minRange.min = 0; minRange.max = 0; maxRange.min = 0; maxRange.max = 0;
+        minRange.value = 0; maxRange.value = 0;
+        updateDateLabels();
+        return;
+      }
+      dateBounds = bounds;
+      monthList = buildMonthList(bounds.min, bounds.max);
+      const maxIdx = Math.max(0, monthList.length - 1);
+      minRange.min = 0; minRange.max = maxIdx; maxRange.min = 0; maxRange.max = maxIdx;
+      if (resetToFull || !preservedFrom || !preservedTo) {
+        resetDateSlidersToFullRange(resetToFull && useLastTwelveMonths);
+        return;
+      }
+      const fromIdx = findMonthIndex(preservedFrom);
+      const toIdx = findMonthIndex(preservedTo);
+      minRange.value = fromIdx >= 0 ? fromIdx : 0;
+      maxRange.value = toIdx >= 0 ? toIdx : maxIdx;
+      if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) maxRange.value = minRange.value;
+      updateDateLabels();
+    }
+
+    function resetDateSlidersToFullRange(useLastTwelveMonths = false) {
+      if (!monthList.length) return;
+      const maxIdx = Math.max(0, monthList.length - 1);
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      if (useLastTwelveMonths) {
+        const { minIdx, maxIdx: hi } = defaultSliderIndices(maxIdx);
+        minRange.value = minIdx;
+        maxRange.value = hi;
+      } else {
+        minRange.value = 0;
+        maxRange.value = maxIdx;
+      }
+      updateDateLabels();
+    }
+
+    function appendListParams(params, key, values) {
+      values.forEach(value => params.append(key, value));
+      return params;
+    }
+
+    function buildFilterOptionsParams() {
+      const params = new URLSearchParams();
+      params.set("status", currentStatus);
+      appendListParams(params, "farm", selectedFarms());
+      appendListParams(params, "reason", selectedReasons());
+      return params;
+    }
+
+    function buildQueryParams(includeDateRange = true, dateOverride = null) {
+      const params = new URLSearchParams();
+      params.set("status", currentStatus);
+      params.set("include_date_bounds", "false");
+      appendListParams(params, "farm", selectedFarms());
+      appendListParams(params, "reason", selectedReasons());
+      const dest = document.getElementById("dest-select").value;
+      if (dest) params.set("dest", dest);
+      if (dateOverride) {
+        params.set("event_from", dateOverride.from);
+        params.set("event_to", dateOverride.to);
+      } else if (includeDateRange && monthList.length) {
+        const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+        const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+        params.set("event_from", toIsoDate(monthList[minIdx]));
+        params.set("event_to", toIsoDate(lastDayOfMonth(monthList[maxIdx])));
+      }
+      if (amountFilterValue() === "has_amount") params.set("has_amount", "true");
+      return params;
+    }
+
+    function getSliderDateRange() {
+      if (!monthList.length) return null;
+      const minIdx = parseInt(document.getElementById("min-date-range").value, 10);
+      const maxIdx = parseInt(document.getElementById("max-date-range").value, 10);
+      if (Number.isNaN(minIdx) || Number.isNaN(maxIdx) || !monthList[minIdx] || !monthList[maxIdx]) return null;
+      return { from: toIsoDate(monthList[minIdx]), to: toIsoDate(lastDayOfMonth(monthList[maxIdx])) };
+    }
+
+    function provisionalLastTwelveMonthsRange() {
+      const today = new Date();
+      const from = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+      return { from: toIsoDate(from), to: toIsoDate(lastDayOfMonth(today)) };
+    }
+
+    function rangesDiffer(a, b) {
+      return !a || !b || a.from !== b.from || a.to !== b.to;
+    }
+
+    let rowByKey = new Map();
+    let tableEventsBound = false;
+
+    function rebuildRowIndex() {
+      rowByKey = new Map(rows.map(row => [rowKey(row), row]));
+    }
+
+    function bindTableBodyEvents() {
+      if (tableEventsBound) return;
+      tableEventsBound = true;
+      const body = document.getElementById("table-body");
+      body.addEventListener("change", event => {
+        const input = event.target;
+        if (!input.matches(".row-select, .row-paid")) return;
+        const key = decodeURIComponent(input.dataset.key);
+        const row = rowByKey.get(key);
+        if (!row) return;
+        toggleRowSelection(row, input.checked);
+        const encodedKey = encodeURIComponent(key);
+        body.querySelectorAll(`tr[data-key="${encodedKey}"]`).forEach(tr => {
+          tr.classList.toggle("row-selected", input.checked);
+          tr.querySelectorAll(".row-select, .row-paid").forEach(box => { box.checked = input.checked; });
+        });
+        const selectAll = document.getElementById("select-all");
+        if (selectAll) selectAll.checked = rows.length > 0 && selectedKeys.size === rows.length;
+      });
+    }
+
+    function renderDestOptions(options) {
+      const select = document.getElementById("dest-select");
+      const current = select.value;
+      select.innerHTML = '<option value="">Any</option>';
+      (options || []).forEach(dest => {
+        const opt = document.createElement("option");
+        opt.value = dest;
+        opt.textContent = dest;
+        select.appendChild(opt);
+      });
+      if (current && [...select.options].some(o => o.value === current)) select.value = current;
+    }
+
+    function renderTableHead() {
+      const head = document.getElementById("table-head");
+      const selectCol = CAN_EDIT
+        ? `<th><input type="checkbox" id="select-all" aria-label="Select all visible rows"></th>` : "";
+      const paidCol = currentStatus === "active" && CAN_EDIT ? "<th>Paid?</th>" : "";
+      head.innerHTML = `
+        <tr>
+          ${selectCol}
+          <th>ID</th>
+          <th>Farm</th>
+          <th>ETAG</th>
+          <th>Age (mo)</th>
+          <th>Gender</th>
+          <th>Date sold</th>
+          <th>DEST</th>
+          <th>Reason</th>
+          <th class="amount-cell">Amount (£)</th>
+          ${paidCol}
+        </tr>`;
+      if (CAN_EDIT) document.getElementById("select-all")?.addEventListener("change", onSelectAllChange);
+    }
+
+    function onSelectAllChange(event) {
+      const checked = event.target.checked;
+      selectedKeys.clear();
+      if (checked) rows.forEach(row => selectedKeys.add(rowKey(row)));
+      renderTableBody();
+      updateActionBar();
+    }
+
+    function toggleRowSelection(row, checked) {
+      const key = rowKey(row);
+      if (checked) selectedKeys.add(key);
+      else selectedKeys.delete(key);
+      updateActionBar();
+    }
+
+    function updateActionBar() {
+      const count = selectedKeys.size;
+      document.getElementById("selection-count").textContent = `${count.toLocaleString("en-GB")} selected`;
+      const confirmBtn = document.getElementById("confirm-btn");
+      const selectAmountBtn = document.getElementById("select-amount-btn");
+      const unarchiveBtn = document.getElementById("unarchive-btn");
+      const rowsWithAmount = rows.filter(row => rowHasSaleAmount(row)).length;
+      if (confirmBtn) {
+        confirmBtn.disabled = count === 0;
+        confirmBtn.hidden = currentStatus !== "active";
+      }
+      if (selectAmountBtn) {
+        selectAmountBtn.disabled = rowsWithAmount === 0;
+        selectAmountBtn.hidden = currentStatus !== "active";
+      }
+      if (unarchiveBtn) {
+        unarchiveBtn.disabled = count === 0;
+        unarchiveBtn.hidden = currentStatus !== "archived";
+      }
+    }
+
+    function selectAllWithAmount() {
+      selectedKeys.clear();
+      rows.forEach(row => { if (rowHasSaleAmount(row)) selectedKeys.add(rowKey(row)); });
+      renderTableBody();
+      updateActionBar();
+    }
+
+    function renderTableBody() {
+      const body = document.getElementById("table-body");
+      const showPaidCol = currentStatus === "active" && CAN_EDIT;
+      body.innerHTML = rows.map(row => {
+        const key = rowKey(row);
+        const selected = selectedKeys.has(key);
+        const selectCell = CAN_EDIT
+          ? `<td><input type="checkbox" class="row-select" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Select row"></td>` : "";
+        const paidCell = showPaidCol
+          ? `<td><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></td>` : "";
+        const hasAmount = rowHasSaleAmount(row);
+        const rowClasses = [
+          selected ? "row-selected" : "",
+          hasAmount ? "row-has-amount" : "",
+          highlightEtag && row.etag === highlightEtag ? "row-highlight" : "",
+        ].filter(Boolean).join(" ");
+        return `
+          <tr class="${rowClasses}" data-key="${encodeURIComponent(key)}">
+            ${selectCell}
+            <td>${row.cow_id || "—"}</td>
+            <td>${row.farm || "—"}</td>
+            <td>${row.etag || "—"}</td>
+            <td>${row.age_months != null ? row.age_months : "—"}</td>
+            <td>${row.gender || "—"}</td>
+            <td>${fmtDate(row.event_date)}</td>
+            <td>${row.dest || "—"}</td>
+            <td><span class="reason-pill reason-pill-${row.sales_reason}">${row.sales_reason}</span></td>
+            <td class="amount-cell">${formatAmountCell(row)}</td>
+            ${paidCell}
+          </tr>`;
+      }).join("");
+    }
+
+    function renderTable() {
+      renderTableHead();
+      renderTableBody();
+      updateActionBar();
+      if (highlightEtag) {
+        document.querySelector("#table-body tr.row-highlight")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+
+    function applyRowsResponse(data) {
+      const empty = document.getElementById("empty-state");
+      const wrap = document.getElementById("table-wrap");
+      const meta = document.getElementById("meta-line");
+      rows = data.rows || [];
+      selectedKeys.clear();
+      rebuildRowIndex();
+      const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
+      meta.textContent = `${label}: ${rows.length.toLocaleString("en-GB")}`;
+      if (!rows.length) {
+        empty.style.display = "";
+        empty.textContent = currentStatus === "active"
+          ? "No unpaid sold animals match the selected filters."
+          : "No archived sales match the selected filters.";
+        wrap.style.display = "none";
+        updateActionBar();
+        return;
+      }
+      empty.style.display = "none";
+      wrap.style.display = "";
+      renderTable();
+    }
+
+    async function loadFilterOptions() {
+      const farms = selectedFarms();
+      const reasons = selectedReasons();
+      if (!farms.length || !reasons.length) return null;
+      const res = await fetch(`/office/api/sales-payments/filter-options?${buildFilterOptionsParams()}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      renderDestOptions(data.dest_options || []);
+      return data.date_bounds ?? null;
+    }
+
+    async function fetchRows(dateOverride = null, { manageLoading = true } = {}) {
+      const farms = selectedFarms();
+      const reasons = selectedReasons();
+      const empty = document.getElementById("empty-state");
+      const wrap = document.getElementById("table-wrap");
+      const meta = document.getElementById("meta-line");
+      if (!farms.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one farm.";
+        wrap.style.display = "none";
+        meta.textContent = "";
+        rows = [];
+        selectedKeys.clear();
+        rebuildRowIndex();
+        return false;
+      }
+      if (!reasons.length) {
+        empty.style.display = "";
+        empty.textContent = "Please select at least one sales reason.";
+        wrap.style.display = "none";
+        meta.textContent = "";
+        rows = [];
+        selectedKeys.clear();
+        rebuildRowIndex();
+        return false;
+      }
+      if (loadController) loadController.abort();
+      loadController = new AbortController();
+      if (manageLoading) setLoading(true);
+      try {
+        const useDateRange = dateOverride || monthList.length > 0;
+        const res = await fetch(
+          `/office/api/sales-payments?${buildQueryParams(useDateRange, dateOverride)}`,
+          { signal: loadController.signal }
+        );
+        if (!res.ok) {
+          empty.style.display = "";
+          empty.textContent = "Failed to load sales payments.";
+          wrap.style.display = "none";
+          meta.textContent = "";
+          return false;
+        }
+        applyRowsResponse(await res.json());
+        return true;
+      } catch (error) {
+        if (error.name === "AbortError") return false;
+        empty.style.display = "";
+        empty.textContent = "Failed to load sales payments.";
+        wrap.style.display = "none";
+        meta.textContent = "";
+        return false;
+      } finally {
+        if (manageLoading) setLoading(false);
+      }
+    }
+
+    async function refreshFilters(resetDateRange = true) {
+      const farms = selectedFarms();
+      const reasons = selectedReasons();
+      if (!farms.length || !reasons.length) {
+        await fetchRows();
+        return;
+      }
+      setLoading(true);
+      try {
+        const provisionalRange = resetDateRange || !monthList.length
+          ? provisionalLastTwelveMonthsRange()
+          : getSliderDateRange();
+        const [, bounds] = await Promise.all([
+          fetchRows(provisionalRange, { manageLoading: false }),
+          loadFilterOptions(),
+        ]);
+        if (bounds) syncDateBounds(bounds, resetDateRange, resetDateRange);
+        else if (resetDateRange) syncDateBounds(null, true, false);
+        const actualRange = getSliderDateRange();
+        if (rangesDiffer(provisionalRange, actualRange)) {
+          await fetchRows(null, { manageLoading: false });
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function scheduleRowsReload() {
+      if (dateLoadTimer) clearTimeout(dateLoadTimer);
+      dateLoadTimer = setTimeout(() => fetchRows(), 250);
+    }
+
+    function removeRowsByPaymentKeys(items) {
+      const keys = new Set(items.map(item => JSON.stringify(item)));
+      rows = rows.filter(row => !keys.has(rowKey(row)));
+      selectedKeys.clear();
+      rebuildRowIndex();
+    }
+
+    function updateMetaFromRows() {
+      const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
+      document.getElementById("meta-line").textContent =
+        `${label}: ${rows.length.toLocaleString("en-GB")}`;
+    }
+
+    function applyRowsToView() {
+      updateMetaFromRows();
+      const empty = document.getElementById("empty-state");
+      const wrap = document.getElementById("table-wrap");
+      if (!rows.length) {
+        empty.style.display = "";
+        empty.textContent = currentStatus === "active"
+          ? "No unpaid sold animals match the selected filters."
+          : "No archived sales match the selected filters.";
+        wrap.style.display = "none";
+      } else {
+        empty.style.display = "none";
+        wrap.style.display = "";
+        renderTable();
+      }
+      updateActionBar();
+    }
+
+    function selectedItems() {
+      return rows.filter(row => selectedKeys.has(rowKey(row))).map(row => row.payment_key);
+    }
+
+    async function confirmSelected() {
+      const items = selectedItems();
+      if (!items.length) return;
+      const confirmBtn = document.getElementById("confirm-btn");
+      const prevLabel = confirmBtn?.textContent;
+      if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = "Confirming…"; }
+      try {
+        const res = await fetch("/office/api/sales-payments/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        if (!res.ok) { alert("Failed to confirm payments."); return; }
+        removeRowsByPaymentKeys(items);
+        applyRowsToView();
+      } finally {
+        if (confirmBtn) {
+          confirmBtn.textContent = prevLabel || "Confirm payment";
+          updateActionBar();
+        }
+      }
+    }
+
+    async function unarchiveSelected() {
+      const items = selectedItems();
+      if (!items.length) return;
+      const unarchiveBtn = document.getElementById("unarchive-btn");
+      const prevLabel = unarchiveBtn?.textContent;
+      if (unarchiveBtn) { unarchiveBtn.disabled = true; unarchiveBtn.textContent = "Unarchiving…"; }
+      try {
+        const res = await fetch("/office/api/sales-payments/unarchive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        if (!res.ok) { alert("Failed to unarchive sales."); return; }
+        removeRowsByPaymentKeys(items);
+        applyRowsToView();
+      } finally {
+        if (unarchiveBtn) {
+          unarchiveBtn.textContent = prevLabel || "Unarchive";
+          updateActionBar();
+        }
+      }
+    }
+
+    function setStatus(status) {
+      currentStatus = status;
+      document.querySelectorAll(".view-tab").forEach(tab => {
+        const active = tab.dataset.status === status;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      selectedKeys.clear();
+      refreshFilters(true);
+    }
+
+    function clearFilters() {
+      resetSlicers(".farm-slicer");
+      resetSlicers(".reason-slicer");
+      resetAmountSlicer();
+      document.getElementById("dest-select").value = "";
+      highlightEtag = null;
+      refreshFilters(true);
+    }
+
+    function readUrlParams() {
+      const params = new URLSearchParams(window.location.search);
+      const hasAmount = params.get("has_amount");
+      return {
+        farms: params.getAll("farm"),
+        hasAmount: hasAmount === "1" || hasAmount === "true",
+        eventFrom: params.get("event_from"),
+        eventTo: params.get("event_to"),
+        highlight: params.get("highlight"),
+      };
+    }
+
+    function applyUrlParams() {
+      const url = readUrlParams();
+      if (url.farms.length) applySlicerSelection(".farm-slicer", url.farms);
+      if (url.hasAmount) applySlicerSelection(".amount-slicer", ["has_amount"]);
+      if (url.highlight) highlightEtag = url.highlight;
+      return url.eventFrom && url.eventTo ? { from: url.eventFrom, to: url.eventTo } : null;
+    }
+
+    function bindDateInputs() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      function clampAndLoad() {
+        if (!monthList.length) return;
+        let minVal = parseInt(minRange.value, 10);
+        let maxVal = parseInt(maxRange.value, 10);
+        if (minVal > maxVal) maxVal = minVal;
+        minRange.value = minVal;
+        maxRange.value = maxVal;
+        updateDateLabels();
+        scheduleRowsReload();
+      }
+      minRange.addEventListener("input", () => {
+        if (parseInt(minRange.value, 10) > parseInt(maxRange.value, 10)) maxRange.value = minRange.value;
+        updateDateLabels();
+        scheduleRowsReload();
+      });
+      maxRange.addEventListener("input", () => {
+        if (parseInt(maxRange.value, 10) < parseInt(minRange.value, 10)) minRange.value = maxRange.value;
+        updateDateLabels();
+        scheduleRowsReload();
+      });
+      minRange.addEventListener("change", clampAndLoad);
+      maxRange.addEventListener("change", clampAndLoad);
+    }
+
+    document.querySelectorAll(".view-tab").forEach(tab => {
+      tab.addEventListener("click", () => setStatus(tab.dataset.status));
+    });
+    document.getElementById("dest-select").addEventListener("change", () => refreshFilters(true));
+    document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
+    document.getElementById("confirm-btn")?.addEventListener("click", confirmSelected);
+    document.getElementById("select-amount-btn")?.addEventListener("click", selectAllWithAmount);
+    document.getElementById("unarchive-btn")?.addEventListener("click", unarchiveSelected);
+    bindSlicers(".farm-slicer");
+    bindSlicers(".reason-slicer");
+    bindAmountSlicer();
+    bindDateInputs();
+    bindTableBodyEvents();
+    (async function initPage() {
+      const dateOverride = applyUrlParams();
+      if (dateOverride) {
+        const farms = selectedFarms();
+        const reasons = selectedReasons();
+        if (!farms.length || !reasons.length) return;
+        setLoading(true);
+        try {
+          const [, bounds] = await Promise.all([
+            fetchRows(dateOverride, { manageLoading: false }),
+            loadFilterOptions(),
+          ]);
+          if (bounds) syncDateBounds(bounds, false, false);
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+      await refreshFilters(true);
+    })();
+  </script>
+{% endblock %}
