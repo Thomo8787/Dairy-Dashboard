@@ -7,8 +7,9 @@ from services.herd_import_utils import CATEGORY_BEEF, category_from_birth
 CATEGORIES: tuple[str, ...] = ("Beef", "Dairy", "Youngstock")
 VALUE_CAP = 1800.0
 
-# DairyComp SBRD codes treated as dairy (legacy blank/"H" plus Holstein variants).
-_DAIRY_SBRD_CODES = frozenset({"", "H", "HF", "HO", "HOLSTEIN"})
+# DairyComp SBRD codes treated as dairy. Lactation > 0 is always a cow;
+# lactation 0 with one of these codes is youngstock. J is Jersey.
+_DAIRY_SBRD_CODES = frozenset({"", "H", "HF", "HO", "HOLSTEIN", "J"})
 
 
 def normalize_inventory_sbrd(sbrd: str | None) -> str:
