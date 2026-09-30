@@ -33,7 +33,6 @@ from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, 
 from services.cattle_sales import list_cattle_sales
 from services.cattle_sales_email import CATTLE_SALES_LOOKBACK_DAYS, outlook_cattle_sales_configured
 from services.cattle_sales_import import (
-    ensure_local_cattle_sales,
     import_cattle_sale_sources,
     sync_outlook_cattle_sales,
 )
@@ -495,8 +494,6 @@ def office_api_upload_cattle_sales():
 @app.route("/office/sales-payments")
 @permission_required("perm_office")
 def office_sales_payments():
-    with get_session() as session:
-        ensure_local_cattle_sales(session)
     return render_template(
         "office/sales_payments.html",
         page_heading="Sales Payments",
@@ -538,7 +535,6 @@ def office_api_sales_payments():
     if include_date_bounds is None:
         include_date_bounds = True
     with get_session() as session:
-        ensure_local_cattle_sales(session)
         return jsonify(
             list_sales_payments(
                 session,
