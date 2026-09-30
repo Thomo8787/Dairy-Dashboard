@@ -21,6 +21,12 @@ NAV_ITEMS = [
         "permission": "perm_office",
         "children": [
             {
+                "id": "office_cattle_sales",
+                "label": "Cattle Sales",
+                "endpoint": "office_cattle_sales",
+                "permission": "perm_office",
+            },
+            {
                 "id": "office_sales_payments",
                 "label": "Sales Payments",
                 "endpoint": "office_sales_payments",

@@ -1,6 +1,7 @@
 """Parse E. Nield & Partners seller remittance PDFs (T13 statements).
 
-Digital PDFs are read as text. Scanned statements use Windows OCR when available.
+Digital PDFs are read as text. Scanned statements are OCR'd per row so each
+ear tag keeps its own weight and amount.
 """
 
 from __future__ import annotations
@@ -9,7 +10,12 @@ import datetime as dt
 import re
 from typing import Any
 
-from services.cattle_sale_pdf import extract_pdf_text_or_ocr, normalize_etag
+from services.cattle_sale_pdf import (
+    extract_pdf_images,
+    extract_pdf_text_or_ocr,
+    normalize_etag,
+    ocr_words_from_image,
+)
 from services.farms import HERD_FARM_OPTIONS
 
 BUYER_NEILDS = "Neilds"
@@ -37,6 +43,8 @@ _FARM_MARKERS: tuple[tuple[str, str], ...] = (
     ("ASTON JUXTA", "ALH"),
     ("BANK FARM", "BNK"),
     ("PARK HALL", "SFR"),
+    ("PARR HALL", "SFR"),
+    ("PARR FALL", "SFR"),
     ("THE PARKES", "PRK"),
     ("CHERRY ORCHARD", "COF"),
 )
@@ -160,6 +168,123 @@ def _parse_weight_and_amount(text: str) -> tuple[float | None, float | None]:
     return weight, amount
 
 
+def _repair_uk_tag(value: str | None) -> str:
+    """Turn an OCR ear tag into UK plus 12 digits."""
+    raw = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    if not raw:
+        return ""
+    raw = raw.replace("UKI", "UK")
+    raw = re.sub(r"^[A-Z](?=UK)", "", raw)
+    if raw.startswith("UR"):
+        raw = "UK" + raw[2:]
+    uk_at = raw.find("UK")
+    if uk_at < 0:
+        fallback = re.fullmatch(r"[A-Z]{1,3}(\d{12})", raw)
+        if fallback is None:
+            return ""
+        return f"UK{fallback.group(1)}"
+    etag = repair_etag(raw[uk_at:])
+    digits = etag[2:] if etag.startswith("UK") else ""
+    if len(digits) != 12 or not digits.isdigit():
+        return ""
+    return etag
+
+
+def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 14.0) -> list[list[dict[str, Any]]]:
+    ordered = sorted(words, key=lambda word: (word["y"], word["x"]))
+    rows: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    anchor_y: float | None = None
+    for word in ordered:
+        if anchor_y is None or abs(word["y"] - anchor_y) <= y_tol:
+            current.append(word)
+            if anchor_y is None:
+                anchor_y = word["y"]
+        else:
+            rows.append(current)
+            current = [word]
+            anchor_y = word["y"]
+    if current:
+        rows.append(current)
+    return rows
+
+
+def _parse_statement_row(row: list[dict[str, Any]]) -> dict[str, Any] | None:
+    tokens = [word["text"] for word in sorted(row, key=lambda item: item["x"])]
+    text = " ".join(tokens)
+    if re.search(r"\b(total|goods|deduction|charges|vendor|collection)\b", text, re.IGNORECASE):
+        return None
+    tag_at = None
+    etag = ""
+    for index, token in enumerate(tokens):
+        repaired = _repair_uk_tag(token)
+        if repaired:
+            tag_at = index
+            etag = repaired
+            break
+        nxt = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if token.upper().startswith("U") and nxt:
+            repaired = _repair_uk_tag(token + nxt)
+            if repaired:
+                tag_at = index + 1
+                etag = repaired
+                break
+    if not etag or tag_at is None:
+        return None
+
+    numbers: list[tuple[str, float]] = []
+    for token in tokens[tag_at + 1 :]:
+        for match in re.findall(r"\d[\d,]*\.\d+|\d{2,5}", token):
+            value = _to_float(match)
+            if value is not None:
+                numbers.append((match.replace(",", ""), value))
+    money = [
+        (token, value)
+        for token, value in numbers
+        if re.fullmatch(r"\d+\.\d{2}", token) and 20 <= value <= 20000
+    ]
+    if not money:
+        return None
+    amount_index = max(
+        index
+        for index, (token, value) in enumerate(numbers)
+        if re.fullmatch(r"\d+\.\d{2}", token) and abs(value - money[-1][1]) < 0.001
+    )
+    amount = numbers[amount_index][1]
+    before_price = list(numbers[:amount_index])
+    pence_per_kg = None
+    if before_price and re.fullmatch(r"\d+\.\d{2}", before_price[-1][0]):
+        pence_per_kg = before_price.pop()
+    weight = None
+    for token, value in reversed(before_price):
+        if "." in token and 40 <= value <= 900:
+            weight = value
+            break
+    if weight is None and pence_per_kg is not None and 40 <= pence_per_kg[1] <= 900:
+        weight = pence_per_kg[1]
+    return {
+        "etag": etag,
+        "cold_weight_kg": round(float(weight or 0.0), 2),
+        "amount_gbp": round(float(amount), 2),
+        "reject_kg": 0.0,
+        "is_rejected": False,
+    }
+
+
+def _lines_from_ocr_words(
+    words: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in _cluster_rows(words):
+        parsed = _parse_statement_row(row)
+        if parsed is None or parsed["etag"] in seen:
+            continue
+        seen.add(parsed["etag"])
+        lines.append(parsed)
+    return lines
+
+
 def parse_neilds_pdf(
     content: bytes,
     *,
@@ -167,6 +292,43 @@ def parse_neilds_pdf(
     source_file: str | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
+    sale_date = _date_from_filename(source_file)
+    farm = mailbox_farm
+    ocr_lines: list[dict[str, Any]] = []
+    ocr_text_parts: list[str] = []
+    for image in extract_pdf_images(content):
+        words = ocr_words_from_image(image, scale=2)
+        if not words:
+            continue
+        ocr_text_parts.append(" ".join(word["text"] for word in words))
+        ocr_lines.extend(_lines_from_ocr_words(words))
+    if ocr_lines:
+        joined = "\n".join(ocr_text_parts)
+        if farm is None:
+            farm = _farm_from_text(joined, source_file)
+        if sale_date is None:
+            sale_date = _collection_date(joined, source_file)
+        for line in ocr_lines:
+            line["kill_date"] = sale_date
+        if sale_date is None:
+            warnings.append("Could not parse collection date from PDF")
+        return {
+            "farm": farm,
+            "sale_date": sale_date,
+            "lines": ocr_lines,
+            "warnings": warnings,
+            "buyer": BUYER_NEILDS,
+        }
+    if ocr_text_parts:
+        joined = "\n".join(ocr_text_parts)
+        return {
+            "farm": farm or _farm_from_text(joined, source_file),
+            "sale_date": sale_date or _collection_date(joined, source_file),
+            "lines": [],
+            "warnings": ["No sale lines extracted from PDF"],
+            "buyer": BUYER_NEILDS,
+        }
+
     text = extract_pdf_text_or_ocr(content)
     if not text.strip():
         return {

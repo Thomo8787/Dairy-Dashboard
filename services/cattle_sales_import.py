@@ -351,7 +351,7 @@ def _known_sale_filenames(db: Session) -> set[str]:
     return {row for row in rows if row}
 
 
-def sync_outlook_cattle_sales(db: Session) -> dict[str, Any] | None:
+def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[str, Any] | None:
     from services.cattle_sales_email import (
         CattleSalePdfEmailService,
         outlook_cattle_sales_configured,
@@ -359,10 +359,17 @@ def sync_outlook_cattle_sales(db: Session) -> dict[str, Any] | None:
 
     if not outlook_cattle_sales_configured():
         return None
+    since = None
+    top = 40
+    if days is not None and days > 0:
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+        top = min(250, max(40, days))
     try:
         found = CattleSalePdfEmailService().fetch_pdfs(
+            since=since,
             skip_message_ids=_known_sale_message_ids(db),
             skip_filenames=_known_sale_filenames(db),
+            top=top,
         )
     except Exception:
         logger.exception("Outlook cattle-sale fetch failed")

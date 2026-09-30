@@ -30,7 +30,13 @@ from services.auth import (
 )
 from services.events_common import build_dairy_semen_30d, build_events_page_report
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
-from services.cattle_sales_import import ensure_local_cattle_sales
+from services.cattle_sales import list_cattle_sales
+from services.cattle_sales_email import CATTLE_SALES_LOOKBACK_DAYS, outlook_cattle_sales_configured
+from services.cattle_sales_import import (
+    ensure_local_cattle_sales,
+    import_cattle_sale_sources,
+    sync_outlook_cattle_sales,
+)
 from services.sales_payments import (
     confirm_payments,
     list_dest_filter_options as list_sales_dest_filter_options,
@@ -376,6 +382,114 @@ def _parse_bool_arg(name: str) -> bool | None:
     if raw in {"0", "false", "no", "off"}:
         return False
     return None
+
+
+@app.route("/office/cattle-sales")
+@permission_required("perm_office")
+def office_cattle_sales():
+    return render_template(
+        "office/cattle_sales.html",
+        page_heading="Cattle Sales",
+        farm_options=list(HERD_FARM_OPTIONS),
+        farm_colors=FARM_CHART_COLORS,
+        lookback_days=CATTLE_SALES_LOOKBACK_DAYS,
+        can_import=True,
+        **_page_context(active_nav="office_cattle_sales"),
+    )
+
+
+@app.route("/office/api/cattle-sales")
+def office_api_cattle_sales():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    include_unmatched = _parse_bool_arg("include_unmatched")
+    if include_unmatched is None:
+        include_unmatched = True
+    with get_session() as session:
+        return jsonify(
+            list_cattle_sales(
+                session,
+                farms=request.args.getlist("farm") or None,
+                categories=request.args.getlist("category") or None,
+                genders=request.args.getlist("gender") or None,
+                buyers=request.args.getlist("buyer") or None,
+                age_min_days=_parse_int_arg("age_min"),
+                age_max_days=_parse_int_arg("age_max"),
+                date_from=_parse_date_arg("date_from"),
+                date_to=_parse_date_arg("date_to"),
+                include_unmatched=include_unmatched,
+            )
+        )
+
+
+@app.route("/office/api/cattle-sales/import", methods=["POST"])
+def office_api_import_cattle_sales():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    if not outlook_cattle_sales_configured():
+        return jsonify(
+            {
+                "rows_total": 0,
+                "warnings": ["Outlook mailbox is not configured for cattle-sale import."],
+                "skipped_files": [],
+                "message": "Cattle sales email import is not configured.",
+            }
+        ), 400
+    days = request.args.get("days", type=int)
+    if days is not None and days <= 0:
+        return jsonify({"message": "Enter a positive whole number of days."}), 400
+    with get_session() as session:
+        result = sync_outlook_cattle_sales(session, days=days)
+    if not result:
+        return jsonify(
+            {
+                "rows_total": 0,
+                "warnings": [],
+                "skipped_files": [],
+                "message": "No new remittance PDFs in the mailbox.",
+            }
+        )
+    payload = dict(result)
+    payload.setdefault(
+        "message",
+        f"Imported {payload.get('rows_total', 0)} line(s).",
+    )
+    return jsonify(payload)
+
+
+@app.route("/office/api/cattle-sales/upload", methods=["POST"])
+def office_api_upload_cattle_sales():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    uploads = request.files.getlist("files")
+    sources: list[dict] = []
+    for upload in uploads:
+        filename = upload.filename or "upload.pdf"
+        content = upload.read()
+        if not content:
+            continue
+        if len(content) > 8 * 1024 * 1024:
+            return jsonify({"message": f"{filename} is larger than 8 MB."}), 400
+        sources.append(
+            {
+                "content": content,
+                "source_file": filename,
+                "message_id": f"upload:{filename}",
+            }
+        )
+    if not sources:
+        return jsonify({"message": "Choose at least one PDF."}), 400
+    with get_session() as session:
+        result = import_cattle_sale_sources(session, sources)
+    payload = dict(result)
+    payload.setdefault(
+        "message",
+        f"Imported {payload.get('rows_total', 0)} line(s).",
+    )
+    return jsonify(payload)
 
 
 @app.route("/office/sales-payments")

@@ -29,3 +29,6 @@ reportlab==4.2.5
 
 # NML milk-quality report PDFs
 pdfplumber==0.11.5
+
+# Scanned cattle-sale remittances on Linux (Render cron). Windows uses WinOCR when installed.
+rapidocr-onnxruntime==1.2.3

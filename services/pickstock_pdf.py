@@ -137,6 +137,18 @@ def parse_pickstock_pdf(
             "buyer": "Pickstock",
         }
 
+    name = (source_file or "").lower()
+    if "kill sheet" in text.lower() or name.startswith("lot summary"):
+        return {
+            "farm": mailbox_farm or _farm_from_text(text, source_file),
+            "sale_date": None,
+            "lines": [],
+            "warnings": [
+                "Pickstock kill sheet lists weights only; the payment is on the FPF remittance"
+            ],
+            "buyer": "Pickstock",
+        }
+
     if not looks_like_pickstock_pdf(text, source_file):
         warnings.append("PDF does not look like a Pickstock remittance")
 

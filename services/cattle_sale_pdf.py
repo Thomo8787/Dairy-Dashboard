@@ -58,36 +58,11 @@ def extract_pdf_images(content: bytes) -> list[bytes]:
     return images
 
 
-def ocr_image_bytes(image_bytes: bytes) -> str:
-    """OCR a scanned remittance image. Uses Windows OCR when available."""
-    try:
-        import asyncio
-
-        import winocr
-        from PIL import Image
-    except ImportError:
-        return ""
-
-    image = Image.open(io.BytesIO(image_bytes))
-    if image.mode not in {"RGB", "L"}:
-        image = image.convert("RGB")
-    try:
-        result = asyncio.run(winocr.recognize_pil(image, lang="en"))
-    except Exception:
-        logging.getLogger(__name__).exception("Windows OCR failed")
-        return ""
-    return (getattr(result, "text", None) or "").strip()
+_rapid_ocr = None
 
 
-def ocr_words_from_image(image_bytes: bytes, *, scale: int = 2) -> list[dict[str, Any]]:
-    """OCR words with bounding boxes. Uses Windows OCR when available."""
-    try:
-        import asyncio
-
-        import winocr
-        from PIL import Image, ImageOps
-    except ImportError:
-        return []
+def _prepare_ocr_image(image_bytes: bytes, *, scale: int = 1):
+    from PIL import Image, ImageOps
 
     image = Image.open(io.BytesIO(image_bytes))
     if image.mode not in {"RGB", "L"}:
@@ -98,12 +73,21 @@ def ocr_words_from_image(image_bytes: bytes, *, scale: int = 2) -> list[dict[str
             Image.Resampling.LANCZOS,
         )
         image = ImageOps.autocontrast(image)
+    return image
+
+
+def _winocr_words(image) -> list[dict[str, Any]]:
+    try:
+        import asyncio
+
+        import winocr
+    except ImportError:
+        return []
     try:
         result = asyncio.run(winocr.recognize_pil(image, lang="en"))
     except Exception:
         logging.getLogger(__name__).exception("Windows OCR failed")
         return []
-
     words: list[dict[str, Any]] = []
     for line in getattr(result, "lines", None) or []:
         for word in getattr(line, "words", None) or []:
@@ -121,6 +105,84 @@ def ocr_words_from_image(image_bytes: bytes, *, scale: int = 2) -> list[dict[str
                 }
             )
     return words
+
+
+def _rapidocr_engine():
+    global _rapid_ocr
+    if _rapid_ocr is False:
+        return None
+    if _rapid_ocr is not None:
+        return _rapid_ocr
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError:
+        _rapid_ocr = False
+        return None
+    try:
+        _rapid_ocr = RapidOCR()
+    except Exception:
+        logging.getLogger(__name__).exception("RapidOCR failed to start")
+        _rapid_ocr = False
+        return None
+    return _rapid_ocr
+
+
+def _rapidocr_words(image) -> list[dict[str, Any]]:
+    engine = _rapidocr_engine()
+    if engine is None:
+        return []
+    try:
+        import numpy as np
+    except ImportError:
+        return []
+    try:
+        result, _elapsed = engine(np.array(image))
+    except Exception:
+        logging.getLogger(__name__).exception("RapidOCR failed")
+        return []
+    words: list[dict[str, Any]] = []
+    for item in result or []:
+        box, text, _score = item
+        label = (text or "").strip()
+        if not label or not box:
+            continue
+        xs = [float(point[0]) for point in box]
+        ys = [float(point[1]) for point in box]
+        words.append(
+            {
+                "text": label,
+                "x": min(xs),
+                "y": min(ys),
+                "width": max(xs) - min(xs),
+                "height": max(ys) - min(ys),
+            }
+        )
+    return words
+
+
+def ocr_image_bytes(image_bytes: bytes) -> str:
+    """OCR a scanned remittance image."""
+    words = ocr_words_from_image(image_bytes, scale=2)
+    if not words:
+        return ""
+    ordered = sorted(words, key=lambda word: (word["y"], word["x"]))
+    return " ".join(word["text"] for word in ordered).strip()
+
+
+def ocr_words_from_image(image_bytes: bytes, *, scale: int = 2) -> list[dict[str, Any]]:
+    """OCR words with bounding boxes.
+
+    Windows OCR is used when it is installed. Render's Linux cron uses RapidOCR.
+    """
+    try:
+        image = _prepare_ocr_image(image_bytes, scale=scale)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not open remittance image")
+        return []
+    words = _winocr_words(image)
+    if words:
+        return words
+    return _rapidocr_words(image)
 
 
 def extract_pdf_text_or_ocr(content: bytes) -> str:

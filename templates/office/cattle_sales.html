@@ -1,0 +1,1928 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_heading }} · {{ app_name }}{% endblock %}
+{% block page_heading %}{{ page_heading }}{% endblock %}
+
+{% block extra_styles %}
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .farm-slicer, .category-slicer { grid-template-columns: 1fr 1fr 1fr; }
+    .slicer-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0.4rem 0.35rem;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn.selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="CM"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="GAD"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .slicer-btn[data-value="Dairy"].selected { background: #dbeafe; border-color: #3b82f6; color: #1e40af; }
+    .slicer-btn[data-value="Youngstock"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+    .slicer-btn[data-value="Beef"].selected { background: #ede9fe; border-color: #a78bfa; color: #5b21b6; }
+    .slicer-btn[data-value="Male"].selected { background: #e0f2fe; border-color: #0ea5e9; color: #075985; }
+    .slicer-btn[data-value="Female"].selected { background: #fce7f3; border-color: #ec4899; color: #9d174d; }
+    .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .date-row label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+    .date-row select, .date-row input { margin: 0; width: 100%; }
+    .buyer-dropdown { position: relative; width: 100%; }
+    .buyer-trigger {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      margin: 0;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-align: left;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .buyer-trigger:hover { background: #f3f4f6; color: var(--text); }
+    .buyer-trigger-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .buyer-chevron { flex-shrink: 0; font-size: 0.7rem; opacity: 0.7; }
+    .buyer-panel {
+      position: absolute;
+      z-index: 40;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: 14rem;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      padding: 0.35rem 0;
+    }
+    .buyer-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      margin: 0;
+      padding: 0.3rem 0.65rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .buyer-option:hover { background: rgba(0, 0, 0, 0.04); }
+    .buyer-option input { margin: 0.1rem 0 0; flex-shrink: 0; accent-color: #1e3a5f; }
+    .buyer-option-all {
+      padding-bottom: 0.45rem;
+      margin-bottom: 0.2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .buyer-empty { margin: 0; padding: 0.35rem 0.65rem; font-size: 0.8rem; color: var(--muted); font-weight: 500; }
+    .series-slicer { width: 100%; }
+    .smooth-row { display: flex; justify-content: flex-start; margin: 0 0 0.75rem; }
+    button.smooth-switch {
+      display: inline-flex; align-items: center; gap: 0.75rem;
+      margin: 0; padding: 0.15rem 0; border: 0; background: transparent;
+      color: var(--text); font-size: 1rem; font-weight: 600; cursor: pointer;
+    }
+    button.smooth-switch:hover { background: transparent; color: var(--text); }
+    .smooth-switch-track {
+      position: relative; width: 3.1rem; height: 1.7rem; border-radius: 999px;
+      background: #d1d5db; flex-shrink: 0; transition: background 0.15s ease;
+    }
+    .smooth-switch-knob {
+      position: absolute; top: 0.18rem; left: 0.18rem;
+      width: 1.34rem; height: 1.34rem; border-radius: 50%;
+      background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.22);
+      transition: transform 0.15s ease;
+    }
+    button.smooth-switch[aria-pressed="true"] .smooth-switch-track { background: #14b8a6; }
+    button.smooth-switch[aria-pressed="true"] .smooth-switch-knob { transform: translateX(1.4rem); }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .meta-line.is-loading { font-style: italic; }
+    .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    button.summary-card {
+      display: block; width: 100%; text-align: left; font: inherit;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.75rem; cursor: pointer; color: inherit;
+    }
+    button.summary-card:hover { border-color: #5a9fd4; background: #f8fafc; }
+    .summary-card .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .summary-card .value { font-size: 1.4rem; font-weight: 700; color: #1e3a5f; }
+    button.filter-funnel {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.25rem; height: 2.25rem; padding: 0; margin: 0;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: #f3f4f6; color: var(--muted); cursor: pointer;
+    }
+    button.filter-funnel:hover { background: #e5e7eb; color: var(--text); }
+    button.filter-funnel.is-active { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    button.filter-funnel svg { display: block; }
+    .filter-actions { display: flex; align-items: center; gap: 0.5rem; }
+    button.filter-clear {
+      margin: 0; padding: 0 0.75rem; height: 2.25rem;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: #fff; color: #1e3a5f;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    }
+    button.filter-clear:hover { background: #f3f4f6; }
+    button.filter-clear:disabled { opacity: 0.45; cursor: default; background: #f3f4f6; color: var(--muted); }
+    .range-filter-panel {
+      margin-top: 0.65rem; padding: 0.75rem;
+      border: 1px solid var(--border); border-radius: 8px; background: #f8fafc;
+    }
+    .range-note { margin: 0 0 0.65rem; font-size: 0.75rem; color: var(--muted); font-weight: 500; }
+    .range-block { margin-bottom: 0.65rem; }
+    .range-block:last-child { margin-bottom: 0; }
+    .summary-popover {
+      position: fixed; inset: 0; z-index: 280;
+      display: flex; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .summary-popover[hidden] { display: none; }
+    .summary-popover-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.35); }
+    .summary-popover-card {
+      position: relative; width: min(92vw, 440px); max-height: min(80vh, 640px);
+      overflow: auto; background: var(--card); border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.28); padding: 1rem;
+    }
+    .summary-popover-card.is-wide {
+      width: min(96vw, 1100px);
+      max-height: min(88vh, 820px);
+    }
+    .summary-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .summary-popover-head h3 { margin: 0; font-size: 1rem; }
+    button.summary-popover-close {
+      width: 1.8rem; height: 1.8rem; padding: 0; border: 0; border-radius: 4px;
+      background: transparent; color: var(--muted); font-size: 1.3rem; line-height: 1; cursor: pointer;
+    }
+    button.summary-popover-close:hover { background: #f3f4f6; color: var(--text); }
+    .summary-breakdown { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+    .summary-breakdown th, .summary-breakdown td {
+      padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--border);
+      text-align: right; font-size: 0.85rem; white-space: nowrap;
+    }
+    .summary-breakdown th:first-child, .summary-breakdown td:first-child { text-align: left; }
+    .summary-breakdown thead th {
+      position: sticky; top: 0; z-index: 2;
+      background: #1e3a5f; color: #fff;
+      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .summary-breakdown tbody td:first-child {
+      position: sticky; left: 0; z-index: 1; background: var(--card);
+    }
+    .summary-breakdown thead th:first-child {
+      position: sticky; top: 0; left: 0; z-index: 3; background: #1e3a5f;
+    }
+    .summary-breakdown.simple td:last-child { color: var(--muted); }
+    .summary-breakdown .cell-n { display: block; margin-top: 0.1rem; font-size: 0.68rem; font-weight: 500; color: var(--muted); }
+    .summary-note { margin: 0 0 0.65rem; font-size: 0.75rem; color: var(--muted); }
+    .summary-empty { margin: 0; color: var(--muted); font-size: 0.875rem; }
+    .amount-rejected { color: #dc2626; font-weight: 700; }
+    .action-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+    .import-scope { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
+    .import-scope select { margin: 0; padding: 0.25rem 0.4rem; font-size: 0.8rem; }
+    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem; margin-bottom: 0.75rem; }
+    .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+    .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .chart-card h3 { margin: 0; font-size: 0.95rem; }
+    .chart-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+    .chart-btn, .chart-expand {
+      border: 1px solid var(--border); background: #f3f4f6; color: var(--muted);
+      border-radius: 6px; width: 1.9rem; height: 1.9rem; line-height: 1;
+      font-size: 1rem; cursor: pointer; flex-shrink: 0; padding: 0;
+    }
+    .chart-btn:hover, .chart-expand:hover { background: #e5e7eb; color: var(--text); }
+    .chart-wrap { position: relative; height: 240px; }
+    .chart-hint { font-size: 0.75rem; color: var(--muted); margin: 0 0 1rem; }
+    .chart-modal { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; padding: 2vh 2vw; }
+    .chart-modal[hidden] { display: none; }
+    .chart-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
+    .chart-modal-body {
+      position: relative; background: var(--card); border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3); width: 96vw; max-width: 1200px;
+      height: 90vh; display: flex; flex-direction: column; padding: 1rem;
+    }
+    .chart-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+    .chart-modal-head h3 { margin: 0; font-size: 1.1rem; }
+    .chart-modal-actions { display: flex; gap: 0.5rem; }
+    .chart-modal-canvas { position: relative; flex: 1 1 auto; min-height: 0; }
+    .chart-modal-formula { margin: 0 0 0.65rem; font-size: 0.85rem; line-height: 1.4; }
+    .chart-modal-formula[hidden] { display: none; }
+    .chart-modal-formula p { margin: 0.15rem 0; }
+    .chart-modal-formula-eq, .chart-modal-formula-note { color: var(--muted); }
+    .chart-modal-formula-note { font-size: 0.75rem; }
+    .trend-swatch {
+      display: inline-block; width: 0.85rem; height: 0.18rem; margin-right: 0.4rem;
+      border-radius: 2px; vertical-align: middle; background: #111;
+    }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 14rem); border: 1px solid var(--border); border-radius: 8px; }
+    #cattle-sales-table { width: 100%; border-collapse: collapse; }
+    #cattle-sales-table th, #cattle-sales-table td {
+      padding: 0.45rem 0.55rem; text-align: right;
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    #cattle-sales-table th:first-child, #cattle-sales-table td:first-child,
+    #cattle-sales-table th:nth-child(2), #cattle-sales-table td:nth-child(2) { text-align: left; }
+    #cattle-sales-table td { font-variant-numeric: tabular-nums; }
+    #cattle-sales-table thead th {
+      background: #1e3a5f; color: #fff; font-weight: 600;
+      position: sticky; top: 0; z-index: 1; cursor: pointer;
+    }
+    #cattle-sales-table tbody tr.unmatched { background: #fff8ef; }
+    .empty-state { padding: 1.5rem; color: var(--muted); text-align: center; }
+    .message.warn {
+      background: #fef3e2; color: #92400e;
+      border: 1px solid #f5d9ad; margin-bottom: 0.75rem;
+    }
+    #import-message:not([hidden]) {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    #import-message[hidden] { display: none !important; }
+    #import-message .message-body { flex: 1; min-width: 0; }
+    #import-message .message-close {
+      flex-shrink: 0;
+      margin: 0;
+      padding: 0;
+      width: 1.6rem;
+      height: 1.6rem;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: #92400e;
+      font-size: 1.2rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #import-message .message-close:hover { background: #f5d9ad; }
+    .import-log { margin-top: 0.5rem; max-height: 12rem; overflow: auto; font-size: 0.8rem; }
+    .hint-phone { display: none; }
+    @media (max-width: 768px) {
+      .page-layout { gap: 0.75rem; }
+      .page-layout, .content-panel, .charts-grid, .chart-card, .table-wrap, .action-bar, .summary-cards {
+        max-width: 100%;
+        min-width: 0;
+      }
+      .slicer-btn { white-space: normal; line-height: 1.15; text-align: center; }
+      .category-slicer .slicer-btn { font-size: 0.72rem; padding: 0.4rem 0.2rem; }
+      .summary-cards { grid-template-columns: 1fr 1fr; }
+      .summary-card .value { font-size: 1.15rem; word-break: break-word; }
+      button.summary-card { min-height: 4.5rem; }
+      .charts-grid { grid-template-columns: 1fr; }
+      .chart-card { min-width: 0; }
+      .chart-card h3 { min-width: 0; flex: 1; line-height: 1.25; }
+      .chart-wrap { height: 210px; }
+      .chart-btn, .chart-expand, button.filter-funnel { width: 2.75rem; height: 2.75rem; }
+      button.filter-clear { min-height: 2.75rem; padding: 0 0.9rem; }
+      .action-bar { flex-direction: column; align-items: stretch; }
+      .action-bar > button { width: 100%; min-height: 2.75rem; justify-content: center; }
+      .import-scope { width: 100%; min-height: 2.75rem; justify-content: space-between; }
+      .import-scope select, .date-row select, .date-row input, .buyer-trigger { font-size: 16px; min-height: 2.75rem; }
+      .hint-desktop { display: none; }
+      .hint-phone { display: inline; }
+      .chart-modal, .summary-popover { padding: 0; align-items: stretch; }
+      .chart-modal-body, .summary-popover-card, .summary-popover-card.is-wide {
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        max-height: none;
+        border-radius: 0;
+        padding: 0.75rem;
+        padding-top: max(0.75rem, env(safe-area-inset-top));
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+      }
+      .chart-modal-head, .summary-popover-head { flex-wrap: wrap; }
+      .chart-modal-actions { width: 100%; }
+      .chart-modal-actions button { flex: 1; min-height: 2.75rem; }
+      .table-wrap { -webkit-overflow-scrolling: touch; max-width: 100%; }
+    }
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farm_options %}
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">{{ farm }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Category</span>
+          <div class="slicer-group category-slicer" role="group" aria-label="Category">
+            <button type="button" class="slicer-btn selected" data-value="Dairy" aria-pressed="true">Dairy</button>
+            <button type="button" class="slicer-btn" data-value="Youngstock" aria-pressed="false">Youngstock</button>
+            <button type="button" class="slicer-btn" data-value="Beef" aria-pressed="false">Beef</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Gender</span>
+          <div class="slicer-group gender-slicer" role="group" aria-label="Gender">
+            <button type="button" class="slicer-btn selected" data-value="Male" aria-pressed="true">Male</button>
+            <button type="button" class="slicer-btn selected" data-value="Female" aria-pressed="true">Female</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Graph lines</span>
+          <div class="slicer-group series-slicer" role="group" aria-label="Graph lines">
+            <button type="button" class="slicer-btn selected" data-value="farm" aria-pressed="true">Farm</button>
+            <button type="button" class="slicer-btn" data-value="supplier" aria-pressed="false">Supplier</button>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Buyer</span>
+          <div class="buyer-dropdown" id="buyer-filter">
+            <button type="button" class="buyer-trigger" id="buyer-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="buyer-panel">
+              <span class="buyer-trigger-label" id="buyer-trigger-label">All</span>
+              <span class="buyer-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="buyer-panel" id="buyer-panel" role="group" aria-label="Buyer" hidden></div>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Sale date range</span>
+          <div class="date-row">
+            <label>From <select id="date-from"></select></label>
+            <label>To <select id="date-to"></select></label>
+          </div>
+        </div>
+        <div class="filter-section" id="range-filter">
+          <div class="filter-actions">
+            <button type="button" class="filter-funnel" id="range-filter-btn" aria-expanded="false" aria-controls="range-filter-panel" aria-label="Age, lactation, DIM and cold weight filters" title="Age, lactation, DIM and cold weight">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/>
+              </svg>
+            </button>
+            <button type="button" class="filter-clear" id="range-filter-clear" disabled>Clear</button>
+          </div>
+          <div id="range-filter-panel" class="range-filter-panel" hidden>
+            <p class="range-note">Min and max start at the lowest and highest values in the current sales.</p>
+            <div class="range-block">
+              <span class="section-label">Age (days)</span>
+              <div class="date-row">
+                <label>Min <input type="number" id="age-min" min="0" step="1" inputmode="numeric"></label>
+                <label>Max <input type="number" id="age-max" min="0" step="1" inputmode="numeric"></label>
+              </div>
+            </div>
+            <div class="range-block">
+              <span class="section-label">Lact</span>
+              <div class="date-row">
+                <label>Min <input type="number" id="lact-min" min="0" step="1" inputmode="numeric"></label>
+                <label>Max <input type="number" id="lact-max" min="0" step="1" inputmode="numeric"></label>
+              </div>
+            </div>
+            <div class="range-block">
+              <span class="section-label">DIM</span>
+              <div class="date-row">
+                <label>Min <input type="number" id="dim-min" min="0" step="1" inputmode="numeric"></label>
+                <label>Max <input type="number" id="dim-max" min="0" step="1" inputmode="numeric"></label>
+              </div>
+            </div>
+            <div class="range-block">
+              <span class="section-label">Cold wt (kg)</span>
+              <div class="date-row">
+                <label>Min <input type="number" id="weight-min" min="0" step="any" inputmode="decimal"></label>
+                <label>Max <input type="number" id="weight-max" min="0" step="any" inputmode="decimal"></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="content-panel">
+      {% if can_import %}
+      <div class="action-bar">
+        <button type="button" id="import-btn">Import from email</button>
+        <label class="import-scope">
+          <span>Range</span>
+          <select id="import-scope" title="How far back to scan the mailboxes">
+            <option value="recent" selected>Recent (last {{ lookback_days }} days)</option>
+            <option value="custom">Choose days back…</option>
+          </select>
+        </label>
+        <input type="file" id="upload-input" accept=".pdf,application/pdf" multiple hidden>
+        <button type="button" id="upload-btn" class="secondary">Upload PDFs</button>
+        <span id="import-status" class="meta-line" style="margin:0;"></span>
+      </div>
+      <div id="import-message" class="message" hidden>
+        <div class="message-body"></div>
+        <button type="button" class="message-close" id="import-message-close" aria-label="Close notification">&times;</button>
+      </div>
+      {% endif %}
+
+      <p class="meta-line" id="meta-line">Loading cattle sales…</p>
+
+      <div class="summary-cards" id="summary-cards"></div>
+      <div id="summary-popover" class="summary-popover" hidden>
+        <div class="summary-popover-backdrop" data-close="1"></div>
+        <div class="summary-popover-card" role="dialog" aria-modal="true" aria-labelledby="summary-popover-title">
+          <div class="summary-popover-head">
+            <h3 id="summary-popover-title">Breakdown</h3>
+            <button type="button" class="summary-popover-close" data-close="1" aria-label="Close">&times;</button>
+          </div>
+          <div id="summary-popover-body"></div>
+        </div>
+      </div>
+
+      <div class="smooth-row">
+        <button type="button" class="smooth-switch" id="smooth-toggle" aria-pressed="false" title="Blend each point with the neighbouring groups">
+          <span class="smooth-switch-label">Smooth</span>
+          <span class="smooth-switch-track" aria-hidden="true"><span class="smooth-switch-knob"></span></span>
+        </button>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg cold weight vs date</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-weight" data-title="Avg cold weight vs date" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-weight"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg amount vs date</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-amount-date" data-title="Avg amount vs date" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-amount-date"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg £/kg vs date</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-price-kg" data-title="Avg £/kg vs date" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-price-kg"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg amount vs DIM</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-amount-dim" data-title="Avg amount vs DIM" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-amount-dim"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg cold weight vs DIM</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-weight-dim" data-title="Avg cold weight vs DIM" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-weight-dim"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg £/kg vs cold weight</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-price-weight" data-title="Avg £/kg vs cold weight" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-price-weight"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <h3>Avg amount vs cold weight</h3>
+            <div class="chart-actions">
+              <button type="button" class="chart-expand" data-canvas="chart-amount-weight" data-title="Avg amount vs cold weight" title="View larger">⤢</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-amount-weight"></canvas></div>
+        </div>
+      </div>
+      <p class="chart-hint"><span class="hint-desktop">Date charts: weekly average per animal over trailing 21 days. Amount and cold weight vs DIM: averages in 30-day DIM groups. £/kg and amount vs cold weight: averages in 25 kg weight groups. Graph lines switches each chart between one line per farm and one line per supplier. Open Buyer and tick the buyers to compare. Click ⤢ to enlarge. In the enlarged view: scroll to zoom, drag to box-zoom, hold Ctrl/⌘ and drag to pan, double-click to reset.</span><span class="hint-phone">Date charts use a 21-day average. DIM charts use 30-day groups. Weight charts use 25 kg groups. Tap ⤢ to open a chart larger.</span></p>
+
+      <div id="chart-modal" class="chart-modal" hidden>
+        <div class="chart-modal-backdrop" data-close="1"></div>
+        <div class="chart-modal-body" role="dialog" aria-modal="true" aria-labelledby="chart-modal-title">
+          <div class="chart-modal-head">
+            <h3 id="chart-modal-title">Chart</h3>
+            <div class="chart-modal-actions">
+              <button type="button" class="secondary small" id="chart-modal-reset">Reset zoom</button>
+              <button type="button" class="secondary small" data-close="1">Close</button>
+            </div>
+          </div>
+          <div id="chart-modal-formula" class="chart-modal-formula" hidden></div>
+          <div class="chart-modal-canvas"><canvas id="chart-modal-canvas"></canvas></div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="cattle-sales-table">
+          <thead>
+            <tr>
+              <th data-sort="cow_id">ID</th>
+              <th data-sort="etag">ETAG</th>
+              <th data-sort="lact">Lact</th>
+              <th data-sort="age_days">Age</th>
+              <th data-sort="dim">DIM</th>
+              <th data-sort="cold_weight_kg">Cold Wt (kg)</th>
+              <th data-sort="amount_gbp">Amount (£)</th>
+              <th data-sort="price_per_kg">£/kg</th>
+              <th data-sort="sale_date">Sale date</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <p class="empty-state" id="empty-state" hidden>No cattle sales match the current filters.</p>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" crossorigin="anonymous"></script>
+  <script>
+    const CAN_IMPORT = {{ 'true' if can_import else 'false' }};
+    const FARM_COLORS = {{ farm_colors | tojson }};
+    const SUPPLIER_COLORS = {
+      Neilds: '#0f766e',
+      Pickstock: '#4d7c0f',
+      Gamechanger: '#0369a1',
+      'Game Changer': '#0369a1',
+      'Market Drayton': '#7c3aed',
+      Warrendale: '#be123c',
+      'Euro Farm Wales': '#0f766e',
+      Pathway: '#7c3aed',
+      Buitelaar: '#b45309',
+    };
+    const SERIES_PALETTE = ['#64748b', '#c2410c', '#4338ca', '#0e7490', '#a16207', '#9f1239', '#15803d'];
+    let chartSeriesBy = 'farm';
+    let chartSmooth = false;
+    let buyerSelection = null;
+    let openSummaryMetric = null;
+    const lastRangeBounds = {};
+    const RANGE_FIELDS = {
+      age: { field: 'age_days', minId: 'age-min', maxId: 'age-max', integer: true },
+      lact: { field: 'lact', minId: 'lact-min', maxId: 'lact-max', integer: true },
+      dim: { field: 'dim', minId: 'dim-min', maxId: 'dim-max', integer: true },
+      weight: { field: 'cold_weight_kg', minId: 'weight-min', maxId: 'weight-max', integer: false },
+    };
+    const SUMMARY_SPECS = {
+      weight: { title: 'Avg weight by supplier', column: 'Avg kg', field: 'cold_weight_kg', dp: 1, payable: false },
+      amount: { title: 'Avg amount by supplier', column: 'Avg amount (£)', field: 'amount_gbp', dp: 2, payable: true, money: true },
+      price: { title: 'Avg £/kg by supplier', column: 'Avg £/kg', field: 'price_per_kg', dp: 2, payable: true, money: true },
+      dim: { title: 'Avg DIM by supplier', column: 'Avg DIM', field: 'dim', dp: 0, payable: false },
+    };
+    let allRows = [];
+    let sortKey = 'sale_date';
+    let sortDir = -1;
+    let loadingCount = 0;
+    let dateFilterReady = false;
+    let isInitialCattleSalesLoad = true;
+    const charts = {};
+    const chartSpecs = {};
+    let modalChart = null;
+    let openModalCanvasId = null;
+    const ROLL_WINDOW_DAYS = 21;
+    const CHART_IDS = ['chart-weight', 'chart-amount-date', 'chart-price-kg', 'chart-amount-dim', 'chart-weight-dim', 'chart-price-weight', 'chart-amount-weight'];
+
+    function selectedValues(selector) {
+      return [...document.querySelectorAll(`${selector} .slicer-btn.selected`)].map(btn => btn.dataset.value);
+    }
+
+    function bindSlicers(selector, minSelected = 1) {
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        btn.addEventListener('click', () => {
+          const selected = btn.classList.contains('selected');
+          const count = document.querySelectorAll(`${selector} .slicer-btn.selected`).length;
+          if (selected && count <= minSelected) return;
+          btn.classList.toggle('selected', !selected);
+          btn.setAttribute('aria-pressed', btn.classList.contains('selected') ? 'true' : 'false');
+          if (selector === '.farm-slicer' || selector === '.category-slicer' || selector === '.gender-slicer') fetchData();
+          else refreshView();
+        });
+      });
+    }
+
+    function bindExclusiveSlicer(selector, onChange) {
+      document.querySelectorAll(`${selector} .slicer-btn`).forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn.classList.contains('selected')) return;
+          document.querySelectorAll(`${selector} .slicer-btn`).forEach(other => {
+            const on = other === btn;
+            other.classList.toggle('selected', on);
+            other.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+          onChange(btn.dataset.value);
+        });
+      });
+    }
+
+    function monthKeyFromIso(iso) {
+      const [y, m] = iso.split('-');
+      return `${y}-${m}`;
+    }
+
+    function monthLabel(key) {
+      const [y, m] = key.split('-').map(Number);
+      const d = new Date(y, m - 1, 1);
+      return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+    }
+
+    function monthToDateFrom(key) {
+      const [y, m] = key.split('-').map(Number);
+      return `${y}-${String(m).padStart(2, '0')}-01`;
+    }
+
+    function monthToDateTo(key) {
+      const [y, m] = key.split('-').map(Number);
+      const last = new Date(y, m, 0).getDate();
+      return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+    }
+
+    function populateMonthSelects(bounds, { resetRange = false } = {}) {
+      const fromSel = document.getElementById('date-from');
+      const toSel = document.getElementById('date-to');
+      if (!bounds?.min || !bounds?.max) {
+        fromSel.innerHTML = '';
+        toSel.innerHTML = '';
+        dateFilterReady = false;
+        return;
+      }
+      const previousFrom = fromSel.value;
+      const previousTo = toSel.value;
+      const months = [];
+      let d = new Date(bounds.min + 'T00:00:00');
+      d = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = new Date(bounds.max + 'T00:00:00');
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (d <= endMonth) {
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      }
+      const opts = months.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join('');
+      dateFilterReady = false;
+      fromSel.innerHTML = opts;
+      toSel.innerHTML = opts;
+      const canPreserve = !resetRange
+        && previousFrom
+        && previousTo
+        && months.includes(previousFrom)
+        && months.includes(previousTo);
+      if (canPreserve) {
+        fromSel.value = previousFrom;
+        toSel.value = previousTo;
+      } else {
+        const endIdx = months.length - 1;
+        const startIdx = Math.max(0, endIdx - 11);
+        fromSel.value = months[startIdx];
+        toSel.value = months[endIdx];
+      }
+      dateFilterReady = true;
+    }
+
+    function filteredRows() {
+      if (!dateFilterReady) return allRows;
+      let from = document.getElementById('date-from').value;
+      let to = document.getElementById('date-to').value;
+      if (!from || !to) return allRows;
+      if (from > to) { const t = from; from = to; to = t; }
+      const fromDate = monthToDateFrom(from);
+      const toDate = monthToDateTo(to);
+      return allRows.filter(r => r.sale_date >= fromDate && r.sale_date <= toDate);
+    }
+
+    function buildQueryParams() {
+      const params = new URLSearchParams();
+      selectedValues('.farm-slicer').forEach(f => params.append('farm', f));
+      selectedValues('.category-slicer').forEach(c => params.append('category', c));
+      selectedValues('.gender-slicer').forEach(g => params.append('gender', g));
+      params.set('include_unmatched', 'true');
+      return params;
+    }
+
+    function buyersFromRows(rows) {
+      return [...new Set((rows || []).map(r => r.buyer).filter(Boolean))].sort();
+    }
+
+    function effectiveBuyerSelection(available) {
+      if (buyerSelection === null) return null;
+      if (buyerSelection.size === 0) return new Set();
+      const kept = available.filter(name => buyerSelection.has(name));
+      if (!kept.length || kept.length === available.length) return null;
+      return new Set(kept);
+    }
+
+    function buyerTriggerLabel(available, selected) {
+      if (!available.length) return 'No buyers';
+      if (selected === null) return 'All';
+      if (!selected.size) return 'None selected';
+      if (selected.size === 1) return [...selected][0];
+      return `${selected.size} selected`;
+    }
+
+    function renderBuyerFilter() {
+      const panel = document.getElementById('buyer-panel');
+      const label = document.getElementById('buyer-trigger-label');
+      if (!panel || !label) return;
+      const available = buyersFromRows(filteredRows());
+      const selected = effectiveBuyerSelection(available);
+      buyerSelection = selected;
+      label.textContent = buyerTriggerLabel(available, selected);
+      if (!available.length) {
+        panel.innerHTML = '<p class="buyer-empty">No buyers in this range.</p>';
+        return;
+      }
+      const allOn = selected === null;
+      const options = available.map(name => {
+        const checked = allOn || selected.has(name);
+        return `<label class="buyer-option"><input type="checkbox" class="buyer-cb" value="${escapeHtml(name)}"${checked ? ' checked' : ''}><span>${escapeHtml(name)}</span></label>`;
+      }).join('');
+      panel.innerHTML =
+        `<label class="buyer-option buyer-option-all"><input type="checkbox" id="buyer-all"${allOn ? ' checked' : ''}><span>All</span></label>` +
+        options;
+      const allBox = document.getElementById('buyer-all');
+      if (allBox) {
+        allBox.indeterminate = !allOn && selected.size > 0 && selected.size < available.length;
+      }
+    }
+
+    function setBuyerDropdownOpen(open) {
+      const trigger = document.getElementById('buyer-trigger');
+      const panel = document.getElementById('buyer-panel');
+      if (!trigger || !panel) return;
+      panel.hidden = !open;
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function buyerScopedRows() {
+      const dated = filteredRows();
+      const available = buyersFromRows(dated);
+      const selected = effectiveBuyerSelection(available);
+      if (selected === null) return dated;
+      if (!selected.size) return [];
+      return dated.filter(r => selected.has(r.buyer));
+    }
+
+    function parseNum(raw) {
+      const text = String(raw ?? '').trim();
+      if (text === '') return null;
+      const n = Number(text);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function sameNum(a, b) {
+      if (a == null || b == null) return false;
+      return Math.abs(a - b) < 1e-6;
+    }
+
+    function formatBound(n, integer) {
+      if (integer) return String(Math.round(n));
+      return String(Math.round(n * 100) / 100);
+    }
+
+    function isShownFullRange(extent, shown, integer) {
+      if (!extent || shown[0] == null || shown[1] == null) return false;
+      return sameNum(shown[0], Number(formatBound(extent[0], integer)))
+        && sameNum(shown[1], Number(formatBound(extent[1], integer)));
+    }
+
+    function limitForFilter(shown, raw, integer) {
+      if (sameNum(shown, Number(formatBound(raw, integer)))) return raw;
+      return shown;
+    }
+
+    function readRangePair(minEl, maxEl) {
+      let min = parseNum(minEl && minEl.value);
+      let max = parseNum(maxEl && maxEl.value);
+      if (min != null && max != null && min > max) { const t = min; min = max; max = t; }
+      return [min, max];
+    }
+
+    function numericExtent(rows, field) {
+      const vals = rows.map(r => r[field]).filter(v => v != null && Number.isFinite(Number(v))).map(Number);
+      if (!vals.length) return null;
+      return [Math.min(...vals), Math.max(...vals)];
+    }
+
+    function clearRangeFilters() {
+      Object.keys(RANGE_FIELDS).forEach(key => { lastRangeBounds[key] = null; });
+    }
+
+    function syncRangeInputs(rows) {
+      let narrowed = false;
+      Object.entries(RANGE_FIELDS).forEach(([key, spec]) => {
+        const minEl = document.getElementById(spec.minId);
+        const maxEl = document.getElementById(spec.maxId);
+        if (!minEl || !maxEl) return;
+        const extent = numericExtent(rows, spec.field);
+        const prev = lastRangeBounds[key];
+        const current = readRangePair(minEl, maxEl);
+        const stillDefault = !prev || isShownFullRange(prev, current, spec.integer);
+        if (!extent) {
+          minEl.value = '';
+          maxEl.value = '';
+          minEl.disabled = true;
+          maxEl.disabled = true;
+          lastRangeBounds[key] = null;
+          return;
+        }
+        minEl.disabled = false;
+        maxEl.disabled = false;
+        let min = extent[0];
+        let max = extent[1];
+        if (!stillDefault) {
+          const chosenMin = current[0] == null ? extent[0] : current[0];
+          const chosenMax = current[1] == null ? extent[1] : current[1];
+          if (chosenMax < extent[0] || chosenMin > extent[1]) {
+            min = extent[0];
+            max = extent[1];
+          } else {
+            min = Math.max(chosenMin, extent[0]);
+            max = Math.min(chosenMax, extent[1]);
+          }
+        }
+        minEl.value = formatBound(min, spec.integer);
+        maxEl.value = formatBound(max, spec.integer);
+        lastRangeBounds[key] = extent;
+        const shown = readRangePair(minEl, maxEl);
+        if (!isShownFullRange(extent, shown, spec.integer)) narrowed = true;
+      });
+      const funnel = document.getElementById('range-filter-btn');
+      if (funnel) funnel.classList.toggle('is-active', narrowed);
+      const clearBtn = document.getElementById('range-filter-clear');
+      if (clearBtn) clearBtn.disabled = !narrowed;
+    }
+
+    function rowPassesRanges(row) {
+      return Object.entries(RANGE_FIELDS).every(([key, spec]) => {
+        const extent = lastRangeBounds[key];
+        if (!extent) return true;
+        const minEl = document.getElementById(spec.minId);
+        const maxEl = document.getElementById(spec.maxId);
+        const [min, max] = readRangePair(minEl, maxEl);
+        if (min == null || max == null) return true;
+        const minLimit = limitForFilter(min, extent[0], spec.integer);
+        const maxLimit = limitForFilter(max, extent[1], spec.integer);
+        if (sameNum(minLimit, extent[0]) && sameNum(maxLimit, extent[1])) return true;
+        const value = row[spec.field];
+        if (value == null || !Number.isFinite(Number(value))) return false;
+        const n = Number(value);
+        return n >= minLimit && n <= maxLimit;
+      });
+    }
+
+    function displayedRows() {
+      return buyerScopedRows().filter(rowPassesRanges);
+    }
+
+    function fmtNum(v, dp = 2) {
+      if (v == null || Number.isNaN(v)) return '—';
+      return Number(v).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    }
+
+    function salesPaymentAmountCell(row) {
+      if (row.is_rejected) {
+        const label = '<span class="amount-rejected">Rejected</span>';
+        if (!row.event_matched) return label;
+        const params = new URLSearchParams();
+        params.set('farm', row.farm);
+        if (row.event_date) {
+          params.set('event_from', row.event_date);
+          params.set('event_to', row.event_date);
+        }
+        params.set('has_amount', '1');
+        if (row.etag) params.set('highlight', row.etag);
+        return `<a href="/office-admin/sales-payments?${params.toString()}" title="Open in Sales Payments">${label}</a>`;
+      }
+      const amountText = fmtNum(row.amount_gbp);
+      if (row.amount_gbp == null || !row.event_matched) return amountText;
+      const params = new URLSearchParams();
+      params.set('farm', row.farm);
+      if (row.event_date) {
+        params.set('event_from', row.event_date);
+        params.set('event_to', row.event_date);
+      }
+      params.set('has_amount', '1');
+      if (row.etag) params.set('highlight', row.etag);
+      return `<a href="/office-admin/sales-payments?${params.toString()}" title="Open in Sales Payments">£${amountText}</a>`;
+    }
+
+    function payableRows(rows) {
+      return rows.filter(r => !r.is_rejected);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function avgMetric(rows, key, dp = 2) {
+      const vals = rows.map(r => r[key]).filter(v => v != null && !Number.isNaN(Number(v))).map(Number);
+      if (!vals.length) return null;
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const f = Math.pow(10, dp);
+      return Math.round(mean * f) / f;
+    }
+
+    function renderSummary(rows) {
+      const payable = payableRows(rows);
+      const avgWeight = avgMetric(rows, 'cold_weight_kg', 1);
+      const avgAmount = avgMetric(payable, 'amount_gbp', 2);
+      const avgPriceKg = avgMetric(payable, 'price_per_kg', 2);
+      const avgDim = avgMetric(rows, 'dim', 0);
+      const cards = [
+        { metric: 'weight', label: 'Avg weight (kg)', hint: 'Show average weight by supplier', value: avgWeight != null ? fmtNum(avgWeight, 1) : '—' },
+        { metric: 'amount', label: 'Avg amount (£)', hint: 'Show average amount by supplier', value: avgAmount != null ? fmtNum(avgAmount, 2) : '—' },
+        { metric: 'price', label: 'Avg £/kg', hint: 'Show average £/kg by weight class and supplier', value: avgPriceKg != null ? fmtNum(avgPriceKg, 2) : '—' },
+        { metric: 'dim', label: 'Avg DIM', hint: 'Show average amount by DIM group and buyer', value: avgDim != null ? String(Math.round(avgDim)) : '—' },
+      ];
+      document.getElementById('summary-cards').innerHTML = cards.map(c =>
+        `<button type="button" class="summary-card" data-metric="${c.metric}" title="${escapeHtml(c.hint)}">` +
+        `<div class="label">${escapeHtml(c.label)}</div>` +
+        `<div class="value">${escapeHtml(c.value)}</div></button>`
+      ).join('');
+      if (openSummaryMetric) fillSummaryPopover(rows, openSummaryMetric);
+    }
+
+    function supplierBreakdown(rows, spec) {
+      const source = spec.payable ? payableRows(rows) : rows;
+      const groups = new Map();
+      source.forEach(row => {
+        const value = row[spec.field];
+        if (value == null || !Number.isFinite(Number(value))) return;
+        const name = row.buyer || 'Unknown';
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(Number(value));
+      });
+      return [...groups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, vals]) => ({
+          name,
+          n: vals.length,
+          avg: vals.reduce((sum, value) => sum + value, 0) / vals.length,
+        }));
+    }
+
+    function formatBreakdownValue(avg, spec) {
+      if (avg == null || Number.isNaN(avg)) return '—';
+      const text = spec.dp === 0 ? String(Math.round(avg)) : fmtNum(avg, spec.dp);
+      return spec.money ? `£${text}` : text;
+    }
+
+    function fillSummaryPopover(rows, metric) {
+      const spec = SUMMARY_SPECS[metric];
+      const title = document.getElementById('summary-popover-title');
+      const body = document.getElementById('summary-popover-body');
+      const card = document.querySelector('.summary-popover-card');
+      if (!spec || !title || !body) return;
+      if (metric === 'price' || metric === 'dim') {
+        if (card) card.classList.add('is-wide');
+        fillGroupedPopover(rows, metric);
+        return;
+      }
+      if (card) card.classList.remove('is-wide');
+      title.textContent = spec.title;
+      const lines = supplierBreakdown(rows, spec);
+      if (!lines.length) {
+        body.innerHTML = '<p class="summary-empty">No sales to break down for the current filters.</p>';
+        return;
+      }
+      body.innerHTML =
+        '<table class="summary-breakdown simple"><thead><tr>' +
+        '<th>Supplier</th><th>' + escapeHtml(spec.column) + '</th><th>Animals</th>' +
+        '</tr></thead><tbody>' +
+        lines.map(line =>
+          `<tr><td>${escapeHtml(line.name)}</td><td>${escapeHtml(formatBreakdownValue(line.avg, spec))}</td><td>${line.n}</td></tr>`
+        ).join('') +
+        '</tbody></table>';
+    }
+
+    function groupedAverageCell(vals, spec) {
+      if (!vals || !vals.length) return '—';
+      const avg = vals.reduce((sum, value) => sum + value, 0) / vals.length;
+      return `${escapeHtml(formatBreakdownValue(avg, spec))}<span class="cell-n">${vals.length}</span>`;
+    }
+
+    function fillGroupedPopover(rows, metric) {
+      const title = document.getElementById('summary-popover-title');
+      const body = document.getElementById('summary-popover-body');
+      const isPrice = metric === 'price';
+      const spec = isPrice
+        ? { dp: 2, money: true }
+        : { dp: 2, money: true };
+      const field = isPrice ? 'price_per_kg' : 'amount_gbp';
+      const bucketOf = isPrice
+        ? (row => weightBucketStart(row.cold_weight_kg))
+        : (row => dimBucketMid(row.dim));
+      const labelOf = isPrice
+        ? (start => `${start}–${start + WEIGHT_BUCKET_SIZE - 1} kg`)
+        : (mid => {
+            const lo = mid - DIM_BUCKET_SIZE / 2;
+            const hi = lo + DIM_BUCKET_SIZE - 1;
+            return `${lo}–${hi}`;
+          });
+      title.textContent = isPrice ? 'Avg £/kg by weight and supplier' : 'Avg amount by DIM and buyer';
+      const source = payableRows(rows).filter(row => {
+        const bucket = bucketOf(row);
+        const value = row[field];
+        return bucket != null && value != null && Number.isFinite(Number(value));
+      });
+      if (!source.length) {
+        body.innerHTML = '<p class="summary-empty">No sales to break down for the current filters.</p>';
+        return;
+      }
+      const buyers = [...new Set(source.map(row => row.buyer || 'Unknown'))].sort((a, b) => a.localeCompare(b));
+      const groups = new Map();
+      source.forEach(row => {
+        const key = bucketOf(row);
+        if (!groups.has(key)) groups.set(key, { key, cells: {} });
+        const name = row.buyer || 'Unknown';
+        if (!groups.get(key).cells[name]) groups.get(key).cells[name] = [];
+        groups.get(key).cells[name].push(Number(row[field]));
+      });
+      const lines = [...groups.values()].sort((a, b) => a.key - b.key);
+      const rowHeader = isPrice ? 'Cold weight' : 'DIM';
+      body.innerHTML =
+        '<p class="summary-note">Each figure is the average. The small number is how many animals.</p>' +
+        '<table class="summary-breakdown"><thead><tr><th>' + escapeHtml(rowHeader) + '</th>' +
+        buyers.map(name => `<th>${escapeHtml(name)}</th>`).join('') +
+        '</tr></thead><tbody>' +
+        lines.map(line =>
+          `<tr><td>${escapeHtml(labelOf(line.key))}</td>` +
+          buyers.map(name => `<td>${groupedAverageCell(line.cells[name], spec)}</td>`).join('') +
+          '</tr>'
+        ).join('') +
+        '</tbody></table>';
+    }
+
+    function openSummaryPopover(metric) {
+      if (!SUMMARY_SPECS[metric]) return;
+      openSummaryMetric = metric;
+      document.getElementById('summary-popover').hidden = false;
+      fillSummaryPopover(displayedRows(), metric);
+    }
+
+    function closeSummaryPopover() {
+      openSummaryMetric = null;
+      const popover = document.getElementById('summary-popover');
+      if (popover) popover.hidden = true;
+    }
+
+    function isoAddDays(iso, days) {
+      const d = new Date(`${iso}T00:00:00`);
+      d.setDate(d.getDate() + days);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function sortRows(data) {
+      return [...data].sort((a, b) => {
+        let av = a[sortKey];
+        let bv = b[sortKey];
+        if (sortKey === 'sale_date') { av = av || ''; bv = bv || ''; }
+        else if (typeof av === 'string') { av = av.toLowerCase(); bv = (bv || '').toLowerCase(); }
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (av < bv) return -1 * sortDir;
+        if (av > bv) return sortDir;
+        return 0;
+      });
+    }
+
+    function renderTable(data) {
+      const body = document.getElementById('table-body');
+      const empty = document.getElementById('empty-state');
+      const sorted = sortRows(data);
+      body.innerHTML = '';
+      if (!sorted.length) {
+        empty.hidden = false;
+        return;
+      }
+      empty.hidden = true;
+      sorted.forEach(row => {
+        const tr = document.createElement('tr');
+        if (!row.event_matched) tr.classList.add('unmatched');
+        tr.innerHTML = `
+          <td data-label="ID">${row.cow_id || '—'}${!row.event_matched ? ' <span title="No matching sale exit event (SOLD/GAME/PATH)" style="color:#b45309">⚠</span>' : ''}</td>
+          <td data-label="ETAG">${row.etag || '—'}</td>
+          <td data-label="Lact">${row.lact != null ? row.lact : '—'}</td>
+          <td data-label="Age">${row.age || '—'}</td>
+          <td data-label="DIM">${row.dim != null ? row.dim : '—'}</td>
+          <td data-label="Cold wt">${fmtNum(row.cold_weight_kg)}</td>
+          <td data-label="Amount">${salesPaymentAmountCell(row)}</td>
+          <td data-label="£/kg">${fmtNum(row.price_per_kg)}</td>
+          <td data-label="Sale date">${fmtDate(row.sale_date) || '—'}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    function mondayOfWeek(iso) {
+      const dow = new Date(`${iso}T00:00:00`).getDay();
+      return isoAddDays(iso, dow === 0 ? -6 : 1 - dow);
+    }
+
+    function strictWeekEndAnchors(minDate, maxDate) {
+      const anchors = [];
+      let cur = mondayOfWeek(minDate);
+      while (cur <= maxDate) {
+        const weekEnd = isoAddDays(cur, 6);
+        if (weekEnd <= maxDate) anchors.push(weekEnd);
+        cur = isoAddDays(cur, 7);
+      }
+      return anchors;
+    }
+
+    function seriesLabel(row) {
+      if (chartSeriesBy === 'supplier') return row.buyer || 'Unknown';
+      return row.farm || 'Unknown';
+    }
+
+    function seriesColor(label, index) {
+      if (chartSeriesBy === 'supplier') {
+        return SUPPLIER_COLORS[label] || SERIES_PALETTE[index % SERIES_PALETTE.length];
+      }
+      return FARM_COLORS[label] || SERIES_PALETTE[index % SERIES_PALETTE.length];
+    }
+
+    function seriesNames(rows) {
+      return [...new Set(rows.map(seriesLabel))].sort((a, b) => a.localeCompare(b));
+    }
+
+    function plottedValues(raw) {
+      const values = raw.map(v => (v == null || Number.isNaN(Number(v)) ? null : Number(v)));
+      if (!chartSmooth) return values;
+      return values.map((y, i) => {
+        if (y == null) return null;
+        let sum = 0;
+        let count = 0;
+        for (let j = i - 1; j <= i + 1; j++) {
+          if (values[j] == null) continue;
+          sum += values[j];
+          count += 1;
+        }
+        if (!count) return null;
+        return Math.round((sum / count) * 100) / 100;
+      });
+    }
+
+    function trailingAnimalAverage(rows, series, endDate, yKey) {
+      const startDate = isoAddDays(endDate, -(ROLL_WINDOW_DAYS - 1));
+      const animals = rows.filter(r =>
+        seriesLabel(r) === series &&
+        r[yKey] != null &&
+        r.sale_date >= startDate &&
+        r.sale_date <= endDate
+      );
+      if (!animals.length) return null;
+      const sum = animals.reduce((a, r) => a + Number(r[yKey]), 0);
+      return {
+        y: Math.round((sum / animals.length) * 100) / 100,
+        _n: animals.length,
+      };
+    }
+
+    function weeklyTrailingLineSpec(rows, yKey, yTitle) {
+      const series = seriesNames(rows);
+      const saleDates = rows.map(r => r.sale_date).filter(Boolean);
+      if (!saleDates.length) {
+        return {
+          type: 'line',
+          data: { labels: [], datasets: [] },
+          options: { responsive: true, maintainAspectRatio: false },
+        };
+      }
+      const minDate = saleDates.reduce((a, b) => (a < b ? a : b));
+      const maxDate = saleDates.reduce((a, b) => (a > b ? a : b));
+      const anchors = strictWeekEndAnchors(minDate, maxDate).filter(endDate =>
+        series.some(name => trailingAnimalAverage(rows, name, endDate, yKey))
+      );
+      const weekMeta = anchors.map(endDate => {
+        const bySeries = {};
+        series.forEach(name => {
+          bySeries[name] = trailingAnimalAverage(rows, name, endDate, yKey);
+        });
+        return { endDate, bySeries };
+      });
+      const datasets = series.map((name, index) => {
+        const color = seriesColor(name, index);
+        return {
+          label: name,
+          data: plottedValues(weekMeta.map(w => {
+            const r = w.bySeries[name];
+            return r ? r.y : null;
+          })),
+          borderColor: color,
+          backgroundColor: color,
+          spanGaps: true,
+          tension: 0.35,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+        };
+      });
+      return {
+        type: 'line',
+        data: { labels: anchors.map(d => fmtDate(d)), datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const w = weekMeta[items[0]?.dataIndex];
+                  return w ? `Week ending ${fmtDate(w.endDate)}` : '';
+                },
+                label: (ctx) => {
+                  const w = weekMeta[ctx.dataIndex];
+                  const r = w?.bySeries[ctx.dataset.label];
+                  if (r == null) return `${ctx.dataset.label}: —`;
+                  const n = r._n > 1
+                    ? ` (${r._n} animals in 21 days)`
+                    : (r._n === 1 ? ' (1 animal in 21 days)' : '');
+                  return `${ctx.dataset.label}: ${fmtNum(r.y)}${n}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Week ending' },
+              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+            },
+            y: { title: { display: true, text: yTitle } },
+          },
+        },
+      };
+    }
+
+    const DIM_BUCKET_SIZE = 30;
+
+    function dimBucketMid(dim) {
+      const d = Number(dim);
+      if (!Number.isFinite(d)) return null;
+      return Math.floor(d / DIM_BUCKET_SIZE) * DIM_BUCKET_SIZE + DIM_BUCKET_SIZE / 2;
+    }
+
+    function weightedLineFit(points) {
+      let sw = 0;
+      let swx = 0;
+      let swy = 0;
+      let swxx = 0;
+      let swxy = 0;
+      points.forEach(p => {
+        const w = p.w > 0 ? p.w : 1;
+        sw += w;
+        swx += w * p.x;
+        swy += w * p.y;
+        swxx += w * p.x * p.x;
+        swxy += w * p.x * p.y;
+      });
+      const denom = sw * swxx - swx * swx;
+      if (points.length < 2 || denom === 0) return null;
+      const slope = (sw * swxy - swx * swy) / denom;
+      const intercept = (swy - slope * swx) / sw;
+      return { slope, intercept };
+    }
+
+    function dimWeightTrendLines(series, bucketMeta) {
+      return series.map((name, index) => {
+        const points = [];
+        bucketMeta.forEach(b => {
+          const r = b.bySeries[name];
+          if (!r) return;
+          points.push({ x: b.mid, y: r.y, w: r._n });
+        });
+        return { name, color: seriesColor(name, index), points, fit: weightedLineFit(points) };
+      });
+    }
+
+    function dimWeightFormulaHtml(trendLines) {
+      const fitted = (trendLines || []).filter(t => t.fit);
+      if (!fitted.length) {
+        return '<p class="chart-modal-formula-note">Not enough groups to fit a straight line.</p>';
+      }
+      const items = fitted.map(t => {
+        const per10 = t.fit.slope * 10;
+        const abs = Math.abs(per10);
+        const amount = fmtNum(abs, abs >= 1 ? 1 : 2);
+        let change = 'cold weight stays about the same';
+        if (abs >= 0.05) {
+          change = per10 > 0
+            ? `cold weight increases by ${amount} kg`
+            : `cold weight decreases by ${amount} kg`;
+        }
+        const sign = t.fit.slope < 0 ? '−' : '+';
+        const equation = `weight = ${fmtNum(t.fit.intercept, 1)} ${sign} ${fmtNum(Math.abs(t.fit.slope), 2)} × DIM`;
+        return '<p><span class="trend-swatch" style="background:' + t.color + '"></span>' +
+          '<strong>' + escapeHtml(t.name) + ':</strong> as DIM increases by 10, ' + change + '. ' +
+          '<span class="chart-modal-formula-eq">' + equation + '</span></p>';
+      }).join('');
+      return items +
+        '<p class="chart-modal-formula-note">The dashed line is a straight fit through the group averages, weighted by how many animals are in each group.</p>';
+    }
+
+    function dimBinnedLineSpec(rows, yKey, yTitle, excludeRejected) {
+      const filtered = rows.filter(r => r.dim != null && r[yKey] != null && (!excludeRejected || !r.is_rejected));
+      const series = seriesNames(filtered);
+      if (!filtered.length) {
+        return {
+          type: 'line',
+          data: { labels: [], datasets: [] },
+          options: { responsive: true, maintainAspectRatio: false },
+          trendLines: yKey === 'cold_weight_kg' ? [] : null,
+        };
+      }
+
+      const mids = [...new Set(filtered.map(r => dimBucketMid(r.dim)).filter(m => m != null))].sort((a, b) => a - b);
+      const bucketMeta = mids.map(mid => {
+        const lo = mid - DIM_BUCKET_SIZE / 2;
+        const hi = lo + DIM_BUCKET_SIZE - 1;
+        const bySeries = {};
+        series.forEach(name => {
+          const animals = filtered.filter(r => seriesLabel(r) === name && dimBucketMid(r.dim) === mid);
+          if (!animals.length) {
+            bySeries[name] = null;
+            return;
+          }
+          const avg = animals.reduce((s, r) => s + Number(r[yKey]), 0) / animals.length;
+          bySeries[name] = { y: Math.round(avg * 100) / 100, _n: animals.length };
+        });
+        return { mid, lo, hi, bySeries };
+      });
+
+      const datasets = series.map((name, index) => {
+        const color = seriesColor(name, index);
+        return {
+          label: name,
+          data: plottedValues(bucketMeta.map(b => {
+            const r = b.bySeries[name];
+            return r ? r.y : null;
+          })),
+          borderColor: color,
+          backgroundColor: color,
+          spanGaps: true,
+          tension: 0.35,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+        };
+      });
+
+      return {
+        type: 'line',
+        data: {
+          labels: bucketMeta.map(b => String(b.mid)),
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const b = bucketMeta[items[0]?.dataIndex];
+                  return b ? `DIM ${b.lo}–${b.hi}` : '';
+                },
+                label: (ctx) => {
+                  const b = bucketMeta[ctx.dataIndex];
+                  const r = b?.bySeries[ctx.dataset.label];
+                  if (r == null) return `${ctx.dataset.label}: —`;
+                  const n = r._n > 1 ? ` (${r._n} animals)` : (r._n === 1 ? ' (1 animal)' : '');
+                  return `${ctx.dataset.label}: ${fmtNum(r.y)}${n}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'DIM (30-day groups)' },
+              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+            },
+            y: { title: { display: true, text: yTitle } },
+          },
+        },
+        trendLines: yKey === 'cold_weight_kg' ? dimWeightTrendLines(series, bucketMeta) : null,
+      };
+    }
+
+    const WEIGHT_BUCKET_SIZE = 25;
+
+    function weightBucketStart(kg) {
+      const w = Number(kg);
+      if (!Number.isFinite(w)) return null;
+      return Math.floor(w / WEIGHT_BUCKET_SIZE) * WEIGHT_BUCKET_SIZE;
+    }
+
+    function weightBinnedLineSpec(rows, yKey, yTitle) {
+      const filtered = rows.filter(r => r.cold_weight_kg != null && r[yKey] != null && !r.is_rejected);
+      const series = seriesNames(filtered);
+      if (!filtered.length) {
+        return {
+          type: 'line',
+          data: { labels: [], datasets: [] },
+          options: { responsive: true, maintainAspectRatio: false },
+        };
+      }
+
+      const starts = [...new Set(filtered.map(r => weightBucketStart(r.cold_weight_kg)).filter(s => s != null))].sort((a, b) => a - b);
+      const bucketMeta = starts.map(lo => {
+        const hi = lo + WEIGHT_BUCKET_SIZE - 1;
+        const bySeries = {};
+        series.forEach(name => {
+          const animals = filtered.filter(r => seriesLabel(r) === name && weightBucketStart(r.cold_weight_kg) === lo);
+          if (!animals.length) {
+            bySeries[name] = null;
+            return;
+          }
+          const avg = animals.reduce((s, r) => s + Number(r[yKey]), 0) / animals.length;
+          bySeries[name] = { y: Math.round(avg * 100) / 100, _n: animals.length };
+        });
+        return { lo, hi, bySeries };
+      });
+
+      const datasets = series.map((name, index) => {
+        const color = seriesColor(name, index);
+        return {
+          label: name,
+          data: plottedValues(bucketMeta.map(b => {
+            const r = b.bySeries[name];
+            return r ? r.y : null;
+          })),
+          borderColor: color,
+          backgroundColor: color,
+          spanGaps: true,
+          tension: 0.35,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+        };
+      });
+
+      return {
+        type: 'line',
+        data: {
+          labels: bucketMeta.map(b => String(b.lo)),
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const b = bucketMeta[items[0]?.dataIndex];
+                  return b ? `${b.lo}–${b.hi} kg` : '';
+                },
+                label: (ctx) => {
+                  const b = bucketMeta[ctx.dataIndex];
+                  const r = b?.bySeries[ctx.dataset.label];
+                  if (r == null) return `${ctx.dataset.label}: —`;
+                  const n = r._n > 1 ? ` (${r._n} animals)` : (r._n === 1 ? ' (1 animal)' : '');
+                  return `${ctx.dataset.label}: £${fmtNum(r.y)}${n}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Cold weight (25 kg groups)' },
+              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+            },
+            y: { title: { display: true, text: yTitle } },
+          },
+        },
+      };
+    }
+
+    function zoomPluginOptions(enableZoom) {
+      if (!enableZoom) {
+        return {
+          pan: { enabled: false },
+          zoom: { wheel: { enabled: false }, pinch: { enabled: false }, drag: { enabled: false } },
+        };
+      }
+      return {
+        pan: { enabled: true, mode: 'xy', modifierKey: 'ctrl' },
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          drag: {
+            enabled: true,
+            backgroundColor: 'rgba(30,58,95,0.15)',
+            borderColor: 'rgba(30,58,95,0.6)',
+            borderWidth: 1,
+          },
+          mode: 'xy',
+        },
+      };
+    }
+
+    function configWithZoom(spec, enableZoom) {
+      const options = Object.assign({}, spec.options || {});
+      const plugins = Object.assign({}, options.plugins || {});
+      plugins.zoom = zoomPluginOptions(enableZoom);
+      options.plugins = plugins;
+      return { type: spec.type, data: spec.data, options };
+    }
+
+    function destroyChart(id) {
+      if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    }
+
+    function renderCharts(rows) {
+      const payable = payableRows(rows);
+      const specs = {
+        'chart-weight': weeklyTrailingLineSpec(rows, 'cold_weight_kg', 'Avg cold weight (kg)'),
+        'chart-amount-date': weeklyTrailingLineSpec(payable, 'amount_gbp', 'Avg amount (£)'),
+        'chart-price-kg': weeklyTrailingLineSpec(payable, 'price_per_kg', 'Avg £/kg'),
+        'chart-amount-dim': dimBinnedLineSpec(rows, 'amount_gbp', 'Avg amount (£)', true),
+        'chart-weight-dim': dimBinnedLineSpec(rows, 'cold_weight_kg', 'Avg cold weight (kg)', false),
+        'chart-price-weight': weightBinnedLineSpec(rows, 'price_per_kg', 'Avg £/kg'),
+        'chart-amount-weight': weightBinnedLineSpec(rows, 'amount_gbp', 'Avg amount (£)'),
+      };
+      let chartError = '';
+      CHART_IDS.forEach(id => {
+        chartSpecs[id] = specs[id];
+        try {
+          destroyChart(id);
+          charts[id] = new Chart(document.getElementById(id), configWithZoom(specs[id], false));
+        } catch (err) {
+          chartError = err?.message || String(err);
+          console.error('Chart render failed', id, err);
+        }
+      });
+      if (openModalCanvasId && chartSpecs[openModalCanvasId]) {
+        renderModalChart(openModalCanvasId);
+      }
+      return chartError;
+    }
+
+    function renderModalChart(canvasId) {
+      const spec = chartSpecs[canvasId];
+      const formulaEl = document.getElementById('chart-modal-formula');
+      if (!spec || typeof Chart === 'undefined') return;
+      if (modalChart) { modalChart.destroy(); modalChart = null; }
+      const config = configWithZoom(spec, true);
+      if (canvasId === 'chart-weight-dim' && spec.trendLines) {
+        const labels = spec.data.labels || [];
+        const trendDatasets = spec.trendLines.filter(t => t.fit).map(t => {
+          const xs = t.points.map(p => p.x);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          return {
+            label: t.name + ' trend',
+            trend: true,
+            data: labels.map(label => {
+              const x = Number(label);
+              if (!Number.isFinite(x) || x < minX || x > maxX) return null;
+              return Math.round((t.fit.intercept + t.fit.slope * x) * 100) / 100;
+            }),
+            borderColor: t.color,
+            backgroundColor: t.color,
+            borderDash: [6, 4],
+            borderWidth: 2,
+            spanGaps: true,
+            tension: 0,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+          };
+        });
+        config.data = {
+          labels: spec.data.labels,
+          datasets: (spec.data.datasets || []).concat(trendDatasets),
+        };
+        const legend = config.options.plugins.legend || {};
+        const legendLabels = Object.assign({}, legend.labels || {});
+        legendLabels.filter = (item, data) => {
+          const datasets = data?.datasets || data?.data?.datasets || [];
+          return !datasets[item.datasetIndex]?.trend;
+        };
+        config.options.plugins.legend = Object.assign({}, legend, { labels: legendLabels });
+        const tooltip = config.options.plugins.tooltip || {};
+        config.options.plugins.tooltip = Object.assign({}, tooltip, {
+          filter: (item) => !item.dataset?.trend,
+        });
+        formulaEl.hidden = false;
+        formulaEl.innerHTML = dimWeightFormulaHtml(spec.trendLines);
+      } else if (formulaEl) {
+        formulaEl.hidden = true;
+        formulaEl.innerHTML = '';
+      }
+      modalChart = new Chart(document.getElementById('chart-modal-canvas'), config);
+    }
+
+    function openChartModal(canvasId, title) {
+      openModalCanvasId = canvasId;
+      document.getElementById('chart-modal-title').textContent = title || '';
+      document.getElementById('chart-modal').hidden = false;
+      renderModalChart(canvasId);
+    }
+
+    function closeChartModal() {
+      document.getElementById('chart-modal').hidden = true;
+      const formulaEl = document.getElementById('chart-modal-formula');
+      if (formulaEl) {
+        formulaEl.hidden = true;
+        formulaEl.innerHTML = '';
+      }
+      if (modalChart) { modalChart.destroy(); modalChart = null; }
+      openModalCanvasId = null;
+    }
+
+    function bindChartUI() {
+      document.querySelectorAll('.chart-expand').forEach(btn => {
+        btn.addEventListener('click', () => openChartModal(btn.dataset.canvas, btn.dataset.title));
+      });
+      document.querySelectorAll('#chart-modal [data-close]').forEach(el => el.addEventListener('click', closeChartModal));
+      document.getElementById('chart-modal-reset').addEventListener('click', () => { if (modalChart) modalChart.resetZoom(); });
+      document.getElementById('chart-modal-canvas').addEventListener('dblclick', () => { if (modalChart) modalChart.resetZoom(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.getElementById('chart-modal').hidden) closeChartModal(); });
+    }
+
+    function setLoading(on) {
+      loadingCount = Math.max(0, loadingCount + (on ? 1 : -1));
+      document.getElementById('meta-line').classList.toggle('is-loading', loadingCount > 0);
+    }
+
+    function refreshView() {
+      renderBuyerFilter();
+      syncRangeInputs(buyerScopedRows());
+      const rows = displayedRows();
+      const unmatched = rows.filter(r => !r.event_matched).length;
+      let meta = `${rows.length} sale line(s)`;
+      if (unmatched) meta += ` · ${unmatched} without matching sale exit event`;
+      document.getElementById('meta-line').textContent = meta;
+      renderSummary(rows);
+      renderTable(rows);
+      renderCharts(rows);
+    }
+
+    async function fetchData() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/office/api/cattle-sales?${buildQueryParams()}`);
+        if (!res.ok) throw new Error('Failed to load');
+        const payload = await res.json();
+        allRows = payload.rows || [];
+        populateMonthSelects(payload.date_bounds, { resetRange: isInitialCattleSalesLoad });
+        isInitialCattleSalesLoad = false;
+        refreshView();
+      } catch (err) {
+        document.getElementById('meta-line').textContent = 'Failed to load cattle sales.';
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    {% if can_import %}
+    function hideImportMessage() {
+      const el = document.getElementById('import-message');
+      if (!el) return;
+      el.hidden = true;
+      el.className = 'message';
+      const body = el.querySelector('.message-body');
+      if (body) body.replaceChildren();
+    }
+
+    function showImportNotice(text) {
+      const el = document.getElementById('import-message');
+      const body = el.querySelector('.message-body');
+      el.className = 'message warn';
+      el.hidden = false;
+      body.replaceChildren();
+      const line = document.createElement('div');
+      line.textContent = text || '';
+      body.appendChild(line);
+    }
+
+    function showImportMessage(result) {
+      if (!result) { hideImportMessage(); return; }
+      const warnings = [...(result.warnings || []), ...(result.skipped_files || [])];
+      const el = document.getElementById('import-message');
+      const body = el.querySelector('.message-body');
+      body.replaceChildren();
+      const summary = document.createElement('div');
+      summary.textContent = result.message || `Imported ${result.rows_total || 0} line(s)`;
+      body.appendChild(summary);
+      if (warnings.length) {
+        const log = document.createElement('div');
+        log.className = 'import-log';
+        warnings.forEach(warning => {
+          const line = document.createElement('div');
+          line.textContent = warning;
+          log.appendChild(line);
+        });
+        body.appendChild(log);
+      }
+      el.className = 'message warn';
+      el.hidden = false;
+    }
+
+    document.getElementById('import-message-close').addEventListener('click', hideImportMessage);
+
+    document.getElementById('import-btn').addEventListener('click', async () => {
+      const scope = document.getElementById('import-scope').value;
+      let days = null;
+      if (scope === 'custom') {
+        const input = window.prompt('How many days back should I scan the mailbox?', '90');
+        if (input === null) return;
+        days = parseInt(input, 10);
+        if (!Number.isFinite(days) || days <= 0) {
+          showImportNotice('Enter a positive whole number of days.');
+          return;
+        }
+      } else if (!window.confirm('Check the mailbox for new Neilds, Pickstock, Gamechanger, and Market Drayton cattle-sale PDFs and import them now?')) {
+        return;
+      }
+
+      const btn = document.getElementById('import-btn');
+      const statusEl = document.getElementById('import-status');
+      btn.disabled = true;
+      statusEl.textContent = days
+        ? `Importing last ${days} days…`
+        : 'Importing from email…';
+      const params = new URLSearchParams();
+      if (days) params.set('days', String(days));
+      const url = '/office/api/cattle-sales/import' + (params.toString() ? `?${params.toString()}` : '');
+      try {
+        const res = await fetch(url, { method: 'POST' });
+        const data = await res.json();
+        showImportMessage(data);
+        if (res.ok) fetchData();
+      } catch (err) {
+        showImportNotice('Cattle sales import failed.');
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        statusEl.textContent = '';
+      }
+    });
+
+    document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('upload-input').click());
+    document.getElementById('upload-input').addEventListener('change', async (e) => {
+      const files = e.target.files;
+      if (!files?.length) return;
+      const fd = new FormData();
+      [...files].forEach(f => fd.append('files', f));
+      const res = await fetch('/office/api/cattle-sales/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      showImportMessage(data);
+      if (res.ok) fetchData();
+      e.target.value = '';
+    });
+    {% endif %}
+
+    document.querySelectorAll('#cattle-sales-table thead th').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.sort;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = 1; }
+        renderTable(displayedRows());
+      });
+    });
+
+    document.getElementById('date-from').addEventListener('change', refreshView);
+    document.getElementById('date-to').addEventListener('change', refreshView);
+    document.getElementById('buyer-trigger').addEventListener('click', () => {
+      const panel = document.getElementById('buyer-panel');
+      setBuyerDropdownOpen(panel.hidden);
+    });
+    document.getElementById('buyer-filter').addEventListener('change', (e) => {
+      const input = e.target;
+      if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox') return;
+      const available = buyersFromRows(filteredRows());
+      if (input.id === 'buyer-all') {
+        buyerSelection = input.checked ? null : new Set();
+      } else {
+        const checked = [...document.querySelectorAll('#buyer-panel .buyer-cb:checked')].map(cb => cb.value);
+        buyerSelection = checked.length && checked.length < available.length ? new Set(checked) : (checked.length ? null : new Set());
+      }
+      refreshView();
+    });
+    document.addEventListener('click', (event) => {
+      const dropdown = document.getElementById('buyer-filter');
+      if (dropdown && !dropdown.contains(event.target)) setBuyerDropdownOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      setBuyerDropdownOpen(false);
+      const panel = document.getElementById('range-filter-panel');
+      const funnel = document.getElementById('range-filter-btn');
+      if (panel) panel.hidden = true;
+      if (funnel) funnel.setAttribute('aria-expanded', 'false');
+      closeSummaryPopover();
+    });
+    document.getElementById('range-filter-btn').addEventListener('click', () => {
+      const panel = document.getElementById('range-filter-panel');
+      const open = panel.hidden;
+      panel.hidden = !open;
+      document.getElementById('range-filter-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.getElementById('range-filter-clear').addEventListener('click', () => {
+      clearRangeFilters();
+      refreshView();
+    });
+    document.addEventListener('click', (event) => {
+      const box = document.getElementById('range-filter');
+      if (box && !box.contains(event.target)) {
+        document.getElementById('range-filter-panel').hidden = true;
+        document.getElementById('range-filter-btn').setAttribute('aria-expanded', 'false');
+      }
+    });
+    Object.values(RANGE_FIELDS).forEach(spec => {
+      [spec.minId, spec.maxId].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', refreshView);
+        el.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        });
+      });
+    });
+    document.getElementById('summary-cards').addEventListener('click', (event) => {
+      const card = event.target.closest('.summary-card');
+      if (!card) return;
+      if (openSummaryMetric === card.dataset.metric) closeSummaryPopover();
+      else openSummaryPopover(card.dataset.metric);
+    });
+    document.querySelectorAll('#summary-popover [data-close]').forEach(el => {
+      el.addEventListener('click', closeSummaryPopover);
+    });
+
+    bindSlicers('.farm-slicer');
+    bindSlicers('.gender-slicer');
+    bindExclusiveSlicer('.category-slicer', () => {
+      clearRangeFilters();
+      fetchData();
+    });
+    bindExclusiveSlicer('.series-slicer', (value) => {
+      chartSeriesBy = value === 'supplier' ? 'supplier' : 'farm';
+      renderCharts(displayedRows());
+    });
+    document.getElementById('smooth-toggle').addEventListener('click', () => {
+      const btn = document.getElementById('smooth-toggle');
+      chartSmooth = !chartSmooth;
+      btn.classList.toggle('selected', chartSmooth);
+      btn.setAttribute('aria-pressed', chartSmooth ? 'true' : 'false');
+      renderCharts(displayedRows());
+    });
+    bindChartUI();
+    fetchData();
+  </script>
+{% endblock %}
