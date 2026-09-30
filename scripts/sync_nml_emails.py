@@ -24,6 +24,7 @@ logging.basicConfig(
 
 
 def _sync_cattle_sales() -> bool:
+    os.environ["CATTLE_SALES_CRON"] = "1"
     from services.cattle_sales_email import outlook_cattle_sales_configured
     from services.cattle_sales_import import sync_outlook_cattle_sales
     from services.database import get_session, init_db

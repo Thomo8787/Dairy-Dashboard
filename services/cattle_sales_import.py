@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 import gc
+import hashlib
+import json
 import logging
+import os
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_SALES_DIR = PROJECT_ROOT / "data" / "cattle_sales"
+INCOMING_DIR = LOCAL_SALES_DIR / "incoming"
+QUEUE_PATH = LOCAL_SALES_DIR / "cron_queue.json"
+OCR_RESULT_PATH = LOCAL_SALES_DIR / "ocr_result.json"
+# These buyers send scanned pages. OCR runs in a fresh process so it does not
+# sit on top of the database libraries and blow the 512MB cron.
+SCANNED_PARSER_HINTS = frozenset({"neilds", "market_drayton"})
 
 
 def _parse_sale_pdf(
@@ -237,23 +248,135 @@ def _upsert(
     return (inserted, updated)
 
 
+def _as_date(value: Any) -> dt.date | None:
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return dt.date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _as_datetime(value: Any) -> dt.datetime | None:
+    if isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return dt.datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _empty_import_summary() -> dict[str, Any]:
+    return {
+        "files_processed": 0,
+        "files_skipped": 0,
+        "rows_inserted": 0,
+        "rows_updated": 0,
+        "rows_total": 0,
+        "warnings": [],
+        "skipped_files": [],
+    }
+
+
+def _merge_import_summary(total: dict[str, Any], part: dict[str, Any]) -> None:
+    for key in (
+        "files_processed",
+        "files_skipped",
+        "rows_inserted",
+        "rows_updated",
+        "rows_total",
+    ):
+        total[key] += part.get(key) or 0
+    total["warnings"].extend(part.get("warnings") or [])
+    total["skipped_files"].extend(part.get("skipped_files") or [])
+
+
+def _import_one_result(
+    db: Session,
+    result: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    summary = _empty_import_summary()
+    source_file = source.get("source_file") or "unknown.pdf"
+    farm = result.get("farm")
+    sale_date = _as_date(result.get("sale_date"))
+    lines = list(result.get("lines") or [])
+    for warning in result.get("warnings") or []:
+        summary["warnings"].append(f"{source_file}: {warning}")
+    if not lines:
+        summary["files_skipped"] = 1
+        summary["skipped_files"].append(f"{source_file}: no animal lines found")
+        return summary
+
+    message_id = source.get("message_id") or "local-file"
+    received_at = _as_datetime(source.get("received_at")) or dt.datetime.now()
+    parsed_by_key: dict[tuple[str, str, dt.date], dict[str, Any]] = {}
+    for line in lines:
+        line_sale_date = _as_date(line.get("kill_date")) or sale_date
+        if not line_sale_date:
+            summary["warnings"].append(
+                f"{source_file}: no kill date for {line.get('etag', 'unknown tag')}"
+            )
+            continue
+        etag = normalize_etag(line.get("etag"))
+        if not etag:
+            continue
+        line_farm = farm or _farm_for_etag(db, etag, line_sale_date)
+        if not line_farm:
+            summary["warnings"].append(f"{source_file}: could not determine farm for {etag}")
+            continue
+        parsed_by_key[(line_farm, etag, line_sale_date)] = {
+            "farm": line_farm,
+            "etag": etag,
+            "sale_date": line_sale_date,
+            "cold_weight_kg": line["cold_weight_kg"],
+            "reject_kg": line.get("reject_kg"),
+            "kill_date": _as_date(line.get("kill_date")) or line_sale_date,
+            "amount_gbp": line["amount_gbp"],
+            "buyer": result.get("buyer") or "Pickstock",
+            "source_message_id": message_id,
+            "source_file": source_file,
+            "source_received": received_at,
+        }
+    if not parsed_by_key:
+        summary["files_skipped"] = 1
+        summary["skipped_files"].append(f"{source_file}: no usable animal lines")
+        return summary
+    inserted, updated = _upsert(db, parsed_by_key)
+    if inserted or updated:
+        db.flush()
+    summary["files_processed"] = 1
+    summary["rows_inserted"] = inserted
+    summary["rows_updated"] = updated
+    summary["rows_total"] = inserted + updated
+    return summary
+
+
+def import_parsed_cattle_sale(
+    db: Session,
+    parsed: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    return _import_one_result(db, parsed, source)
+
+
 def import_cattle_sale_sources(
     db: Session,
     sources: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    parsed_by_key: dict[tuple[str, str, dt.date], dict[str, Any]] = {}
-    warnings: list[str] = []
-    skipped_files: list[str] = []
-    files_processed = 0
-    files_skipped = 0
-    now = dt.datetime.now()
-
+    summary = _empty_import_summary()
     for source in sources:
         source_file = source.get("source_file") or "unknown.pdf"
         content = source.get("content")
         if not content:
-            skipped_files.append(f"{source_file}: empty PDF")
-            files_skipped += 1
+            summary["files_skipped"] += 1
+            summary["skipped_files"].append(f"{source_file}: empty PDF")
             continue
         try:
             result = _parse_sale_pdf(
@@ -264,70 +387,11 @@ def import_cattle_sale_sources(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Could not parse cattle sale PDF %s", source_file)
-            skipped_files.append(f"Could not read PDF: {source_file} ({exc})")
-            files_skipped += 1
+            summary["files_skipped"] += 1
+            summary["skipped_files"].append(f"Could not read PDF: {source_file} ({exc})")
             continue
-
-        farm = result.get("farm")
-        sale_date = result.get("sale_date")
-        lines = list(result.get("lines") or [])
-        for warning in result.get("warnings") or []:
-            warnings.append(f"{source_file}: {warning}")
-
-        if not lines:
-            skipped_files.append(f"{source_file}: no animal lines found")
-            files_skipped += 1
-            continue
-
-        message_id = source.get("message_id") or "local-file"
-        received_at = source.get("received_at") or now
-        ingested = False
-        for line in lines:
-            line_sale_date = line.get("kill_date") or sale_date
-            if not line_sale_date:
-                warnings.append(f"{source_file}: no kill date for {line.get('etag', 'unknown tag')}")
-                continue
-            etag = normalize_etag(line.get("etag"))
-            if not etag:
-                continue
-            line_farm = farm or _farm_for_etag(db, etag, line_sale_date)
-            if not line_farm:
-                warnings.append(f"{source_file}: could not determine farm for {etag}")
-                continue
-            key = (line_farm, etag, line_sale_date)
-            parsed_by_key[key] = {
-                "farm": line_farm,
-                "etag": etag,
-                "sale_date": line_sale_date,
-                "cold_weight_kg": line["cold_weight_kg"],
-                "reject_kg": line.get("reject_kg"),
-                "kill_date": line.get("kill_date") or line_sale_date,
-                "amount_gbp": line["amount_gbp"],
-                "buyer": result.get("buyer") or "Pickstock",
-                "source_message_id": message_id,
-                "source_file": source_file,
-                "source_received": received_at,
-            }
-            ingested = True
-
-        if ingested:
-            files_processed += 1
-        else:
-            files_skipped += 1
-            skipped_files.append(f"{source_file}: no usable animal lines")
-
-    inserted, updated = _upsert(db, parsed_by_key)
-    if inserted or updated:
-        db.flush()
-    return {
-        "files_processed": files_processed,
-        "files_skipped": files_skipped,
-        "rows_inserted": inserted,
-        "rows_updated": updated,
-        "rows_total": inserted + updated,
-        "warnings": warnings,
-        "skipped_files": skipped_files,
-    }
+        _merge_import_summary(summary, _import_one_result(db, result, source))
+    return summary
 
 
 def import_local_cattle_sale_pdfs(db: Session) -> dict[str, Any]:
@@ -352,29 +416,119 @@ def _known_sale_filenames(db: Session) -> set[str]:
     return {row for row in rows if row}
 
 
-def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[str, Any] | None:
-    from services.cattle_sales_email import (
-        CattleSalePdfEmailService,
-        outlook_cattle_sales_configured,
+def _load_queue() -> dict[str, Any] | None:
+    if not QUEUE_PATH.is_file():
+        return None
+    try:
+        payload = json.loads(QUEUE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Could not read cattle-sale cron queue")
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload.setdefault("pending", [])
+    payload.setdefault("summary", _empty_import_summary())
+    return payload
+
+
+def _save_queue(payload: dict[str, Any]) -> None:
+    LOCAL_SALES_DIR.mkdir(parents=True, exist_ok=True)
+    QUEUE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _clear_queue() -> None:
+    for path in (QUEUE_PATH, OCR_RESULT_PATH):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove %s", path)
+
+
+def _incoming_pdf_path(message_id: str, source_file: str) -> Path:
+    digest = hashlib.sha1(f"{message_id}|{source_file}".encode()).hexdigest()[:12]
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", source_file)[:80] or "remittance.pdf"
+    return INCOMING_DIR / f"{digest}_{safe}"
+
+
+def _exec_scanned_ocr(item: dict[str, Any]) -> None:
+    """Replace this process with a small OCR job, then resume the queue."""
+    script = PROJECT_ROOT / "scripts" / "ocr_cattle_sale_pdf.py"
+    resume = PROJECT_ROOT / "scripts" / "sync_nml_emails.py"
+    logger.info("Starting OCR process for %s", item.get("source_file"))
+    os.execv(
+        sys.executable,
+        [
+            sys.executable,
+            str(script),
+            "--pdf",
+            item["path"],
+            "--hint",
+            item.get("parser_hint") or "neilds",
+            "--source-file",
+            item.get("source_file") or "remittance.pdf",
+            "--out",
+            str(OCR_RESULT_PATH),
+            "--resume",
+            str(resume),
+        ],
     )
 
-    if not outlook_cattle_sales_configured():
-        return None
+
+def _apply_ocr_result(db: Session, payload: dict[str, Any]) -> None:
+    if not OCR_RESULT_PATH.is_file():
+        return
+    pending = payload.get("pending") or []
+    if not pending:
+        OCR_RESULT_PATH.unlink(missing_ok=True)
+        return
+    try:
+        parsed_payload = json.loads(OCR_RESULT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Could not read OCR result")
+        OCR_RESULT_PATH.unlink(missing_ok=True)
+        return
+    item = pending[0]
+    source = {
+        "source_file": item.get("source_file"),
+        "message_id": item.get("message_id"),
+        "received_at": item.get("received_at"),
+        "parser_hint": item.get("parser_hint"),
+    }
+    try:
+        result = import_parsed_cattle_sale(db, parsed_payload.get("parsed") or {}, source)
+        db.commit()
+    except Exception:
+        logger.exception("Could not save OCR result for %s", item.get("source_file"))
+        db.rollback()
+        result = _empty_import_summary()
+        result["files_skipped"] = 1
+        result["skipped_files"] = [f"{item.get('source_file')}: could not save OCR result"]
+    _merge_import_summary(payload["summary"], result)
+    logger.info(
+        "Cattle-sale %s: %s inserted, %s updated",
+        item.get("source_file"),
+        result.get("rows_inserted") or 0,
+        result.get("rows_updated") or 0,
+    )
+    pdf_path = Path(item.get("path") or "")
+    if pdf_path.is_file():
+        pdf_path.unlink(missing_ok=True)
+    pending.pop(0)
+    payload["pending"] = pending
+    _save_queue(payload)
+    OCR_RESULT_PATH.unlink(missing_ok=True)
+
+
+def _download_cattle_sale_queue(db: Session, *, days: int | None) -> dict[str, Any] | None:
+    from services.cattle_sales_email import CattleSalePdfEmailService
+
     since = None
     top = 40
     if days is not None and days > 0:
         since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         top = min(250, max(40, days))
-    summary: dict[str, Any] = {
-        "files_processed": 0,
-        "files_skipped": 0,
-        "rows_inserted": 0,
-        "rows_updated": 0,
-        "rows_total": 0,
-        "warnings": [],
-        "skipped_files": [],
-    }
-    found_any = False
+    INCOMING_DIR.mkdir(parents=True, exist_ok=True)
+    pending: list[dict[str, Any]] = []
     try:
         pdfs = CattleSalePdfEmailService().iter_pdfs(
             since=since,
@@ -385,59 +539,118 @@ def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[s
     except Exception:
         logger.exception("Outlook cattle-sale fetch failed")
         return None
-
-    LOCAL_SALES_DIR.mkdir(parents=True, exist_ok=True)
     for item in pdfs:
-        found_any = True
-        name = Path(item["source_file"]).name
+        name = Path(item.get("source_file") or "remittance.pdf").name
         content = item.get("content") or b""
         item["content"] = b""
+        destination = _incoming_pdf_path(item.get("message_id") or name, name)
         try:
-            (LOCAL_SALES_DIR / name).write_bytes(content)
+            destination.write_bytes(content)
         except Exception:
             logger.exception("Could not save cattle-sale PDF %s", name)
+            del content
+            continue
+        del content
+        received = item.get("received_at")
+        pending.append(
+            {
+                "path": str(destination),
+                "source_file": name,
+                "message_id": item.get("message_id") or "outlook",
+                "received_at": received.isoformat() if isinstance(received, dt.datetime) else received,
+                "parser_hint": item.get("parser_hint"),
+                "ocr_attempts": 0,
+            }
+        )
+        gc.collect()
+    if not pending:
+        return None
+    payload = {"pending": pending, "summary": _empty_import_summary()}
+    _save_queue(payload)
+    logger.info("Cattle-sale queue: %s PDF(s) saved for import", len(pending))
+    return payload
+
+
+def _process_cattle_sale_queue(db: Session, payload: dict[str, Any]) -> dict[str, Any] | None:
+    _apply_ocr_result(db, payload)
+    while payload.get("pending"):
+        item = payload["pending"][0]
+        hint = (item.get("parser_hint") or "").strip().lower()
+        pdf_path = Path(item.get("path") or "")
+        if hint in SCANNED_PARSER_HINTS and os.environ.get("CATTLE_SALES_CRON") == "1":
+            attempts = int(item.get("ocr_attempts") or 0)
+            if attempts >= 1 and not OCR_RESULT_PATH.is_file():
+                logger.warning("Skipping scanned remittance after a failed OCR: %s", item.get("source_file"))
+                payload["summary"]["files_skipped"] += 1
+                payload["summary"]["skipped_files"].append(
+                    f"{item.get('source_file')}: scanned remittance OCR did not finish"
+                )
+                if pdf_path.is_file():
+                    pdf_path.unlink(missing_ok=True)
+                payload["pending"].pop(0)
+                _save_queue(payload)
+                continue
+            item["ocr_attempts"] = attempts + 1
+            _save_queue(payload)
+            _exec_scanned_ocr(item)
+        if not pdf_path.is_file():
+            payload["summary"]["files_skipped"] += 1
+            payload["summary"]["skipped_files"].append(f"{item.get('source_file')}: file missing")
+            payload["pending"].pop(0)
+            _save_queue(payload)
+            continue
+        content = pdf_path.read_bytes()
         try:
             result = import_cattle_sale_sources(
                 db,
                 [
                     {
                         "content": content,
-                        "source_file": name,
-                        "message_id": item.get("message_id") or "outlook",
-                        "received_at": item.get("received_at"),
-                        "parser_hint": item.get("parser_hint"),
+                        "source_file": item.get("source_file"),
+                        "message_id": item.get("message_id"),
+                        "received_at": _as_datetime(item.get("received_at")),
+                        "parser_hint": hint,
                     }
                 ],
             )
             db.commit()
         except Exception:
-            logger.exception("Cattle-sale import failed for %s", name)
+            logger.exception("Cattle-sale import failed for %s", item.get("source_file"))
             db.rollback()
-            summary["files_skipped"] += 1
-            summary["skipped_files"].append(f"{name}: import failed")
-            continue
+            result = _empty_import_summary()
+            result["files_skipped"] = 1
+            result["skipped_files"] = [f"{item.get('source_file')}: import failed"]
         finally:
             del content
             gc.collect()
-        for key in (
-            "files_processed",
-            "files_skipped",
-            "rows_inserted",
-            "rows_updated",
-            "rows_total",
-        ):
-            summary[key] += result.get(key) or 0
-        summary["warnings"].extend(result.get("warnings") or [])
-        summary["skipped_files"].extend(result.get("skipped_files") or [])
+        _merge_import_summary(payload["summary"], result)
         logger.info(
             "Cattle-sale %s: %s inserted, %s updated",
-            name,
+            item.get("source_file"),
             result.get("rows_inserted") or 0,
             result.get("rows_updated") or 0,
         )
-    if not found_any:
+        pdf_path.unlink(missing_ok=True)
+        payload["pending"].pop(0)
+        _save_queue(payload)
+    summary = payload.get("summary") or _empty_import_summary()
+    _clear_queue()
+    if not summary["files_processed"] and not summary["files_skipped"]:
         return None
     return summary
+
+
+def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[str, Any] | None:
+    from services.cattle_sales_email import outlook_cattle_sales_configured
+
+    payload = _load_queue()
+    if payload is None:
+        if not outlook_cattle_sales_configured():
+            return None
+        payload = _download_cattle_sale_queue(db, days=days)
+        if payload is None:
+            return None
+    return _process_cattle_sale_queue(db, payload)
 
 
 def ensure_local_cattle_sales(db: Session) -> dict[str, Any] | None:
