@@ -31,11 +31,23 @@ def _parse_sale_pdf(
     *,
     mailbox_farm: str | None,
     source_file: str | None,
+    parser_hint: str | None = None,
 ) -> dict[str, Any]:
     from services.cattle_sale_pdf import extract_pdf_text
 
     text = extract_pdf_text(content)
     name = source_file or ""
+    hint = (parser_hint or "").strip().lower()
+    if hint == "neilds":
+        return parse_neilds_pdf(content, mailbox_farm=mailbox_farm, source_file=source_file)
+    if hint == "pickstock":
+        return parse_pickstock_pdf(content, mailbox_farm=mailbox_farm, source_file=source_file)
+    if hint in {"gamechanger", "blade"}:
+        return parse_blade_pdf(content, mailbox_farm=mailbox_farm, source_file=source_file)
+    if hint in {"market_drayton", "drayton"}:
+        return parse_market_drayton_pdf(
+            content, mailbox_farm=mailbox_farm, source_file=source_file
+        )
     if looks_like_warrendale_pdf(text, name) or looks_like_warrendale_pdf("", name):
         return parse_warrendale_pdf(
             content,
@@ -247,6 +259,7 @@ def import_cattle_sale_sources(
                 content,
                 mailbox_farm=source.get("mailbox_farm") or _farm_from_filename(source_file),
                 source_file=source_file,
+                parser_hint=source.get("parser_hint"),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Could not parse cattle sale PDF %s", source_file)
@@ -369,13 +382,14 @@ def sync_outlook_cattle_sales(db: Session) -> dict[str, Any] | None:
                 "source_file": name,
                 "message_id": item.get("message_id") or "outlook",
                 "received_at": item.get("received_at"),
+                "parser_hint": item.get("parser_hint"),
             }
         )
     return import_cattle_sale_sources(db, sources)
 
 
 def ensure_local_cattle_sales(db: Session) -> dict[str, Any] | None:
-    """Import local remittance PDFs, and Outlook Payment Advice when configured."""
+    """Import local remittance PDFs, and Outlook remittance PDFs when configured."""
     outlook_result = sync_outlook_cattle_sales(db)
     files = _iter_local_pdfs()
     if not files:

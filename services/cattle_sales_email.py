@@ -1,4 +1,11 @@
-"""Fetch Blade Payment Advice PDFs from the DataFlow Outlook mailbox."""
+"""Fetch cattle remittance PDFs from Outlook by sender domain.
+
+Neilds: auctionmarts.com
+Pickstock: pickstocktelford.co.uk
+Gamechanger: gamechangerfarming.com
+Market Drayton: barbers-auctions.co.uk
+Warrendale: not fetched from email.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +17,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from services.blade_pdf import looks_like_blade_pdf, looks_like_blade_pdf_bytes
-from services.warrendale_pdf import looks_like_warrendale_pdf, looks_like_warrendale_pdf_bytes
+from services.blade_pdf import looks_like_blade_pdf
+from services.cattle_sale_pdf import extract_pdf_text
 from services.graph_client import (
     GRAPH_BASE,
     _request_with_retries,
@@ -21,22 +28,22 @@ from services.graph_client import (
     graph_headers,
     require_azure_config,
 )
+from services.market_drayton_pdf import looks_like_market_drayton_pdf
+from services.neilds_pdf import looks_like_neilds_pdf
+from services.pickstock_pdf import looks_like_pickstock_pdf
 
 logger = logging.getLogger(__name__)
 
 CATTLE_SALES_LOOKBACK_DAYS = 45
 _MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
-_SUBJECT_FRAGMENTS = (
-    "Payment Advice",
-    "PaymentAdvice",
-    "Gamechanger",
-    "GameChanger",
-    "Purchase Order",
-    "PurchaseOrder",
-    "Warrendale",
-    "Wagyu",
+
+# Sender domain -> parser hint used on import. Warrendale is local-file only.
+_SENDER_DOMAINS: tuple[tuple[str, str], ...] = (
+    ("auctionmarts.com", "neilds"),
+    ("pickstocktelford.co.uk", "pickstock"),
+    ("gamechangerfarming.com", "gamechanger"),
+    ("barbers-auctions.co.uk", "market_drayton"),
 )
-_SEARCH_TERMS = ("PaymentAdvice", "PurchaseOrder")
 
 
 def _parse_received(raw: str | None) -> datetime | None:
@@ -56,8 +63,51 @@ def outlook_cattle_sales_configured() -> bool:
     return True
 
 
+def _message_sender(message: dict) -> str:
+    for key in ("from", "sender"):
+        address = (
+            (message.get(key) or {})
+            .get("emailAddress", {})
+            .get("address", "")
+        )
+        if address:
+            return str(address).lower()
+    return ""
+
+
+def _parser_hint_for_sender(address: str) -> str | None:
+    haystack = (address or "").lower()
+    for domain, hint in _SENDER_DOMAINS:
+        if domain in haystack:
+            return hint
+    return None
+
+
+def _pdf_matches_hint(content: bytes, name: str, hint: str) -> bool:
+    if hint == "neilds":
+        looks = looks_like_neilds_pdf
+    elif hint == "pickstock":
+        looks = looks_like_pickstock_pdf
+    elif hint == "gamechanger":
+        looks = looks_like_blade_pdf
+    elif hint == "market_drayton":
+        looks = looks_like_market_drayton_pdf
+    else:
+        return False
+    if looks("", name):
+        return True
+    try:
+        text = extract_pdf_text(content)
+    except Exception:
+        text = ""
+    if looks(text, name):
+        return True
+    # Scanned remittances often have no text; still take PDFs from the known sender.
+    return not bool((text or "").strip())
+
+
 class CattleSalePdfEmailService:
-    """Pull Blade Payment Advice PDFs from the same mailbox as other farm mail."""
+    """Pull remittance PDFs from known livestock-buyer sender domains."""
 
     def __init__(self) -> None:
         self.mailbox = os.environ.get("OUTLOOK_MAILBOX", "").strip()
@@ -76,29 +126,73 @@ class CattleSalePdfEmailService:
         since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
         return received_at is not None and received_at >= since_aware
 
-    def _list_filtered_messages(self, *, top: int, since: datetime) -> list[dict]:
-        root = self._mailbox_root()
+    def _from_filter(self, since: datetime) -> str:
         since_iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        subject_clause = " or ".join(
-            f"contains(subject,'{fragment.replace(chr(39), chr(39)*2)}')"
-            for fragment in _SUBJECT_FRAGMENTS
+        domain_clause = " or ".join(
+            f"contains(from/emailAddress/address,'{domain}')"
+            for domain, _hint in _SENDER_DOMAINS
         )
-        scoped = (
+        return (
             f"receivedDateTime ge {since_iso} and hasAttachments eq true "
-            f"and ({subject_clause})"
+            f"and ({domain_clause})"
         )
-        query = urlencode(
-            {
-                "$filter": scoped,
-                "$orderby": "receivedDateTime desc",
-                "$top": str(min(50, max(top, 1))),
-                "$select": "id,subject,receivedDateTime,from,hasAttachments",
-            }
+
+    def _folder_targets(self) -> list[tuple[str, str]]:
+        """Inbox plus Inbox child folders, or CATTLE_SALES_MAIL_FOLDERS names."""
+        root = self._mailbox_root()
+        configured = [
+            part.strip()
+            for part in (os.environ.get("CATTLE_SALES_MAIL_FOLDERS") or "").split(",")
+            if part.strip()
+        ]
+        if configured:
+            return self._folders_by_display_name(configured)
+
+        inbox = graph_get(f"{GRAPH_BASE}/{root}/mailFolders/inbox?$select=id,displayName")
+        inbox_id = inbox.get("id")
+        if not inbox_id:
+            return []
+        targets = [(inbox_id, inbox.get("displayName") or "Inbox")]
+        children = graph_get(
+            f"{GRAPH_BASE}/{root}/mailFolders/inbox/childFolders"
+            f"?$select=id,displayName&$top=50"
         )
-        url: str | None = f"{GRAPH_BASE}/{root}/messages?{query}"
+        for child in children.get("value", []) or []:
+            child_id = child.get("id")
+            if child_id:
+                targets.append((child_id, child.get("displayName") or "folder"))
+        logger.info(
+            "Cattle-sale mail folders: %s",
+            ", ".join(name for _folder_id, name in targets),
+        )
+        return targets
+
+    def _folders_by_display_name(self, names: list[str]) -> list[tuple[str, str]]:
+        root = self._mailbox_root()
+        wanted = {name.lower() for name in names}
+        found: list[tuple[str, str]] = []
+        url: str | None = (
+            f"{GRAPH_BASE}/{root}/mailFolders?$select=id,displayName&$top=50"
+        )
+        pages = 0
+        while url and pages < 10:
+            pages += 1
+            payload = graph_get(url)
+            for folder in payload.get("value", []) or []:
+                display = (folder.get("displayName") or "").strip()
+                folder_id = folder.get("id")
+                if folder_id and display.lower() in wanted:
+                    found.append((folder_id, display))
+            url = payload.get("@odata.nextLink")
+        missing = wanted - {name.lower() for _folder_id, name in found}
+        if missing:
+            logger.warning("Cattle-sale mail folders not found: %s", ", ".join(sorted(missing)))
+        return found
+
+    def _page_messages(self, url: str | None, *, top: int, since: datetime) -> list[dict]:
         by_id: dict[str, dict] = {}
         pages = 0
-        max_pages = max(4, min(20, (top + 49) // 50 + 2))
+        max_pages = max(2, min(12, (top + 49) // 50 + 2))
         try:
             while url and len(by_id) < top and pages < max_pages:
                 pages += 1
@@ -109,6 +203,8 @@ class CattleSalePdfEmailService:
                         continue
                     if not self._received_ok(message, since):
                         continue
+                    if not _parser_hint_for_sender(_message_sender(message)):
+                        continue
                     message_id = message.get("id") or ""
                     if message_id:
                         by_id[message_id] = message
@@ -116,32 +212,34 @@ class CattleSalePdfEmailService:
                         break
                 url = payload.get("@odata.nextLink")
         except Exception:
-            logger.exception("Cattle-sale subject-filtered Graph list failed")
+            logger.exception("Cattle-sale sender message list failed")
         return list(by_id.values())
 
-    def _search_named_messages(self, term: str, *, top: int, since: datetime) -> list[dict]:
+    def _list_folder_messages(self, folder_id: str, *, top: int, since: datetime) -> list[dict]:
         root = self._mailbox_root()
         query = urlencode(
             {
-                "$search": f'"{term}"',
-                "$top": str(min(25, max(top, 1))),
-                "$select": "id,subject,receivedDateTime,from,hasAttachments",
+                "$filter": self._from_filter(since),
+                "$orderby": "receivedDateTime desc",
+                "$top": str(min(50, max(top, 1))),
+                "$select": "id,subject,receivedDateTime,from,sender,hasAttachments",
+            }
+        )
+        url = f"{GRAPH_BASE}/{root}/mailFolders/{folder_id}/messages?{query}"
+        return self._page_messages(url, top=top, since=since)
+
+    def _list_mailbox_messages(self, *, top: int, since: datetime) -> list[dict]:
+        root = self._mailbox_root()
+        query = urlencode(
+            {
+                "$filter": self._from_filter(since),
+                "$orderby": "receivedDateTime desc",
+                "$top": str(min(50, max(top, 1))),
+                "$select": "id,subject,receivedDateTime,from,sender,hasAttachments",
             }
         )
         url = f"{GRAPH_BASE}/{root}/messages?{query}"
-        headers = {**graph_headers(), "ConsistencyLevel": "eventual"}
-        matches: list[dict] = []
-        try:
-            response = _request_with_retries("GET", url, timeout=60, headers=headers)
-            for message in response.json().get("value", []):
-                if not message.get("hasAttachments"):
-                    continue
-                if not self._received_ok(message, since):
-                    continue
-                matches.append(message)
-        except Exception:
-            logger.exception("Cattle-sale %s Graph search failed", term)
-        return matches
+        return self._page_messages(url, top=top, since=since)
 
     def _list_attachments(self, message_id: str) -> list[dict]:
         root = self._mailbox_root()
@@ -176,21 +274,30 @@ class CattleSalePdfEmailService:
         skip_names = {name.lower() for name in (skip_filenames or set())}
 
         by_id: dict[str, dict] = {}
-        for message in self._list_filtered_messages(top=top, since=since_aware):
+        try:
+            for folder_id, _name in self._folder_targets():
+                for message in self._list_folder_messages(
+                    folder_id, top=top, since=since_aware
+                ):
+                    message_id = message.get("id") or ""
+                    if message_id and message_id not in skip_ids:
+                        by_id[message_id] = message
+        except Exception:
+            logger.exception("Cattle-sale Inbox folder scan failed")
+
+        for message in self._list_mailbox_messages(top=top, since=since_aware):
             message_id = message.get("id") or ""
-            if message_id and message_id not in skip_ids:
+            if message_id and message_id not in skip_ids and message_id not in by_id:
                 by_id[message_id] = message
-        for term in _SEARCH_TERMS:
-            for message in self._search_named_messages(term, top=top, since=since_aware):
-                message_id = message.get("id") or ""
-                if message_id and message_id not in skip_ids and message_id not in by_id:
-                    by_id[message_id] = message
 
         found: list[dict[str, Any]] = []
         for message in by_id.values():
             message_id = message.get("id") or ""
+            hint = _parser_hint_for_sender(_message_sender(message))
+            if not hint:
+                continue
             for attachment in self._list_attachments(message_id):
-                name = Path(attachment.get("name") or "payment-advice.pdf").name
+                name = Path(attachment.get("name") or "remittance.pdf").name
                 if not name.lower().endswith(".pdf"):
                     continue
                 if name.lower() in skip_names:
@@ -202,16 +309,8 @@ class CattleSalePdfEmailService:
                 content = self._attachment_bytes(message_id, attachment)
                 if not content or not content.startswith(b"%PDF"):
                     continue
-                name_low = name.lower()
-                name_ok = name_low.startswith("paymentadvice") or name_low.startswith(
-                    "purchaseorder"
-                )
-                if not name_ok:
-                    if not looks_like_blade_pdf("", name) and not looks_like_warrendale_pdf("", name):
-                        if not looks_like_blade_pdf_bytes(
-                            content, name
-                        ) and not looks_like_warrendale_pdf_bytes(content, name):
-                            continue
+                if not _pdf_matches_hint(content, name, hint):
+                    continue
                 found.append(
                     {
                         "content": content,
@@ -219,6 +318,7 @@ class CattleSalePdfEmailService:
                         "message_id": message_id,
                         "subject": message.get("subject"),
                         "received_at": _parse_received(message.get("receivedDateTime")),
+                        "parser_hint": hint,
                     }
                 )
         logger.info("Fetched %s cattle-sale PDF(s) from %s message(s)", len(found), len(by_id))
