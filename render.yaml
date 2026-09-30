@@ -87,7 +87,8 @@ services:
       - key: OUTLOOK_MAILBOX
         sync: false
 
-  # Every 3 hours: NML milk-quality PDFs from @nationalmilklabs.com.
+  # Every 3 hours: NML milk-quality PDFs from @nationalmilklabs.com,
+  # plus cattle remittance PDFs (Neilds, Pickstock, Gamechanger, Market Drayton).
   # Skips emails already imported (by Outlook message ID).
   - type: cron
     name: fetch-nml-emails

@@ -1,4 +1,4 @@
-"""CLI entrypoint for NML milk-quality PDF import (Task Scheduler / cron friendly)."""
+"""CLI entrypoint for NML and cattle remittance PDF import (Render cron / Task Scheduler)."""
 
 from __future__ import annotations
 
@@ -22,8 +22,42 @@ logging.basicConfig(
 )
 
 
+def _sync_cattle_sales() -> bool:
+    from services.cattle_sales_email import outlook_cattle_sales_configured
+    from services.cattle_sales_import import sync_outlook_cattle_sales
+    from services.database import get_session, init_db
+
+    if not outlook_cattle_sales_configured():
+        print("Cattle sales: skipped (Outlook mailbox not configured)")
+        return True
+    try:
+        init_db()
+        with get_session() as session:
+            result = sync_outlook_cattle_sales(session)
+    except Exception:
+        logging.exception("Cattle-sale email sync failed")
+        print("Cattle sales: failed")
+        return False
+    if not result:
+        print("Cattle sales: no new remittance PDFs")
+        return True
+    print(
+        "Cattle sales: "
+        f"{result.get('files_processed', 0)} file(s), "
+        f"{result.get('rows_inserted', 0)} inserted, "
+        f"{result.get('rows_updated', 0)} updated"
+    )
+    for warning in result.get("warnings") or []:
+        print(f"warning: {warning}")
+    for skipped in result.get("skipped_files") or []:
+        print(f"skipped: {skipped}")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Import NML PDFs from the DataFlow Outlook mailbox")
+    parser = argparse.ArgumentParser(
+        description="Import NML and cattle remittance PDFs from the DataFlow Outlook mailbox"
+    )
     parser.add_argument(
         "--days",
         type=int,
@@ -55,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     print(format_nml_summary(result))
     for warning in result.get("warnings") or []:
         print(f"warning: {warning}")
-    return 0
+
+    sales_ok = _sync_cattle_sales()
+    return 0 if sales_ok else 1
 
 
 if __name__ == "__main__":
