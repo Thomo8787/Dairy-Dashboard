@@ -70,7 +70,7 @@ def extract_pdf_images(content: bytes) -> list[bytes]:
 _rapid_ocr = None
 
 
-def _prepare_ocr_image(image_bytes: bytes, *, scale: int = 1, max_edge: int = 1600):
+def _prepare_ocr_image(image_bytes: bytes, *, scale: int = 2, max_edge: int = 1600):
     from PIL import Image, ImageOps
 
     image = Image.open(io.BytesIO(image_bytes))
@@ -134,7 +134,16 @@ def _rapidocr_engine():
         _rapid_ocr = False
         return None
     try:
-        _rapid_ocr = RapidOCR(use_angle_cls=False)
+        # Cap the detector input. The default "min" side length upscales a
+        # full-page scan and the 512MB sales cron dies on the larger statements.
+        _rapid_ocr = RapidOCR(
+            use_angle_cls=False,
+            det_limit_side_len=960,
+            det_limit_type="max",
+            det_model_path="",
+            rec_batch_num=1,
+            rec_model_path="",
+        )
     except Exception:
         logging.getLogger(__name__).exception("RapidOCR failed to start")
         _rapid_ocr = False

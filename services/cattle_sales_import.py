@@ -453,7 +453,7 @@ def _incoming_pdf_path(message_id: str, source_file: str) -> Path:
 def _exec_scanned_ocr(item: dict[str, Any]) -> None:
     """Replace this process with a small OCR job, then resume the queue."""
     script = PROJECT_ROOT / "scripts" / "ocr_cattle_sale_pdf.py"
-    resume = PROJECT_ROOT / "scripts" / "sync_nml_emails.py"
+    resume = PROJECT_ROOT / "scripts" / "sync_sales_data.py"
     logger.info("Starting OCR process for %s", item.get("source_file"))
     os.execv(
         sys.executable,

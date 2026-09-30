@@ -1117,6 +1117,13 @@
       if (popover) popover.hidden = true;
     }
 
+    function fmtDate(iso) {
+      if (!iso) return '';
+      const [y, m, d] = String(iso).split('-').map(Number);
+      if (!y || !m || !d) return String(iso);
+      return new Date(y, m - 1, d).toLocaleDateString('en-GB');
+    }
+
     function isoAddDays(iso, days) {
       const d = new Date(`${iso}T00:00:00`);
       d.setDate(d.getDate() + days);
@@ -1721,12 +1728,17 @@
         allRows = payload.rows || [];
         populateMonthSelects(payload.date_bounds, { resetRange: isInitialCattleSalesLoad });
         isInitialCattleSalesLoad = false;
-        refreshView();
       } catch (err) {
         document.getElementById('meta-line').textContent = 'Failed to load cattle sales.';
         console.error(err);
+        return;
       } finally {
         setLoading(false);
+      }
+      try {
+        refreshView();
+      } catch (err) {
+        console.error(err);
       }
     }
 

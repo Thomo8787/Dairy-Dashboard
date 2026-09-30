@@ -7,6 +7,7 @@ ear tag keeps its own weight and amount.
 from __future__ import annotations
 
 import datetime as dt
+import gc
 import re
 from typing import Any
 
@@ -183,11 +184,13 @@ def _repair_uk_tag(value: str | None) -> str:
         if fallback is None:
             return ""
         return f"UK{fallback.group(1)}"
-    etag = repair_etag(raw[uk_at:])
-    digits = etag[2:] if etag.startswith("UK") else ""
-    if len(digits) != 12 or not digits.isdigit():
+    # Take the first 12 digits after UK. OCR often glues the lot code on the
+    # same token ("UK161195130245 P-1"), and the extra digit must not count.
+    tail = raw[uk_at + 2 :].translate(_OCR_DIGIT)
+    digits = re.sub(r"\D", "", tail)
+    if len(digits) < 12:
         return ""
-    return etag
+    return f"UK{digits[:12]}"
 
 
 def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 14.0) -> list[list[dict[str, Any]]]:
@@ -234,10 +237,17 @@ def _parse_statement_row(row: list[dict[str, Any]]) -> dict[str, Any] | None:
 
     numbers: list[tuple[str, float]] = []
     for token in tokens[tag_at + 1 :]:
-        for match in re.findall(r"\d[\d,]*\.\d+|\d{2,5}", token):
-            value = _to_float(match)
+        for match in re.finditer(r"(\d+)\.(\d{1,2})", token):
+            whole, frac = match.group(1), match.group(2)
+            # A collection date glued to the weight reads as 24/08/24213.1.
+            if len(frac) == 1 and len(whole) > 3:
+                whole = whole[-3:]
+            elif len(whole) > 4:
+                whole = whole[-4:]
+            literal = f"{int(whole)}.{frac}"
+            value = _to_float(literal)
             if value is not None:
-                numbers.append((match.replace(",", ""), value))
+                numbers.append((literal, value))
     money = [
         (token, value)
         for token, value in numbers
@@ -298,10 +308,12 @@ def parse_neilds_pdf(
     ocr_text_parts: list[str] = []
     for image in extract_pdf_images(content):
         words = ocr_words_from_image(image, scale=2)
-        if not words:
-            continue
-        ocr_text_parts.append(" ".join(word["text"] for word in words))
-        ocr_lines.extend(_lines_from_ocr_words(words))
+        del image
+        if words:
+            ocr_text_parts.append(" ".join(word["text"] for word in words))
+            ocr_lines.extend(_lines_from_ocr_words(words))
+        del words
+        gc.collect()
     if ocr_lines:
         joined = "\n".join(ocr_text_parts)
         if farm is None:

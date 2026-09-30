@@ -83,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         args.source_file,
         len(parsed.get("lines") or []),
     )
-    os.execv(sys.executable, [sys.executable, args.resume, "--cattle-sales-only"])
+    for warning in parsed.get("warnings") or []:
+        logger.warning("%s: %s", args.source_file, warning)
+    os.execv(sys.executable, [sys.executable, args.resume])
     return 0
 
 
