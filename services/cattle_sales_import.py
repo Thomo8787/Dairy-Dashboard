@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import gc
 import logging
 from pathlib import Path
 from typing import Any
@@ -364,8 +365,18 @@ def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[s
     if days is not None and days > 0:
         since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         top = min(250, max(40, days))
+    summary: dict[str, Any] = {
+        "files_processed": 0,
+        "files_skipped": 0,
+        "rows_inserted": 0,
+        "rows_updated": 0,
+        "rows_total": 0,
+        "warnings": [],
+        "skipped_files": [],
+    }
+    found_any = False
     try:
-        found = CattleSalePdfEmailService().fetch_pdfs(
+        pdfs = CattleSalePdfEmailService().iter_pdfs(
             since=since,
             skip_message_ids=_known_sale_message_ids(db),
             skip_filenames=_known_sale_filenames(db),
@@ -374,25 +385,59 @@ def sync_outlook_cattle_sales(db: Session, *, days: int | None = None) -> dict[s
     except Exception:
         logger.exception("Outlook cattle-sale fetch failed")
         return None
-    if not found:
-        return None
 
     LOCAL_SALES_DIR.mkdir(parents=True, exist_ok=True)
-    sources: list[dict[str, Any]] = []
-    for item in found:
+    for item in pdfs:
+        found_any = True
         name = Path(item["source_file"]).name
-        destination = LOCAL_SALES_DIR / name
-        destination.write_bytes(item["content"])
-        sources.append(
-            {
-                "content": item["content"],
-                "source_file": name,
-                "message_id": item.get("message_id") or "outlook",
-                "received_at": item.get("received_at"),
-                "parser_hint": item.get("parser_hint"),
-            }
+        content = item.get("content") or b""
+        item["content"] = b""
+        try:
+            (LOCAL_SALES_DIR / name).write_bytes(content)
+        except Exception:
+            logger.exception("Could not save cattle-sale PDF %s", name)
+        try:
+            result = import_cattle_sale_sources(
+                db,
+                [
+                    {
+                        "content": content,
+                        "source_file": name,
+                        "message_id": item.get("message_id") or "outlook",
+                        "received_at": item.get("received_at"),
+                        "parser_hint": item.get("parser_hint"),
+                    }
+                ],
+            )
+            db.commit()
+        except Exception:
+            logger.exception("Cattle-sale import failed for %s", name)
+            db.rollback()
+            summary["files_skipped"] += 1
+            summary["skipped_files"].append(f"{name}: import failed")
+            continue
+        finally:
+            del content
+            gc.collect()
+        for key in (
+            "files_processed",
+            "files_skipped",
+            "rows_inserted",
+            "rows_updated",
+            "rows_total",
+        ):
+            summary[key] += result.get(key) or 0
+        summary["warnings"].extend(result.get("warnings") or [])
+        summary["skipped_files"].extend(result.get("skipped_files") or [])
+        logger.info(
+            "Cattle-sale %s: %s inserted, %s updated",
+            name,
+            result.get("rows_inserted") or 0,
+            result.get("rows_updated") or 0,
         )
-    return import_cattle_sale_sources(db, sources)
+    if not found_any:
+        return None
+    return summary
 
 
 def ensure_local_cattle_sales(db: Session) -> dict[str, Any] | None:

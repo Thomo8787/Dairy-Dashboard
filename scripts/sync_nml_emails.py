@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -73,7 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         "--since",
         help="Only emails on/after this date (YYYY-MM-DD). Overrides --days.",
     )
+    parser.add_argument(
+        "--cattle-sales-only",
+        action="store_true",
+        help="Import cattle remittances only. Used after NML so that job's memory is released.",
+    )
     args = parser.parse_args(argv)
+
+    if args.cattle_sales_only:
+        return 0 if _sync_cattle_sales() else 1
 
     from services.nml_import import format_nml_summary, import_nml_results
 
@@ -90,8 +99,10 @@ def main(argv: list[str] | None = None) -> int:
     for warning in result.get("warnings") or []:
         print(f"warning: {warning}")
 
-    sales_ok = _sync_cattle_sales()
-    return 0 if sales_ok else 1
+    # NML parsing keeps a high memory watermark. Replace this process before
+    # cattle-sale OCR so the 512MB Render cron starts that step clean.
+    script = str(Path(__file__).resolve())
+    os.execv(sys.executable, [sys.executable, script, "--cattle-sales-only"])
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import quote, urlencode
 
 from services.blade_pdf import looks_like_blade_pdf
@@ -257,14 +257,15 @@ class CattleSalePdfEmailService:
             f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments/{attachment['id']}/$value"
         )
 
-    def fetch_pdfs(
+    def iter_pdfs(
         self,
         *,
         since: datetime | None = None,
         skip_message_ids: set[str] | None = None,
         skip_filenames: set[str] | None = None,
         top: int = 40,
-    ) -> list[dict[str, Any]]:
+    ) -> Iterator[dict[str, Any]]:
+        """Yield one remittance at a time so the cron never holds the whole batch."""
         since_aware = since or (
             datetime.now(timezone.utc) - timedelta(days=CATTLE_SALES_LOOKBACK_DAYS)
         )
@@ -290,13 +291,18 @@ class CattleSalePdfEmailService:
             if message_id and message_id not in skip_ids and message_id not in by_id:
                 by_id[message_id] = message
 
-        found: list[dict[str, Any]] = []
+        logger.info("Cattle-sale mailbox scan: %s message(s)", len(by_id))
         for message in by_id.values():
             message_id = message.get("id") or ""
             hint = _parser_hint_for_sender(_message_sender(message))
             if not hint:
                 continue
-            for attachment in self._list_attachments(message_id):
+            try:
+                attachments = self._list_attachments(message_id)
+            except Exception:
+                logger.exception("Could not list attachments for cattle-sale message")
+                continue
+            for attachment in attachments:
                 name = Path(attachment.get("name") or "remittance.pdf").name
                 if not name.lower().endswith(".pdf"):
                     continue
@@ -306,20 +312,38 @@ class CattleSalePdfEmailService:
                 if size > _MAX_ATTACHMENT_BYTES:
                     logger.warning("Skipping oversized cattle-sale PDF %s (%s bytes)", name, size)
                     continue
-                content = self._attachment_bytes(message_id, attachment)
+                try:
+                    content = self._attachment_bytes(message_id, attachment)
+                except Exception:
+                    logger.exception("Could not download cattle-sale PDF %s", name)
+                    continue
                 if not content or not content.startswith(b"%PDF"):
                     continue
                 if not _pdf_matches_hint(content, name, hint):
                     continue
-                found.append(
-                    {
-                        "content": content,
-                        "source_file": name,
-                        "message_id": message_id,
-                        "subject": message.get("subject"),
-                        "received_at": _parse_received(message.get("receivedDateTime")),
-                        "parser_hint": hint,
-                    }
-                )
-        logger.info("Fetched %s cattle-sale PDF(s) from %s message(s)", len(found), len(by_id))
-        return found
+                logger.info("Cattle-sale PDF %s (%s bytes)", name, len(content))
+                yield {
+                    "content": content,
+                    "source_file": name,
+                    "message_id": message_id,
+                    "subject": message.get("subject"),
+                    "received_at": _parse_received(message.get("receivedDateTime")),
+                    "parser_hint": hint,
+                }
+
+    def fetch_pdfs(
+        self,
+        *,
+        since: datetime | None = None,
+        skip_message_ids: set[str] | None = None,
+        skip_filenames: set[str] | None = None,
+        top: int = 40,
+    ) -> list[dict[str, Any]]:
+        return list(
+            self.iter_pdfs(
+                since=since,
+                skip_message_ids=skip_message_ids,
+                skip_filenames=skip_filenames,
+                top=top,
+            )
+        )

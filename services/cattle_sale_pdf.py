@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 
 from typing import Any
@@ -43,6 +44,9 @@ def extract_pdf_text(content: bytes) -> str:
     return "\n".join(lines)
 
 
+_MAX_DECODED_IMAGE_BYTES = 4 * 1024 * 1024
+
+
 def extract_pdf_images(content: bytes) -> list[bytes]:
     images: list[bytes] = []
     with pdfplumber.open(io.BytesIO(content)) as pdf:
@@ -52,26 +56,35 @@ def extract_pdf_images(content: bytes) -> list[bytes]:
                 if stream is None:
                     continue
                 try:
-                    images.append(stream.get_data())
+                    data = stream.get_data()
                 except Exception:
                     continue
+                # Some remittance PDFs embed a huge unused bitmap. Decoding it
+                # blows the 512MB Render cron, and it is not a page scan.
+                if not data or len(data) > _MAX_DECODED_IMAGE_BYTES:
+                    continue
+                images.append(data)
     return images
 
 
 _rapid_ocr = None
 
 
-def _prepare_ocr_image(image_bytes: bytes, *, scale: int = 1):
+def _prepare_ocr_image(image_bytes: bytes, *, scale: int = 1, max_edge: int = 1600):
     from PIL import Image, ImageOps
 
     image = Image.open(io.BytesIO(image_bytes))
     if image.mode not in {"RGB", "L"}:
         image = image.convert("RGB")
-    if scale and scale > 1:
-        image = image.resize(
-            (image.width * scale, image.height * scale),
-            Image.Resampling.LANCZOS,
-        )
+    target_w = image.width * scale if scale and scale > 1 else image.width
+    target_h = image.height * scale if scale and scale > 1 else image.height
+    longest = max(target_w, target_h, 1)
+    if longest > max_edge:
+        ratio = max_edge / longest
+        target_w = max(1, int(target_w * ratio))
+        target_h = max(1, int(target_h * ratio))
+    if (target_w, target_h) != (image.width, image.height):
+        image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
         image = ImageOps.autocontrast(image)
     return image
 
@@ -113,13 +126,15 @@ def _rapidocr_engine():
         return None
     if _rapid_ocr is not None:
         return _rapid_ocr
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError:
         _rapid_ocr = False
         return None
     try:
-        _rapid_ocr = RapidOCR()
+        _rapid_ocr = RapidOCR(use_angle_cls=False)
     except Exception:
         logging.getLogger(__name__).exception("RapidOCR failed to start")
         _rapid_ocr = False
