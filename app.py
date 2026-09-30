@@ -54,6 +54,7 @@ from services.database import (
 )
 from services.excel_parser import parse_excel_file
 from services.graph_onedrive import GraphOneDriveService
+from services.herd_file_status import herd_file_status_by_farm
 from services.herd_sync import (
     consume_herd_import_result,
     get_herd_import_status,
@@ -328,9 +329,16 @@ def logout():
 @app.route("/")
 @permission_required("perm_home")
 def home():
+    try:
+        with get_session() as session:
+            herd_file_status = herd_file_status_by_farm(session)
+    except Exception:
+        logger.exception("Could not load herd file status")
+        herd_file_status = {}
     return render_template(
         "home.html",
         farm_chart_colors=FARM_CHART_COLORS,
+        herd_file_status=herd_file_status,
         **_page_context(active_nav="home"),
     )
 

@@ -447,6 +447,61 @@ html, body {
   margin-top: 1.35rem;
 }
 
+.home-herd-files {
+  margin-top: 0;
+}
+
+.home-herd-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.home-herd-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.home-herd-file.ok {
+  color: #15803d;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.home-herd-file.bad {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.home-herd-file-mark {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.home-herd-file-mark.ok { color: #15803d; }
+.home-herd-file-mark.bad { color: #b91c1c; }
+
+.home-farm-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+}
+
+.home-farm-head .home-farm-label {
+  margin: 0;
+}
+
 .home-section-heading {
   margin: 0 0 0.65rem;
   font-size: 1.05rem;

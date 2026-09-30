@@ -4,6 +4,20 @@
 {% block page_title %}Home{% endblock %}
 
 {% block content %}
+  <section class="home-section home-herd-files" aria-label="Herd files">
+    <h2 class="home-section-heading">Herd files</h2>
+    <div class="home-herd-files-row">
+      {% for farm in farms %}
+      {% set file_status = herd_file_status.get(farm.code) if herd_file_status else none %}
+      {% set file_ok = file_status.ok if file_status else false %}
+      <div class="home-herd-file {{ 'ok' if file_ok else 'bad' }}" title="{{ file_status.title if file_status else 'No herd file imported' }}">
+        <span class="home-herd-file-code">{{ farm.code }}</span>
+        <span class="home-herd-file-mark" aria-label="{{ file_status.aria if file_status else farm.code ~ ' has no herd file' }}">{% if file_ok %}✓{% else %}✕{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
   {% if current_user and current_user.perm_events %}
   <div class="home-widgets">
     <a href="{{ url_for('events_breedings') }}?semen=dairy" class="home-widget home-widget-wide status-loading" id="dairy-semen-widget" aria-label="Dairy semen used in the last 30 days" aria-live="polite">
@@ -19,7 +33,12 @@
     <h2 class="home-section-heading">Production</h2>
     {% for farm in farms %}
     <div class="home-farm-block" data-production-farm="{{ farm.code }}">
-      <h3 class="home-farm-label">{{ farm.code }}</h3>
+      {% set file_status = herd_file_status.get(farm.code) if herd_file_status else none %}
+      {% set file_ok = file_status.ok if file_status else false %}
+      <div class="home-farm-head">
+        <h3 class="home-farm-label">{{ farm.code }}</h3>
+        <span class="home-herd-file-mark {{ 'ok' if file_ok else 'bad' }}" title="{{ file_status.title if file_status else 'No herd file imported' }}" aria-label="{{ file_status.aria if file_status else farm.code ~ ' has no herd file' }}">{% if file_ok %}✓{% else %}✕{% endif %}</span>
+      </div>
       <div class="home-widgets">
         <a href="{{ url_for('milk_quality_collections') }}" class="home-widget status-loading" data-metric="milk_per_cow" aria-label="{{ farm.code }} milk per cow">
           <span class="widget-icon" aria-hidden="true">
