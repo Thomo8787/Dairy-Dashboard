@@ -31,6 +31,7 @@ BUYER_PICKSTOCK = "Pickstock"
 BUYER_NEILDS = "Neilds"
 BUYER_MARKET_DRAYTON = "Market Drayton"
 BUYER_WARRENDALE = "Warrendale"
+WARRENDALE_BONUS_GBP = 80.0
 KNOWN_BUYERS: tuple[str, ...] = (
     BUYER_NEILDS,
     BUYER_PICKSTOCK,
@@ -135,6 +136,132 @@ def compute_price_per_kg(amount_gbp: float, cold_weight_kg: float) -> float | No
     if cold_weight_kg <= 0:
         return None
     return round(amount_gbp / cold_weight_kg, 2)
+
+
+def _amount_is_warrendale_bonus(amount: float | None) -> bool:
+    if amount is None:
+        return False
+    return abs(float(amount) - WARRENDALE_BONUS_GBP) < 0.005
+
+
+def _warrendale_line_key(line: CattleSaleLine) -> tuple[str, str]:
+    return (line.farm, normalize_etag(line.etag))
+
+
+def _load_warrendale_related_lines(
+    db: Session,
+    lines: list[CattleSaleLine],
+) -> list[CattleSaleLine]:
+    """Load other Warrendale remittances for the same farm+tag (bonus vs calf price)."""
+    seen_ids = {line.id for line in lines}
+    keys: set[tuple[str, str]] = set()
+    for line in lines:
+        buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
+        if buyer != BUYER_WARRENDALE:
+            continue
+        etag = normalize_etag(line.etag)
+        if etag:
+            keys.add((line.farm, etag))
+    if not keys:
+        return []
+    farms = {farm for farm, _ in keys}
+    etags = {etag for _, etag in keys}
+    related = db.scalars(
+        select(CattleSaleLine).where(
+            CattleSaleLine.farm.in_(farms),
+            CattleSaleLine.etag.in_(etags),
+        )
+    ).all()
+    extra: list[CattleSaleLine] = []
+    for line in related:
+        if line.id in seen_ids:
+            continue
+        buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
+        if buyer != BUYER_WARRENDALE:
+            continue
+        if _warrendale_line_key(line) not in keys:
+            continue
+        extra.append(line)
+    return extra
+
+
+def _pair_warrendale_bonus_lines(
+    in_range: list[CattleSaleLine],
+    related: list[CattleSaleLine],
+    beef_line_ids: set[int],
+) -> list[tuple[CattleSaleLine, float | None, float]]:
+    """One row per Warrendale beef calf: bonus £80 is folded into amount once both exist.
+
+    Bonus-only stays at £80 until the calf price remittance arrives.
+    Dairy and youngstock remittances are left unchanged.
+    """
+    in_range_ids = {line.id for line in in_range}
+
+    def _beef_warrendale(line: CattleSaleLine) -> bool:
+        if line.id not in beef_line_ids:
+            return False
+        buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
+        etag = normalize_etag(line.etag)
+        return buyer == BUYER_WARRENDALE and bool(etag)
+
+    grouped: dict[tuple[str, str], list[CattleSaleLine]] = {}
+    passthrough: list[CattleSaleLine] = []
+    for line in in_range:
+        if _beef_warrendale(line):
+            grouped.setdefault(_warrendale_line_key(line), []).append(line)
+        else:
+            passthrough.append(line)
+    for line in related:
+        if _beef_warrendale(line):
+            grouped.setdefault(_warrendale_line_key(line), []).append(line)
+
+    emitted: list[tuple[CattleSaleLine, float | None, float]] = []
+    for group_lines in grouped.values():
+        unique = {line.id: line for line in group_lines}
+        members = list(unique.values())
+        calves = [line for line in members if not _amount_is_warrendale_bonus(line.amount_gbp)]
+        bonuses = [line for line in members if _amount_is_warrendale_bonus(line.amount_gbp)]
+        calves.sort(key=lambda line: line.sale_date)
+        bonuses.sort(key=lambda line: line.sale_date)
+        paired: dict[int, CattleSaleLine] = {}
+        used_bonus_ids: set[int] = set()
+        for bonus in bonuses:
+            best: CattleSaleLine | None = None
+            best_delta: int | None = None
+            for calf in calves:
+                if calf.id in paired:
+                    continue
+                delta = abs((calf.sale_date - bonus.sale_date).days)
+                if best is None or best_delta is None or delta < best_delta:
+                    best = calf
+                    best_delta = delta
+            if best is not None:
+                paired[best.id] = bonus
+                used_bonus_ids.add(bonus.id)
+
+        for calf in calves:
+            if calf.id not in in_range_ids:
+                continue
+            bonus = paired.get(calf.id)
+            bonus_gbp = round(float(bonus.amount_gbp), 2) if bonus is not None else None
+            amount = float(calf.amount_gbp)
+            if bonus_gbp is not None:
+                amount = round(amount + bonus_gbp, 2)
+            emitted.append((calf, bonus_gbp, amount))
+
+        for bonus in bonuses:
+            if bonus.id in used_bonus_ids or bonus.id not in in_range_ids:
+                continue
+            bonus_gbp = round(float(bonus.amount_gbp), 2)
+            emitted.append((bonus, bonus_gbp, bonus_gbp))
+
+    for line in passthrough:
+        emitted.append((line, None, float(line.amount_gbp)))
+
+    emitted.sort(
+        key=lambda item: (-item[0].sale_date.toordinal(), item[0].farm, item[0].etag)
+    )
+    return emitted
 
 
 def _category_from_event(lact: int | None, cbrd: int | None, gndr: str | None) -> str:
@@ -299,6 +426,8 @@ def list_cattle_sales(
         CattleSaleLine.etag.asc(),
     )
     sale_lines = list(db.scalars(query).all())
+    related_lines = _load_warrendale_related_lines(db, sale_lines)
+    event_lines = sale_lines + related_lines
 
     date_bounds = None
     if include_date_bounds:
@@ -323,19 +452,31 @@ def list_cattle_sales(
             "farms": list(HERD_FARM_OPTIONS),
         }
 
-    etags = {line.etag for line in sale_lines}
+    etags = {line.etag for line in event_lines}
     reference_dates: list[dt.date] = []
-    for line in sale_lines:
+    for line in event_lines:
         reference_dates.append(line.sale_date)
         if line.kill_date is not None:
             reference_dates.append(line.kill_date)
     min_sale = min(reference_dates)
     max_sale = max(reference_dates)
     sold_by_key = _load_sold_events(db, selected_farms, etags, min_sale, max_sale)
+    beef_line_ids: set[int] = set()
+    for line in event_lines:
+        match = _best_sold_match(
+            sold_by_key.get((line.farm, normalize_etag(line.etag)), []),
+            line.sale_date,
+            line.kill_date,
+        )
+        if match is None:
+            continue
+        if _category_from_event(match.lact, match.cbrd, match.gndr) == "Beef":
+            beef_line_ids.add(line.id)
+    display_lines = _pair_warrendale_bonus_lines(sale_lines, related_lines, beef_line_ids)
 
     rows: list[dict[str, Any]] = []
     available_buyer_set: set[str] = set()
-    for line in sale_lines:
+    for line, bonus_gbp, amount_gbp in display_lines:
         buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
         norm_etag = normalize_etag(line.etag)
         match = _best_sold_match(
@@ -391,7 +532,7 @@ def list_cattle_sales(
 
         rejected = is_rejected_sale(line.cold_weight_kg, line.reject_kg, line.amount_gbp)
         price_per_kg = (
-            None if rejected else compute_price_per_kg(line.amount_gbp, line.cold_weight_kg)
+            None if rejected else compute_price_per_kg(amount_gbp, line.cold_weight_kg)
         )
         rows.append(
             {
@@ -408,7 +549,8 @@ def list_cattle_sales(
                 "cold_weight_kg": line.cold_weight_kg,
                 "reject_kg": line.reject_kg,
                 "kill_date": line.kill_date.isoformat() if line.kill_date else None,
-                "amount_gbp": line.amount_gbp,
+                "amount_gbp": amount_gbp,
+                "bonus_gbp": bonus_gbp if category == "Beef" else None,
                 "is_rejected": rejected,
                 "price_per_kg": price_per_kg,
                 "sale_date": line.sale_date.isoformat(),

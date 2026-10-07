@@ -267,6 +267,7 @@
       position: sticky; top: 0; z-index: 1; cursor: pointer;
     }
     #cattle-sales-table tbody tr.unmatched { background: #fff8ef; }
+    #cattle-sales-table:not(.show-bonus) .bonus-col { display: none; }
     .empty-state { padding: 1.5rem; color: var(--muted); text-align: center; }
     .message.warn {
       background: #fef3e2; color: #92400e;
@@ -569,6 +570,7 @@
               <th data-sort="dim">DIM</th>
               <th data-sort="cold_weight_kg">Cold Wt (kg)</th>
               <th data-sort="amount_gbp">Amount (£)</th>
+              <th class="bonus-col" data-sort="bonus_gbp">Bonus (£)</th>
               <th data-sort="price_per_kg">£/kg</th>
               <th data-sort="sale_date">Sale date</th>
             </tr>
@@ -1144,10 +1146,16 @@
       });
     }
 
+    function showBonusColumn() {
+      return selectedValues('.category-slicer').includes('Beef');
+    }
+
     function renderTable(data) {
+      const table = document.getElementById('cattle-sales-table');
       const body = document.getElementById('table-body');
       const empty = document.getElementById('empty-state');
       const sorted = sortRows(data);
+      table.classList.toggle('show-bonus', showBonusColumn());
       body.innerHTML = '';
       if (!sorted.length) {
         empty.hidden = false;
@@ -1165,6 +1173,7 @@
           <td data-label="DIM">${row.dim != null ? row.dim : '—'}</td>
           <td data-label="Cold wt">${fmtNum(row.cold_weight_kg)}</td>
           <td data-label="Amount">${salesPaymentAmountCell(row)}</td>
+          <td class="bonus-col" data-label="Bonus">${fmtNum(row.bonus_gbp)}</td>
           <td data-label="£/kg">${fmtNum(row.price_per_kg)}</td>
           <td data-label="Sale date">${fmtDate(row.sale_date) || '—'}</td>
         `;
