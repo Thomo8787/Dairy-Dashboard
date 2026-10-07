@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import and_, case, exists, func, literal, or_, select
+from sqlalchemy import and_, exists, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from services.cattle_sale_pdf import is_rejected_sale, normalize_etag
@@ -20,18 +20,6 @@ from services.events_common import (
     _sales_reason_expression,
     normalize_farms,
 )
-
-def _payments_dest_expression():
-    """DEST on payments rows: JV display labels, else CowEvent.dest."""
-    dest = func.upper(func.trim(CowEvent.dest))
-    return case(
-        (CowEvent.event == "GAME", literal("GAMEJV")),
-        (CowEvent.event.in_(("PATH", "PATHWAY")), literal("PATHJV")),
-        (dest == "BLADE", literal("Gamechanger")),
-        (dest == "WARR", literal("Warrendale")),
-        else_=CowEvent.dest,
-    )
-
 
 def _normalize_key_part(value: str | None) -> str:
     return (value or "").strip()
@@ -100,12 +88,18 @@ def _reason_filter_conditions(reasons: list[str] | None):
     return or_(*conditions)
 
 
+def _dests_match(row_dest: str | None, selected: str | None) -> bool:
+    wanted = (selected or "").strip().upper()
+    if not wanted:
+        return True
+    return (row_dest or "").strip().upper() == wanted
+
+
 def _apply_sold_event_filters(
     query,
     *,
     farms: list[str],
     reasons: list[str] | None,
-    dest: str | None,
     event_from: dt.date | None,
     event_to: dt.date | None,
 ):
@@ -116,10 +110,6 @@ def _apply_sold_event_filters(
     reason_filter = _reason_filter_conditions(reasons)
     if reason_filter is not None:
         query = query.where(reason_filter)
-    if dest:
-        dest_value = dest.strip()
-        if dest_value:
-            query = query.where(_payments_dest_expression() == dest_value)
     if event_from is not None:
         query = query.where(CowEvent.event_date >= event_from)
     if event_to is not None:
@@ -193,6 +183,7 @@ def _sale_match_for_sold_event(
         "amount_gbp": best_line.amount_gbp if has_sale_amount else None,
         "sale_rejected": rejected,
         "has_sale_amount": has_sale_amount,
+        "buyer": (best_line.buyer or "").strip(),
     }
 
 
@@ -290,15 +281,13 @@ def _unmatched_remittance_rows(
         query = query.where(CattleSaleLine.sale_date >= event_from)
     if event_to is not None:
         query = query.where(CattleSaleLine.sale_date <= event_to)
-    dest_value = (dest or "").strip().upper()
-
     extra: list[dict[str, Any]] = []
     for line in db.scalars(query).all():
         etag = normalize_etag(line.etag)
         if not etag or etag in existing_etags:
             continue
-        buyer = (line.buyer or "").strip().upper()
-        if dest_value and dest_value != buyer:
+        buyer = (line.buyer or "").strip()
+        if not _dests_match(buyer, dest):
             continue
         event_date = line.kill_date or line.sale_date
         rejected = is_rejected_sale(line.cold_weight_kg, line.reject_kg, line.amount_gbp)
@@ -316,7 +305,7 @@ def _unmatched_remittance_rows(
                 line.farm,
                 identity.cow_id if identity else None,
                 identity.etag if identity else line.etag,
-                buyer or "UNKNOWN",
+                buyer,
                 event_date,
                 sales_reason,
                 identity.gndr if identity else None,
@@ -341,7 +330,6 @@ def _compute_date_bounds(
     status: str,
     farms: list[str],
     reasons: list[str] | None,
-    dest: str | None,
 ) -> dict[str, str] | None:
     bounds_query = select(func.min(CowEvent.event_date), func.max(CowEvent.event_date)).select_from(
         CowEvent
@@ -355,7 +343,6 @@ def _compute_date_bounds(
         bounds_query,
         farms=farms,
         reasons=reasons,
-        dest=dest,
         event_from=None,
         event_to=None,
     )
@@ -387,8 +374,6 @@ def list_sales_payments(
         return {"rows": [], "total": 0, "status": status, "date_bounds": None}
 
     reason_expr = _sales_reason_expression()
-    dest_expr = _payments_dest_expression()
-    dest_nulls_last = case((dest_expr.is_(None), 1), else_=0)
     etag_suffix = func.substr(func.coalesce(CowEvent.etag, ""), -5)
 
     if status == "archived":
@@ -397,7 +382,6 @@ def list_sales_payments(
                 CowEvent.farm,
                 CowEvent.cow_id,
                 CowEvent.etag,
-                dest_expr.label("dest"),
                 CowEvent.event_date,
                 reason_expr.label("sales_reason"),
                 CowEvent.gndr,
@@ -413,7 +397,6 @@ def list_sales_payments(
             CowEvent.farm,
             CowEvent.cow_id,
             CowEvent.etag,
-            dest_expr.label("dest"),
             CowEvent.event_date,
             reason_expr.label("sales_reason"),
             CowEvent.gndr,
@@ -426,15 +409,12 @@ def list_sales_payments(
         query,
         farms=selected_farms,
         reasons=reasons,
-        dest=dest,
         event_from=event_from,
         event_to=event_to,
     )
     query = _apply_status_filter(query, status)
     query = query.order_by(
         CowEvent.event_date.asc(),
-        dest_nulls_last.asc(),
-        dest_expr.asc(),
         etag_suffix.asc(),
     )
 
@@ -445,13 +425,12 @@ def list_sales_payments(
             status=status,
             farms=selected_farms,
             reasons=reasons,
-            dest=dest,
         )
 
     result_rows = list(db.execute(query).all())
     sale_lines_by_key: dict[tuple[str, str], list[CattleSaleLine]] = {}
     if result_rows:
-        event_dates = [row[4] for row in result_rows if row[4] is not None]
+        event_dates = [row[3] for row in result_rows if row[3] is not None]
         if event_dates:
             min_event = min(event_dates)
             max_event = max(event_dates)
@@ -471,7 +450,6 @@ def list_sales_payments(
         farm,
         cow_id,
         etag,
-        row_dest,
         event_date,
         sales_reason,
         gndr,
@@ -484,6 +462,7 @@ def list_sales_payments(
         amount_gbp = None
         sale_rejected = False
         has_sale_amount = False
+        remittance_dest = ""
         sale_match = _sale_match_for_sold_event(
             sale_lines_by_key, farm, etag, event_date
         )
@@ -491,16 +470,19 @@ def list_sales_payments(
             amount_gbp = sale_match["amount_gbp"]
             sale_rejected = sale_match["sale_rejected"]
             has_sale_amount = sale_match["has_sale_amount"]
+            remittance_dest = sale_match["buyer"]
         if has_amount is True and not has_sale_amount:
             continue
         if has_amount is False and has_sale_amount:
+            continue
+        if not _dests_match(remittance_dest, dest):
             continue
         rows.append(
             _row_to_dict(
                 farm,
                 cow_id,
                 etag,
-                row_dest,
+                remittance_dest,
                 event_date,
                 sales_reason,
                 gndr,
@@ -525,7 +507,7 @@ def list_sales_payments(
             existing_etags={normalize_etag(row["etag"]) for row in rows},
         )
         rows.extend(extra_rows)
-        rows.sort(key=lambda row: (row["event_date"], row["dest"], row["etag"]))
+    rows.sort(key=lambda row: (row["event_date"], row["dest"], row["etag"]))
 
     return {"rows": rows, "total": len(rows), "status": status, "date_bounds": date_bounds}
 
@@ -541,44 +523,23 @@ def list_dest_filter_options(
     if not selected_farms:
         return {"dest_options": [], "date_bounds": None}
 
-    dest_expr = _payments_dest_expression()
-    dest_query = select(func.distinct(dest_expr)).where(dest_expr.isnot(None)).where(
-        func.trim(dest_expr) != ""
-    )
-    if status == "archived":
-        dest_query = dest_query.select_from(CowEvent).join(
-            SalesPaymentRecord,
-            _payment_match_conditions(),
-        )
-    dest_query = _apply_sold_event_filters(
-        dest_query,
-        farms=selected_farms,
-        reasons=reasons,
-        dest=None,
-        event_from=None,
-        event_to=None,
-    )
-    dest_query = _apply_status_filter(dest_query, status)
-    dest_query = dest_query.order_by(dest_expr.asc())
-    dest_rows = db.execute(dest_query).all()
-    dest_options = [row[0] for row in dest_rows if row[0]]
-    remittance_dests = db.scalars(
-        select(func.distinct(func.upper(CattleSaleLine.buyer))).where(
-            CattleSaleLine.farm.in_(selected_farms),
-            CattleSaleLine.buyer.isnot(None),
-            func.trim(CattleSaleLine.buyer) != "",
-        )
-    ).all()
-    for buyer in remittance_dests:
-        if buyer and buyer not in dest_options:
-            dest_options.append(buyer)
-    dest_options.sort()
+    dest_options = [
+        buyer
+        for buyer in db.scalars(
+            select(func.distinct(CattleSaleLine.buyer)).where(
+                CattleSaleLine.farm.in_(selected_farms),
+                CattleSaleLine.buyer.isnot(None),
+                func.trim(CattleSaleLine.buyer) != "",
+            )
+        ).all()
+        if buyer and buyer.strip()
+    ]
+    dest_options.sort(key=str.upper)
     date_bounds = _compute_date_bounds(
         db,
         status=status,
         farms=selected_farms,
         reasons=reasons,
-        dest=None,
     )
     return {
         "dest_options": dest_options,
