@@ -1165,8 +1165,13 @@
       sorted.forEach(row => {
         const tr = document.createElement('tr');
         if (!row.event_matched) tr.classList.add('unmatched');
+        const idNote = !row.event_matched
+          ? ' <span title="No matching sale exit event (SOLD/GAME/PATH)" style="color:#b45309">⚠</span>'
+          : (row.dairycomp_farm
+            ? ` <span title="Sold on DairyComp ${row.dairycomp_farm}. Payment PDF is a different farm; accounts need an internal transfer." style="color:#b45309">DairyComp ${row.dairycomp_farm}</span>`
+            : '');
         tr.innerHTML = `
-          <td data-label="ID">${row.cow_id || '—'}${!row.event_matched ? ' <span title="No matching sale exit event (SOLD/GAME/PATH)" style="color:#b45309">⚠</span>' : ''}</td>
+          <td data-label="ID">${row.cow_id || '—'}${idNote}</td>
           <td data-label="ETAG">${row.etag || '—'}</td>
           <td data-label="Lact">${row.lact != null ? row.lact : '—'}</td>
           <td data-label="Age">${row.age || '—'}</td>
@@ -1720,8 +1725,10 @@
       syncRangeInputs(buyerScopedRows());
       const rows = displayedRows();
       const unmatched = rows.filter(r => !r.event_matched).length;
+      const otherFarm = rows.filter(r => r.dairycomp_farm).length;
       let meta = `${rows.length} sale line(s)`;
       if (unmatched) meta += ` · ${unmatched} without matching sale exit event`;
+      if (otherFarm) meta += ` · ${otherFarm} on a different DairyComp farm`;
       document.getElementById('meta-line').textContent = meta;
       renderSummary(rows);
       renderTable(rows);

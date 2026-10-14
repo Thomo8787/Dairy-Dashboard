@@ -331,6 +331,62 @@ def _best_sold_match(
     return best
 
 
+def _match_sale_to_sold_event(
+    sold_by_key: dict[tuple[str, str], list[CowEvent]],
+    *,
+    farm: str,
+    etag: str,
+    sale_date: dt.date,
+    kill_date: dt.date | None,
+) -> tuple[CowEvent | None, str | None]:
+    """Prefer a sold event on the payment farm.
+
+    When that farm has none, use the closest event on another herd inside the
+    same window. A distance tie uses the earliest event date, then farm code.
+    The second value is the other DairyComp farm when the match is cross-farm.
+    """
+    norm_etag = normalize_etag(etag)
+    same_farm = _best_sold_match(
+        sold_by_key.get((farm, norm_etag), []),
+        sale_date,
+        kill_date,
+    )
+    if same_farm is not None:
+        return same_farm, None
+
+    reference_dates = [sale_date]
+    if kill_date is not None and kill_date != sale_date:
+        reference_dates.append(kill_date)
+
+    best: CowEvent | None = None
+    best_delta: int | None = None
+    for other_farm in HERD_FARM_OPTIONS:
+        if other_farm == farm:
+            continue
+        for event in sold_by_key.get((other_farm, norm_etag), []):
+            if event.event_date is None:
+                continue
+            delta = min(abs((event.event_date - ref).days) for ref in reference_dates)
+            if delta > EVENT_MATCH_WINDOW_DAYS:
+                continue
+            if best is None or best_delta is None or delta < best_delta:
+                best = event
+                best_delta = delta
+                continue
+            if delta > best_delta or best.event_date is None:
+                continue
+            if event.event_date < best.event_date or (
+                event.event_date == best.event_date
+                and (event.farm or "") < (best.farm or "")
+            ):
+                best = event
+                best_delta = delta
+
+    if best is None:
+        return None, None
+    return best, best.farm
+
+
 def format_cattle_gender(gndr: str | None) -> str | None:
     normalized = (gndr or "").strip().upper()
     if normalized in {"M", "MALE"}:
@@ -460,13 +516,15 @@ def list_cattle_sales(
             reference_dates.append(line.kill_date)
     min_sale = min(reference_dates)
     max_sale = max(reference_dates)
-    sold_by_key = _load_sold_events(db, selected_farms, etags, min_sale, max_sale)
+    sold_by_key = _load_sold_events(db, list(HERD_FARM_OPTIONS), etags, min_sale, max_sale)
     beef_line_ids: set[int] = set()
     for line in event_lines:
-        match = _best_sold_match(
-            sold_by_key.get((line.farm, normalize_etag(line.etag)), []),
-            line.sale_date,
-            line.kill_date,
+        match, _other_farm = _match_sale_to_sold_event(
+            sold_by_key,
+            farm=line.farm,
+            etag=line.etag,
+            sale_date=line.sale_date,
+            kill_date=line.kill_date,
         )
         if match is None:
             continue
@@ -478,11 +536,12 @@ def list_cattle_sales(
     available_buyer_set: set[str] = set()
     for line, bonus_gbp, amount_gbp in display_lines:
         buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
-        norm_etag = normalize_etag(line.etag)
-        match = _best_sold_match(
-            sold_by_key.get((line.farm, norm_etag), []),
-            line.sale_date,
-            line.kill_date,
+        match, dairycomp_farm = _match_sale_to_sold_event(
+            sold_by_key,
+            farm=line.farm,
+            etag=line.etag,
+            sale_date=line.sale_date,
+            kill_date=line.kill_date,
         )
         event_matched = match is not None
         if not event_matched and not include_unmatched:
@@ -556,6 +615,7 @@ def list_cattle_sales(
                 "sale_date": line.sale_date.isoformat(),
                 "event_date": event_date.isoformat() if event_date else None,
                 "event_matched": event_matched,
+                "dairycomp_farm": dairycomp_farm,
             }
         )
 
