@@ -9,7 +9,14 @@ from sqlalchemy import and_, exists, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from services.cattle_sale_pdf import is_rejected_sale, normalize_etag
-from services.cattle_sales import EVENT_MATCH_WINDOW_DAYS, cattle_sales_exit_event_clause
+from services.cattle_sales import (
+    BUYER_WARRENDALE,
+    EVENT_MATCH_WINDOW_DAYS,
+    WARRENDALE_BONUS_GBP,
+    cattle_sales_exit_event_clause,
+)
+
+WARRENDALE_BONUS_LOOKAHEAD_DAYS = 28
 from services.database import CattleSaleLine, CowEvent, SalesPaymentRecord, User
 from services.events_common import (
     SALES_BEEF_REMARKS,
@@ -124,7 +131,7 @@ def _load_cattle_sale_lines_by_farm_etag(
     max_date: dt.date,
 ) -> dict[tuple[str, str], list[CattleSaleLine]]:
     window_start = min_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
-    window_end = max_date + dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
+    window_end = max_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
     sale_lines = db.scalars(
         select(CattleSaleLine).where(
             CattleSaleLine.farm.in_(farms),
@@ -144,6 +151,89 @@ def _load_cattle_sale_lines_by_farm_etag(
     return grouped
 
 
+def _is_warrendale_bonus(amount: float | None) -> bool:
+    if amount is None:
+        return False
+    return abs(float(amount) - WARRENDALE_BONUS_GBP) < 0.005
+
+
+def _is_warrendale_line(line: CattleSaleLine) -> bool:
+    return (line.buyer or "").strip() == BUYER_WARRENDALE
+
+
+def _line_dates(line: CattleSaleLine) -> list[dt.date]:
+    dates = [line.sale_date]
+    if line.kill_date is not None and line.kill_date != line.sale_date:
+        dates.append(line.kill_date)
+    return dates
+
+
+def _bonus_in_window(
+    line: CattleSaleLine,
+    event_date: dt.date,
+    calf_date: dt.date | None,
+) -> bool:
+    earliest = event_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
+    latest = event_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
+    calf_latest = None
+    if calf_date is not None:
+        calf_latest = calf_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
+    for sale_date in _line_dates(line):
+        if earliest <= sale_date <= latest:
+            return True
+        if calf_date is not None and calf_latest is not None and calf_date <= sale_date <= calf_latest:
+            return True
+    return False
+
+
+def _warrendale_split_match(
+    lines: list[CattleSaleLine],
+    event_date: dt.date,
+) -> dict[str, Any] | None:
+    """Calf price within 14 days; £80 bonus up to 28 days after the sale or calf price."""
+    calf_line: CattleSaleLine | None = None
+    calf_delta: int | None = None
+    for line in lines:
+        if not _is_warrendale_line(line) or _is_warrendale_bonus(line.amount_gbp):
+            continue
+        delta = _sale_line_match_delta(line, event_date)
+        if delta > EVENT_MATCH_WINDOW_DAYS:
+            continue
+        if calf_line is None or calf_delta is None or delta < calf_delta:
+            calf_line = line
+            calf_delta = delta
+    calf_date = calf_line.sale_date if calf_line is not None else None
+    bonus_line: CattleSaleLine | None = None
+    bonus_delta: int | None = None
+    for line in lines:
+        if not _is_warrendale_line(line) or not _is_warrendale_bonus(line.amount_gbp):
+            continue
+        if not _bonus_in_window(line, event_date, calf_date):
+            continue
+        delta = _sale_line_match_delta(line, event_date)
+        if bonus_line is None or bonus_delta is None or delta < bonus_delta:
+            bonus_line = line
+            bonus_delta = delta
+    if calf_line is None and bonus_line is None:
+        return None
+    rejected = False
+    if calf_line is not None:
+        rejected = is_rejected_sale(
+            calf_line.cold_weight_kg, calf_line.reject_kg, calf_line.amount_gbp
+        )
+    calf_amount = round(float(calf_line.amount_gbp), 2) if calf_line is not None else None
+    bonus_amount = round(float(bonus_line.amount_gbp), 2) if bonus_line is not None else None
+    has_sale_amount = rejected or calf_amount is not None or bonus_amount is not None
+    return {
+        "calf_amount_gbp": calf_amount,
+        "bonus_gbp": bonus_amount,
+        "sale_rejected": rejected,
+        "has_sale_amount": has_sale_amount,
+        "buyer": BUYER_WARRENDALE,
+        "warrendale_split": True,
+    }
+
+
 def _sale_line_match_delta(line: CattleSaleLine, event_date: dt.date) -> int:
     deltas = [abs((line.sale_date - event_date).days)]
     if line.kill_date is not None:
@@ -151,18 +241,24 @@ def _sale_line_match_delta(line: CattleSaleLine, event_date: dt.date) -> int:
     return min(deltas)
 
 
-def _sale_match_for_sold_event(
+def _candidate_sale_lines(
     sale_lines_by_key: dict[tuple[str, str], list[CattleSaleLine]],
     farm: str,
     etag: str | None,
-    event_date: dt.date,
-) -> dict[str, Any] | None:
+) -> list[CattleSaleLine]:
     normalized_etag = normalize_etag(etag)
     if not normalized_etag:
-        return None
+        return []
     lines = sale_lines_by_key.get((farm, normalized_etag), [])
     if not lines:
         lines = sale_lines_by_key.get(("", normalized_etag), [])
+    return lines
+
+
+def _closest_sale_match(
+    lines: list[CattleSaleLine],
+    event_date: dt.date,
+) -> dict[str, Any] | None:
     best_line: CattleSaleLine | None = None
     best_delta: int | None = None
     for line in lines:
@@ -179,12 +275,31 @@ def _sale_match_for_sold_event(
         best_line.cold_weight_kg, best_line.reject_kg, best_line.amount_gbp
     )
     has_sale_amount = rejected or best_line.amount_gbp > 0
+    amount = best_line.amount_gbp if has_sale_amount else None
     return {
-        "amount_gbp": best_line.amount_gbp if has_sale_amount else None,
+        "amount_gbp": amount,
+        "calf_amount_gbp": amount,
+        "bonus_gbp": None,
         "sale_rejected": rejected,
         "has_sale_amount": has_sale_amount,
         "buyer": (best_line.buyer or "").strip(),
+        "warrendale_split": False,
     }
+
+
+def _sale_match_for_sold_event(
+    sale_lines_by_key: dict[tuple[str, str], list[CattleSaleLine]],
+    farm: str,
+    etag: str | None,
+    event_date: dt.date,
+    sales_reason: str | None = None,
+) -> dict[str, Any] | None:
+    lines = _candidate_sale_lines(sale_lines_by_key, farm, etag)
+    if sales_reason == "Beef":
+        split = _warrendale_split_match(lines, event_date)
+        if split is not None:
+            return split
+    return _closest_sale_match(lines, event_date)
 
 
 def _row_to_dict(
@@ -201,6 +316,11 @@ def _row_to_dict(
     amount_gbp: float | None = None,
     sale_rejected: bool = False,
     has_sale_amount: bool = False,
+    bonus_gbp: float | None = None,
+    amount_paid: bool = False,
+    bonus_paid: bool = False,
+    warrendale_split: bool = False,
+    confirm_part: str | None = None,
 ) -> dict[str, Any]:
     normalized_cow_id = _normalize_key_part(cow_id)
     normalized_etag = _normalize_key_part(etag)
@@ -216,6 +336,11 @@ def _row_to_dict(
         "event_date": event_date.isoformat(),
         "sales_reason": sales_reason,
         "amount_gbp": amount_gbp,
+        "bonus_gbp": bonus_gbp,
+        "amount_paid": amount_paid,
+        "bonus_paid": bonus_paid,
+        "warrendale_split": warrendale_split,
+        "confirm_part": confirm_part,
         "sale_rejected": sale_rejected,
         "has_sale_amount": has_sale_amount,
         "paid_at": paid_at.isoformat() if paid_at else None,
@@ -226,6 +351,59 @@ def _row_to_dict(
             "etag": normalized_etag,
             "event_date": event_date.isoformat(),
         },
+    }
+
+
+def _confirm_part(
+    *,
+    warrendale_split: bool,
+    calf_amount: float | None,
+    bonus_amount: float | None,
+    amount_paid: bool,
+    bonus_paid: bool,
+) -> str | None:
+    if not warrendale_split:
+        return None
+    if calf_amount is not None and bonus_amount is not None and not amount_paid and not bonus_paid:
+        return "both"
+    if calf_amount is not None and not amount_paid:
+        return "amount"
+    if bonus_amount is not None and not bonus_paid:
+        return "bonus"
+    return None
+
+
+def _display_amount(
+    calf_amount: float | None,
+    bonus_amount: float | None,
+    amount_paid: bool,
+    bonus_paid: bool,
+) -> float | None:
+    if (
+        calf_amount is not None
+        and bonus_amount is not None
+        and not amount_paid
+        and not bonus_paid
+    ):
+        return round(calf_amount + bonus_amount, 2)
+    return calf_amount
+
+
+def _payment_flags_by_key(
+    db: Session,
+    farms: list[str],
+    min_date: dt.date | None,
+    max_date: dt.date | None,
+) -> dict[tuple[str, str, str, dt.date], SalesPaymentRecord]:
+    query = select(SalesPaymentRecord).where(SalesPaymentRecord.farm.in_(farms))
+    if min_date is not None:
+        query = query.where(SalesPaymentRecord.event_date >= min_date)
+    if max_date is not None:
+        query = query.where(SalesPaymentRecord.event_date <= max_date)
+    records = db.scalars(query).all()
+    return {
+        _payment_record_key(record.farm, record.cow_id, record.etag, record.event_date): record
+        for record in records
     }
 
 
@@ -300,6 +478,13 @@ def _unmatched_remittance_rows(
         sales_reason = _remittance_sales_reason(line.buyer, identity)
         if reasons and sales_reason not in reasons:
             continue
+        warrendale_split = sales_reason == "Beef" and _is_warrendale_line(line)
+        bonus_gbp = (
+            round(float(line.amount_gbp), 2)
+            if warrendale_split and _is_warrendale_bonus(line.amount_gbp)
+            else None
+        )
+        calf_amount = None if bonus_gbp is not None else (line.amount_gbp if has_sale_amount else None)
         extra.append(
             _row_to_dict(
                 line.farm,
@@ -310,9 +495,18 @@ def _unmatched_remittance_rows(
                 sales_reason,
                 identity.gndr if identity else None,
                 identity.bdat if identity else None,
-                amount_gbp=line.amount_gbp if has_sale_amount else None,
+                amount_gbp=calf_amount,
                 sale_rejected=rejected,
                 has_sale_amount=has_sale_amount,
+                bonus_gbp=bonus_gbp,
+                warrendale_split=warrendale_split,
+                confirm_part=_confirm_part(
+                    warrendale_split=warrendale_split,
+                    calf_amount=calf_amount,
+                    bonus_amount=bonus_gbp,
+                    amount_paid=False,
+                    bonus_paid=False,
+                ),
             )
         )
     return extra
@@ -445,6 +639,22 @@ def list_sales_payments(
                 max_event,
             )
 
+    flag_min = None
+    flag_max = None
+    if result_rows:
+        flag_dates = []
+        for row in result_rows:
+            event_date = row[3]
+            if event_date is None:
+                continue
+            if hasattr(event_date, "date"):
+                event_date = event_date.date()
+            flag_dates.append(event_date)
+        if flag_dates:
+            flag_min = min(flag_dates)
+            flag_max = max(flag_dates)
+    payment_flags = _payment_flags_by_key(db, selected_farms, flag_min, flag_max)
+
     rows = []
     for (
         farm,
@@ -460,17 +670,34 @@ def list_sales_payments(
         if hasattr(event_date, "date"):
             event_date = event_date.date()
         amount_gbp = None
+        calf_amount = None
+        bonus_gbp = None
         sale_rejected = False
         has_sale_amount = False
         remittance_dest = ""
+        warrendale_split = False
         sale_match = _sale_match_for_sold_event(
-            sale_lines_by_key, farm, etag, event_date
+            sale_lines_by_key, farm, etag, event_date, sales_reason
         )
         if sale_match is not None:
-            amount_gbp = sale_match["amount_gbp"]
+            calf_amount = sale_match.get("calf_amount_gbp")
+            bonus_gbp = sale_match.get("bonus_gbp")
             sale_rejected = sale_match["sale_rejected"]
             has_sale_amount = sale_match["has_sale_amount"]
             remittance_dest = sale_match["buyer"]
+            warrendale_split = bool(sale_match.get("warrendale_split"))
+        record = payment_flags.get(
+            _payment_record_key(farm, cow_id, etag, event_date)
+        )
+        amount_paid = bool(record and record.amount_paid_at)
+        bonus_paid = bool(record and record.bonus_paid_at)
+        if record and record.archived_at and not amount_paid and not bonus_paid and warrendale_split:
+            amount_paid = calf_amount is not None or bonus_gbp is None
+            bonus_paid = bonus_gbp is not None
+        if warrendale_split:
+            amount_gbp = _display_amount(calf_amount, bonus_gbp, amount_paid, bonus_paid)
+        elif sale_match is not None:
+            amount_gbp = sale_match["amount_gbp"]
         if has_amount is True and not has_sale_amount:
             continue
         if has_amount is False and has_sale_amount:
@@ -487,11 +714,22 @@ def list_sales_payments(
                 sales_reason,
                 gndr,
                 bdat,
-                paid_at,
-                archived_at,
+                paid_at if paid_at is not None else (record.paid_at if record else None),
+                archived_at if archived_at is not None else (record.archived_at if record else None),
                 amount_gbp=amount_gbp,
                 sale_rejected=sale_rejected,
                 has_sale_amount=has_sale_amount,
+                bonus_gbp=bonus_gbp,
+                amount_paid=amount_paid,
+                bonus_paid=bonus_paid,
+                warrendale_split=warrendale_split,
+                confirm_part=_confirm_part(
+                    warrendale_split=warrendale_split,
+                    calf_amount=calf_amount,
+                    bonus_amount=bonus_gbp,
+                    amount_paid=amount_paid,
+                    bonus_paid=bonus_paid,
+                ),
             )
         )
 
@@ -607,6 +845,32 @@ def _load_payment_records_for_items(
     }
 
 
+def _record_for_confirm(
+    db: Session,
+    existing: dict[tuple[str, str, str, dt.date], SalesPaymentRecord],
+    farm: str,
+    cow_id: str,
+    etag: str,
+    event_date: dt.date,
+    user: User,
+) -> SalesPaymentRecord:
+    key = _payment_record_key(farm, cow_id, etag, event_date)
+    record = existing.get(key)
+    if record is None:
+        record = SalesPaymentRecord(
+            farm=farm,
+            cow_id=cow_id,
+            etag=etag,
+            event_date=event_date,
+            confirmed_by_user_id=user.id,
+        )
+        db.add(record)
+        existing[key] = record
+    else:
+        record.confirmed_by_user_id = user.id
+    return record
+
+
 def confirm_payments(
     db: Session,
     items: list[dict[str, Any]],
@@ -617,25 +881,25 @@ def confirm_payments(
     confirmed = 0
     for item in items:
         farm, cow_id, etag, event_date = _parse_payment_item(item)
-        key = _payment_record_key(farm, cow_id, etag, event_date)
-        record = existing.get(key)
-        if record:
+        record = _record_for_confirm(db, existing, farm, cow_id, etag, event_date, user)
+        part = (item.get("part") or "").strip().lower()
+        if part == "amount":
+            record.amount_paid_at = now
+        elif part == "bonus":
+            record.bonus_paid_at = now
+        elif part == "both":
+            record.amount_paid_at = now
+            record.bonus_paid_at = now
+        else:
             record.paid_at = now
             record.archived_at = now
-            record.confirmed_by_user_id = user.id
             record.unarchived_at = None
-        else:
-            db.add(
-                SalesPaymentRecord(
-                    farm=farm,
-                    cow_id=cow_id,
-                    etag=etag,
-                    event_date=event_date,
-                    paid_at=now,
-                    archived_at=now,
-                    confirmed_by_user_id=user.id,
-                )
-            )
+            confirmed += 1
+            continue
+        if record.amount_paid_at and record.bonus_paid_at:
+            record.paid_at = now
+            record.archived_at = now
+            record.unarchived_at = None
         confirmed += 1
     return {"confirmed": confirmed}
 
@@ -656,6 +920,8 @@ def unarchive_payments(
             continue
         record.archived_at = None
         record.paid_at = None
+        record.amount_paid_at = None
+        record.bonus_paid_at = None
         record.unarchived_at = now
         record.confirmed_by_user_id = user.id
         restored += 1

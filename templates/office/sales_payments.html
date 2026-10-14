@@ -224,9 +224,16 @@
     #sales-payments-table tbody tr:hover { background: #f8fafc; }
     #sales-payments-table tbody tr.row-has-amount:hover { background: #d1fae5; }
     #sales-payments-table tbody tr.row-selected:hover { background: #bbf7d0; }
-    #sales-payments-table td.amount-cell {
+    #sales-payments-table:not(.show-bonus) .bonus-col { display: none; }
+    #sales-payments-table td.amount-cell,
+    #sales-payments-table td.bonus-cell {
       text-align: right;
       font-variant-numeric: tabular-nums;
+    }
+    .paid-tick {
+      color: #15803d;
+      font-weight: 700;
+      margin-left: 0.35rem;
     }
     #sales-payments-table .amount-rejected {
       color: #dc2626;
@@ -376,6 +383,21 @@
       if (row.sale_rejected) return '<span class="amount-rejected">Rejected</span>';
       if (row.amount_gbp != null && row.amount_gbp > 0) return `£${fmtNum(row.amount_gbp)}`;
       return "—";
+    }
+
+    function paidTick() {
+      return '<span class="paid-tick" title="Paid">✓</span>';
+    }
+
+    function partCheckbox(row, part) {
+      if (!CAN_EDIT || currentStatus !== "active" || row.confirm_part !== part) return "";
+      const key = encodeURIComponent(rowKey(row));
+      const selected = selectedKeys.has(rowKey(row));
+      return `<input type="checkbox" class="row-paid" data-key="${key}" ${selected ? "checked" : ""} aria-label="Mark paid">`;
+    }
+
+    function showBonusColumn() {
+      return selectedReasons().includes("Beef");
     }
 
     function rowKey(row) { return JSON.stringify(row.payment_key); }
@@ -659,6 +681,8 @@
 
     function renderTableHead() {
       const head = document.getElementById("table-head");
+      const table = document.getElementById("sales-payments-table");
+      table.classList.toggle("show-bonus", showBonusColumn());
       const selectCol = CAN_EDIT
         ? `<th><input type="checkbox" id="select-all" aria-label="Select all visible rows"></th>` : "";
       const paidCol = currentStatus === "active" && CAN_EDIT ? "<th>Paid?</th>" : "";
@@ -674,6 +698,7 @@
           <th>DEST</th>
           <th>Reason</th>
           <th class="amount-cell">Amount (£)</th>
+          <th class="bonus-col">Bonus (£)</th>
           ${paidCol}
         </tr>`;
       if (CAN_EDIT) document.getElementById("select-all")?.addEventListener("change", onSelectAllChange);
@@ -730,8 +755,9 @@
         const selected = selectedKeys.has(key);
         const selectCell = CAN_EDIT
           ? `<td><input type="checkbox" class="row-select" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Select row"></td>` : "";
-        const paidCell = showPaidCol
-          ? `<td><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></td>` : "";
+        const paidCell = showPaidCol && !row.warrendale_split
+          ? `<td><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></td>`
+          : (showPaidCol ? "<td></td>" : "");
         const hasAmount = rowHasSaleAmount(row);
         const rowClasses = [
           selected ? "row-selected" : "",
@@ -749,7 +775,8 @@
             <td>${fmtDate(row.event_date)}</td>
             <td>${row.dest || "—"}</td>
             <td><span class="reason-pill reason-pill-${row.sales_reason}">${row.sales_reason}</span></td>
-            <td class="amount-cell">${formatAmountCell(row)}</td>
+            <td class="amount-cell">${formatAmountCell(row)}${row.amount_paid ? paidTick() : ""}${partCheckbox(row, "amount")}${partCheckbox(row, "both")}</td>
+            <td class="bonus-cell bonus-col">${row.bonus_gbp != null ? `£${fmtNum(row.bonus_gbp)}` : "—"}${row.bonus_paid ? paidTick() : ""}${partCheckbox(row, "bonus")}</td>
             ${paidCell}
           </tr>`;
       }).join("");
@@ -918,7 +945,11 @@
     }
 
     function selectedItems() {
-      return rows.filter(row => selectedKeys.has(rowKey(row))).map(row => row.payment_key);
+      return rows.filter(row => selectedKeys.has(rowKey(row))).map(row => {
+        const item = { ...row.payment_key };
+        if (row.confirm_part) item.part = row.confirm_part;
+        return item;
+      });
     }
 
     async function confirmSelected() {
@@ -934,8 +965,8 @@
           body: JSON.stringify({ items }),
         });
         if (!res.ok) { alert("Failed to confirm payments."); return; }
-        removeRowsByPaymentKeys(items);
-        applyRowsToView();
+        selectedKeys.clear();
+        await fetchRows(null, { manageLoading: false });
       } finally {
         if (confirmBtn) {
           confirmBtn.textContent = prevLabel || "Confirm payment";

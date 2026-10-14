@@ -274,6 +274,8 @@ class SalesPaymentRecord(Base):
     paid_at = Column(DateTime)
     archived_at = Column(DateTime)
     unarchived_at = Column(DateTime)
+    amount_paid_at = Column(DateTime)
+    bonus_paid_at = Column(DateTime)
     confirmed_by_user_id = Column(Integer, ForeignKey("users.id"))
 
 
@@ -829,6 +831,22 @@ def _ensure_herd_inventory_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_sales_payment_columns(engine) -> None:
+    """create_all will not add new columns to an existing sales_payment_records table."""
+    inspector = inspect(engine)
+    if "sales_payment_records" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("sales_payment_records")}
+    needed = {
+        "amount_paid_at": "ALTER TABLE sales_payment_records ADD COLUMN amount_paid_at TIMESTAMP",
+        "bonus_paid_at": "ALTER TABLE sales_payment_records ADD COLUMN bonus_paid_at TIMESTAMP",
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def _ensure_nml_milk_result_columns(engine) -> None:
     """create_all will not add new columns to an existing nml_milk_results table."""
     inspector = inspect(engine)
@@ -862,6 +880,7 @@ def init_db():
     _ensure_user_permission_columns(engine)
     _ensure_herd_inventory_columns(engine)
     _ensure_nml_milk_result_columns(engine)
+    _ensure_sales_payment_columns(engine)
     return engine
 
 
