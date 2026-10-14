@@ -193,6 +193,7 @@ def _build_trend(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     buckets: dict[tuple[str, str], dict[str, list[tuple[float, float]]]] = {}
     day_litres: dict[tuple[str, str], float] = {}
     day_cows: dict[tuple[str, str], int] = {}
+    day_collections: dict[tuple[str, str], int] = {}
     for row in rows:
         farm = row["farm"] or "?"
         date = row["sample_date"]
@@ -202,6 +203,7 @@ def _build_trend(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         litres = _load_weight(row)
         if litres:
             day_litres[key] = day_litres.get(key, 0.0) + litres
+            day_collections[key] = day_collections.get(key, 0) + 1
         cows = row.get("cows_in_milk")
         if cows is not None:
             try:
@@ -225,6 +227,7 @@ def _build_trend(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
             "litres": litres or None,
             "volume_litres": litres or None,
             "cows_in_milk": cows,
+            "collection_count": day_collections.get((farm, date), 0),
         }
         if litres and cows and cows > 0:
             point["litres_per_cow"] = round(float(litres) / cows, 2)

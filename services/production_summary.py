@@ -3,7 +3,8 @@
 Windows end yesterday (UK), so today's incomplete tanker volumes are excluded.
 The headline figure is a plain 7-day calendar mean (yesterday and the six days
 before). Daily quality points are litre-weighted from tanker loads. Days in the
-window with no figure are skipped.
+window with no figure are skipped. COF and BNK 7-day milk per cow uses only
+days with two collections that have a volume.
 """
 
 from __future__ import annotations
@@ -20,6 +21,9 @@ _UK = ZoneInfo("Europe/London")
 _LOOKBACK_PAD_DAYS = 45
 _SHORT_WINDOW_DAYS = 7
 _LONG_WINDOW_DAYS = 30
+# These farms collect twice a day. A single load is an incomplete day.
+_TWO_COLLECTION_FARMS = frozenset({"COF", "BNK"})
+_MIN_COLLECTIONS = 2
 
 
 def _uk_today() -> dt.date:
@@ -151,6 +155,32 @@ def _bundle_for_days(
     }
 
 
+def _apply_two_collection_milk_per_cow(
+    bundle: dict[str, Any],
+    points: list[dict[str, Any]],
+    *,
+    window_end: dt.date,
+) -> None:
+    """Replace 7-day milk per cow with days that have two collections with volume."""
+    eligible = [
+        point
+        for point in points
+        if int(point.get("collection_count") or 0) >= _MIN_COLLECTIONS
+    ]
+    per_cow = _metric_window(
+        eligible,
+        key="litres_per_cow",
+        days=_SHORT_WINDOW_DAYS,
+        dp=1,
+        window_end=window_end,
+    )
+    bundle["milk_per_cow"] = per_cow["value"]
+    window = bundle["windows"]["milk_per_cow"]
+    window["from"] = per_cow["from"]
+    window["to"] = per_cow["to"]
+    window["days_with_data"] = per_cow["days_with_data"]
+
+
 def _annotate_volume_and_cows(trend: dict[str, list[dict[str, Any]]]) -> None:
     for farm_points in trend.values():
         for point in farm_points:
@@ -229,6 +259,10 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         points = list(trend.get(farm) or [])
         d7 = _bundle_for_days(points, _SHORT_WINDOW_DAYS, window_end=completed_through)
         d30 = _bundle_for_days(points, _LONG_WINDOW_DAYS, window_end=completed_through)
+        if farm in _TWO_COLLECTION_FARMS:
+            _apply_two_collection_milk_per_cow(
+                d7, points, window_end=completed_through
+            )
         farms_out.append(
             {
                 "farm": farm,
