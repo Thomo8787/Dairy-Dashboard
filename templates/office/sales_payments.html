@@ -267,6 +267,12 @@
       border: 1px solid var(--line);
       border-radius: 8px;
     }
+    .empty-state.load-failed {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
     .reason-pill {
       display: inline-block;
       padding: 0.15rem 0.45rem;
@@ -531,6 +537,26 @@
         ? formatMonthLabel(monthList[parseInt(minRange.value, 10)]) : "—";
       maxLabel.textContent = monthList[parseInt(maxRange.value, 10)]
         ? formatMonthLabel(monthList[parseInt(maxRange.value, 10)]) : "—";
+    }
+
+    function showEmptyMessage(empty, message) {
+      empty.classList.remove("load-failed");
+      empty.style.display = "";
+      empty.textContent = message;
+    }
+
+    function showLoadFailure(empty, wrap, meta) {
+      empty.classList.add("load-failed");
+      empty.style.display = "";
+      empty.replaceChildren(document.createTextNode("Failed to load sales payments."));
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "secondary small";
+      retry.textContent = "Retry";
+      retry.addEventListener("click", () => fetchRows());
+      empty.append(retry);
+      wrap.style.display = "none";
+      meta.textContent = "";
     }
 
     function setLoading(isLoading) {
@@ -819,14 +845,14 @@
       rebuildRowIndex();
       updateMetaFromRows();
       if (!rows.length) {
-        empty.style.display = "";
-        empty.textContent = currentStatus === "active"
+        showEmptyMessage(empty, currentStatus === "active"
           ? "No unpaid sold animals match the selected filters."
-          : "No archived sales match the selected filters.";
+          : "No archived sales match the selected filters.");
         wrap.style.display = "none";
         updateActionBar();
         return;
       }
+      empty.classList.remove("load-failed");
       empty.style.display = "none";
       wrap.style.display = "";
       renderTable();
@@ -850,8 +876,7 @@
       const wrap = document.getElementById("table-wrap");
       const meta = document.getElementById("meta-line");
       if (!farms.length) {
-        empty.style.display = "";
-        empty.textContent = "Please select at least one farm.";
+        showEmptyMessage(empty, "Please select at least one farm.");
         wrap.style.display = "none";
         meta.textContent = "";
         rows = [];
@@ -860,8 +885,7 @@
         return false;
       }
       if (!reasons.length) {
-        empty.style.display = "";
-        empty.textContent = "Please select at least one sales reason.";
+        showEmptyMessage(empty, "Please select at least one sales reason.");
         wrap.style.display = "none";
         meta.textContent = "";
         rows = [];
@@ -879,20 +903,14 @@
           { signal: loadController.signal }
         );
         if (!res.ok) {
-          empty.style.display = "";
-          empty.textContent = "Failed to load sales payments.";
-          wrap.style.display = "none";
-          meta.textContent = "";
+          showLoadFailure(empty, wrap, meta);
           return false;
         }
         applyRowsResponse(await res.json());
         return true;
       } catch (error) {
         if (error.name === "AbortError") return false;
-        empty.style.display = "";
-        empty.textContent = "Failed to load sales payments.";
-        wrap.style.display = "none";
-        meta.textContent = "";
+        showLoadFailure(empty, wrap, meta);
         return false;
       } finally {
         if (manageLoading) setLoading(false);
@@ -950,12 +968,12 @@
       const empty = document.getElementById("empty-state");
       const wrap = document.getElementById("table-wrap");
       if (!rows.length) {
-        empty.style.display = "";
-        empty.textContent = currentStatus === "active"
+        showEmptyMessage(empty, currentStatus === "active"
           ? "No unpaid sold animals match the selected filters."
-          : "No archived sales match the selected filters.";
+          : "No archived sales match the selected filters.");
         wrap.style.display = "none";
       } else {
+        empty.classList.remove("load-failed");
         empty.style.display = "none";
         wrap.style.display = "";
         renderTable();
