@@ -107,16 +107,25 @@ def _reason_filter_conditions(reasons: list[str] | None):
     if not reasons:
         return None
     beef_calf = _payment_beef_calf_clause()
+    ofs = or_(ofs_sales_clause(), died_cert_clause())
     conditions = []
     if "OFS" in reasons:
-        conditions.append(CowEvent.remark == "OFS")
+        conditions.append(ofs)
     if "TB" in reasons:
-        conditions.append(CowEvent.remark.in_(list(SALES_TB_REMARKS)))
+        conditions.append(
+            and_(
+                CowEvent.remark.in_(list(SALES_TB_REMARKS)),
+                ~ofs,
+            )
+        )
     if "Beef" in reasons:
         conditions.append(
-            or_(
-                CowEvent.remark.in_(list(SALES_BEEF_REMARKS)),
-                beef_calf,
+            and_(
+                or_(
+                    CowEvent.remark.in_(list(SALES_BEEF_REMARKS)),
+                    beef_calf,
+                ),
+                ~ofs,
             )
         )
     if "Dairy" in reasons:
@@ -124,6 +133,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
             and_(
                 CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
                 ~beef_calf,
+                ~ofs,
             )
         )
     if "CULL" in reasons:
@@ -134,6 +144,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
                     CowEvent.remark.notin_(list(SALES_MAPPED_REMARKS)),
                 ),
                 ~beef_calf,
+                ~ofs,
             )
         )
     if not conditions:
