@@ -265,6 +265,16 @@
     return d7 <= 3.6 ? "red" : "unknown";
   }
 
+  function bactoscanStatus(dailyValues) {
+    const recent = (dailyValues || []).slice(-3);
+    if (recent.length < 3) return "unknown";
+    const high = recent.every((value) => {
+      const n = Number(value);
+      return value !== null && value !== undefined && value !== "" && Number.isFinite(n) && n >= 30;
+    });
+    return high ? "red" : "unknown";
+  }
+
   function setWidget(widget, main, sub, href) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
@@ -365,6 +375,7 @@
       const byFarm = Object.fromEntries(
         (data.farms || []).map((f) => [String(f.farm || "").toUpperCase(), f])
       );
+      const bactoscanSeries = (data.bactoscan_chart && data.bactoscan_chart.series) || {};
       farmBlocks.forEach((block) => {
         const farm = (block.dataset.productionFarm || "").toUpperCase();
         const row = byFarm[farm] || {};
@@ -386,6 +397,9 @@
           }
           if (metric === "butterfat_pct") {
             setStatus(widget, fatStatus(d7[metric]));
+          }
+          if (metric === "bactoscan") {
+            setStatus(widget, bactoscanStatus(bactoscanSeries[farm]));
           }
         });
       });
