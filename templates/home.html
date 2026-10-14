@@ -240,6 +240,15 @@
     widget.classList.add(`status-${status || "unknown"}`);
   }
 
+  function milkPerCowStatus(recent, baseline) {
+    if (recent === null || recent === undefined || recent === "") return "unknown";
+    if (baseline === null || baseline === undefined || baseline === "") return "unknown";
+    const d7 = Number(recent);
+    const d30 = Number(baseline);
+    if (!Number.isFinite(d7) || !Number.isFinite(d30) || d30 <= 0) return "unknown";
+    return (d30 - d7) / d30 > 0.045 ? "red" : "unknown";
+  }
+
   function setWidget(widget, main, sub, href) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
@@ -353,6 +362,9 @@
             formatMetric(metric, d30[metric]),
             href
           );
+          if (metric === "milk_per_cow") {
+            setStatus(widget, milkPerCowStatus(d7[metric], d30[metric]));
+          }
         });
       });
       renderBactoscanChart(data.bactoscan_chart || {});
