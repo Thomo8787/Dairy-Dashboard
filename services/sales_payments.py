@@ -109,6 +109,7 @@ def _apply_sold_event_filters(
     reasons: list[str] | None,
     event_from: dt.date | None,
     event_to: dt.date | None,
+    cow_id: str | None = None,
 ):
     query = query.where(cattle_sales_exit_event_clause()).where(
         CowEvent.event_date.isnot(None)
@@ -117,6 +118,10 @@ def _apply_sold_event_filters(
     reason_filter = _reason_filter_conditions(reasons)
     if reason_filter is not None:
         query = query.where(reason_filter)
+    normalized_cow_id = _normalize_key_part(cow_id)
+    if normalized_cow_id:
+        query = query.where(func.trim(CowEvent.cow_id) == normalized_cow_id)
+        return query
     if event_from is not None:
         query = query.where(CowEvent.event_date >= event_from)
     if event_to is not None:
@@ -562,6 +567,7 @@ def list_sales_payments(
     event_to: dt.date | None = None,
     include_date_bounds: bool = True,
     has_amount: bool | None = None,
+    cow_id: str | None = None,
 ) -> dict[str, Any]:
     selected_farms = normalize_farms(farms)
     if not selected_farms:
@@ -605,6 +611,7 @@ def list_sales_payments(
         reasons=reasons,
         event_from=event_from,
         event_to=event_to,
+        cow_id=cow_id,
     )
     query = _apply_status_filter(query, status)
     query = query.order_by(
@@ -733,7 +740,8 @@ def list_sales_payments(
             )
         )
 
-    if status != "archived":
+    search_id = _normalize_key_part(cow_id)
+    if status != "archived" and not search_id:
         extra_rows = _unmatched_remittance_rows(
             db,
             farms=selected_farms,

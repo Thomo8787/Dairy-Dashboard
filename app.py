@@ -546,6 +546,7 @@ def office_api_sales_payments():
                 event_to=_parse_date_arg("event_to"),
                 include_date_bounds=include_date_bounds,
                 has_amount=_parse_bool_arg("has_amount"),
+                cow_id=(request.args.get("cow_id") or "").strip() or None,
             )
         )
 

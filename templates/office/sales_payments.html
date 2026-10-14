@@ -47,6 +47,17 @@
       margin-bottom: 0.35rem;
     }
     .filter-select { width: 100%; margin: 0; }
+    .id-search {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .id-search input {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+    }
+    .id-search button { flex: 0 0 auto; }
     .slicer-group {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -336,6 +347,13 @@
             <input type="range" id="max-date-range" min="0" max="0" value="0">
           </div>
         </div>
+        <div class="filter-section">
+          <label class="section-label" for="cow-id-search">ID</label>
+          <div class="id-search">
+            <input type="search" id="cow-id-search" placeholder="Cow ID" autocomplete="off" enterkeyhint="search">
+            <button type="button" class="secondary small" id="cow-id-search-btn">Search</button>
+          </div>
+        </div>
         <div class="filter-actions">
           <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
         </div>
@@ -381,6 +399,7 @@
     let dateLoadTimer = null;
     let loadingCount = 0;
     let highlightEtag = null;
+    let appliedCowId = "";
 
     function fmtNum(v, dp = 2) {
       if (v == null || v === "") return "—";
@@ -653,7 +672,9 @@
       appendListParams(params, "reason", selectedReasons());
       const dest = document.getElementById("dest-select").value;
       if (dest) params.set("dest", dest);
-      if (dateOverride) {
+      if (appliedCowId) {
+        params.set("cow_id", appliedCowId);
+      } else if (dateOverride) {
         params.set("event_from", dateOverride.from);
         params.set("event_to", dateOverride.to);
       } else if (includeDateRange && monthList.length) {
@@ -959,8 +980,9 @@
     function updateMetaFromRows() {
       if (loadingCount > 0) return;
       const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
+      const idNote = appliedCowId ? ` for ID ${appliedCowId}` : "";
       document.getElementById("meta-line").textContent =
-        `${label}: ${rows.length.toLocaleString("en-GB")}`;
+        `${label}${idNote}: ${rows.length.toLocaleString("en-GB")}`;
     }
 
     function applyRowsToView() {
@@ -1046,11 +1068,20 @@
       refreshFilters(true);
     }
 
+    function searchByCowId() {
+      const input = document.getElementById("cow-id-search");
+      appliedCowId = (input.value || "").trim();
+      input.value = appliedCowId;
+      fetchRows();
+    }
+
     function clearFilters() {
       resetSlicers(".farm-slicer");
       resetSlicers(".reason-slicer");
       resetAmountSlicer();
       document.getElementById("dest-select").value = "";
+      document.getElementById("cow-id-search").value = "";
+      appliedCowId = "";
       highlightEtag = null;
       refreshFilters(true);
     }
@@ -1107,6 +1138,13 @@
     });
     document.getElementById("dest-select").addEventListener("change", () => refreshFilters(true));
     document.getElementById("clear-filters-btn").addEventListener("click", clearFilters);
+    document.getElementById("cow-id-search-btn").addEventListener("click", searchByCowId);
+    document.getElementById("cow-id-search").addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchByCowId();
+      }
+    });
     document.getElementById("confirm-btn")?.addEventListener("click", confirmSelected);
     document.getElementById("select-amount-btn")?.addEventListener("click", selectAllWithAmount);
     document.getElementById("unarchive-btn")?.addEventListener("click", unarchiveSelected);
