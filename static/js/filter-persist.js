@@ -74,7 +74,61 @@
     if (farms.length) saveFarms(farms);
   }
 
+  const CLICK_HOLD_MS = 300;
+  const multiSelectGroups = new Set(
+    [...document.querySelectorAll(".farm-slicer")].filter(isAllSelected)
+  );
+  multiSelectGroups.forEach((group) => {
+    group.querySelectorAll(".slicer-btn[data-value]").forEach((btn) => {
+      btn.title = "Double-click to show only this farm";
+    });
+  });
+
+  let committingClick = false;
+  let pendingClick = null;
+
+  function farmButton(event) {
+    const btn = event.target.closest(".farm-slicer .slicer-btn");
+    if (!btn) return null;
+    const group = btn.closest(".farm-slicer");
+    if (!multiSelectGroups.has(group)) return null;
+    return { btn, group };
+  }
+
+  function commitClick(btn) {
+    committingClick = true;
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    committingClick = false;
+  }
+
   restore();
+
+  document.addEventListener("click", (event) => {
+    if (committingClick) return;
+    const hit = farmButton(event);
+    if (!hit) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    clearTimeout(pendingClick);
+    pendingClick = setTimeout(() => {
+      pendingClick = null;
+      commitClick(hit.btn);
+    }, CLICK_HOLD_MS);
+  }, true);
+
+  document.addEventListener("dblclick", (event) => {
+    const hit = farmButton(event);
+    if (!hit) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    clearTimeout(pendingClick);
+    pendingClick = null;
+    hit.group.querySelectorAll(".slicer-btn").forEach((btn) => {
+      btn.classList.remove("selected");
+      btn.setAttribute("aria-pressed", "false");
+    });
+    commitClick(hit.btn);
+  }, true);
 
   document.addEventListener("click", (event) => {
     if (
