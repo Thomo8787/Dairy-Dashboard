@@ -831,10 +831,13 @@
           hasAmount ? "row-has-amount" : "",
           highlightEtag && row.etag === highlightEtag ? "row-highlight" : "",
         ].filter(Boolean).join(" ");
+        const farmNote = row.dairycomp_farm
+          ? ' <span title="Sold on DairyComp ' + row.dairycomp_farm + '. Payment PDF is a different farm; accounts need an internal transfer." style="color:#b45309">DairyComp ' + row.dairycomp_farm + '</span>'
+          : "";
         return `
           <tr class="${rowClasses}" data-key="${encodeURIComponent(key)}">
             ${selectCell}
-            <td>${row.cow_id || "—"}</td>
+            <td>${row.cow_id || "—"}${farmNote}</td>
             <td>${row.farm || "—"}</td>
             <td>${row.etag || "—"}</td>
             <td>${row.age_months != null ? row.age_months : "—"}</td>
@@ -981,8 +984,10 @@
       if (loadingCount > 0) return;
       const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
       const idNote = appliedCowId ? ` for ID ${appliedCowId}` : "";
+      const otherFarm = rows.filter(row => row.dairycomp_farm).length;
+      const farmNote = otherFarm ? ` · ${otherFarm} on a different DairyComp farm` : "";
       document.getElementById("meta-line").textContent =
-        `${label}${idNote}: ${rows.length.toLocaleString("en-GB")}`;
+        `${label}${idNote}: ${rows.length.toLocaleString("en-GB")}${farmNote}`;
     }
 
     function applyRowsToView() {

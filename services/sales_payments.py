@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import and_, exists, func, literal, or_, select
+from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from services.cattle_sale_pdf import is_rejected_sale, normalize_etag
@@ -13,20 +13,26 @@ from services.cattle_sales import (
     BUYER_WARRENDALE,
     EVENT_MATCH_WINDOW_DAYS,
     WARRENDALE_BONUS_GBP,
+    _load_sold_events,
+    _match_sale_to_sold_event,
     cattle_sales_exit_event_clause,
 )
 
 WARRENDALE_BONUS_LOOKAHEAD_DAYS = 28
 from services.database import CattleSaleLine, CowEvent, SalesPaymentRecord, User
 from services.events_common import (
+    OFS_DEST_PREFIXES,
     SALES_BEEF_REMARKS,
     SALES_DAIRY_REMARKS,
     SALES_MAPPED_REMARKS,
     SALES_TABLE_REASON_ORDER,
     SALES_TB_REMARKS,
-    _sales_reason_expression,
+    died_cert_clause,
     normalize_farms,
+    ofs_sales_clause,
 )
+from services.farms import HERD_FARM_OPTIONS
+from services.herd_import_utils import BEEF_CBREED_MIN
 
 def _normalize_key_part(value: str | None) -> str:
     return (value or "").strip()
@@ -71,23 +77,63 @@ def _archived_payment_exists():
     )
 
 
+def _payment_beef_calf_clause():
+    """Lactation 0 and a beef breed, excluding fallen stock and TB."""
+    return and_(
+        func.coalesce(CowEvent.lact, 0) == 0,
+        CowEvent.cbrd.isnot(None),
+        CowEvent.cbrd >= BEEF_CBREED_MIN,
+        ~ofs_sales_clause(),
+        ~died_cert_clause(),
+        or_(
+            CowEvent.remark.is_(None),
+            CowEvent.remark.notin_(list(SALES_TB_REMARKS)),
+        ),
+    )
+
+
+def _payment_sales_reason_expression():
+    return case(
+        (or_(ofs_sales_clause(), died_cert_clause()), literal("OFS")),
+        (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
+        (_payment_beef_calf_clause(), literal("Beef")),
+        (CowEvent.remark.in_(list(SALES_BEEF_REMARKS)), literal("Beef")),
+        (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),
+        else_=literal("CULL"),
+    )
+
+
 def _reason_filter_conditions(reasons: list[str] | None):
     if not reasons:
         return None
+    beef_calf = _payment_beef_calf_clause()
     conditions = []
     if "OFS" in reasons:
         conditions.append(CowEvent.remark == "OFS")
     if "TB" in reasons:
         conditions.append(CowEvent.remark.in_(list(SALES_TB_REMARKS)))
     if "Beef" in reasons:
-        conditions.append(CowEvent.remark.in_(list(SALES_BEEF_REMARKS)))
-    if "Dairy" in reasons:
-        conditions.append(CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)))
-    if "CULL" in reasons:
         conditions.append(
             or_(
-                CowEvent.remark.is_(None),
-                CowEvent.remark.notin_(list(SALES_MAPPED_REMARKS)),
+                CowEvent.remark.in_(list(SALES_BEEF_REMARKS)),
+                beef_calf,
+            )
+        )
+    if "Dairy" in reasons:
+        conditions.append(
+            and_(
+                CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
+                ~beef_calf,
+            )
+        )
+    if "CULL" in reasons:
+        conditions.append(
+            and_(
+                or_(
+                    CowEvent.remark.is_(None),
+                    CowEvent.remark.notin_(list(SALES_MAPPED_REMARKS)),
+                ),
+                ~beef_calf,
             )
         )
     if not conditions:
@@ -254,10 +300,26 @@ def _candidate_sale_lines(
     normalized_etag = normalize_etag(etag)
     if not normalized_etag:
         return []
-    lines = sale_lines_by_key.get((farm, normalized_etag), [])
-    if not lines:
-        lines = sale_lines_by_key.get(("", normalized_etag), [])
-    return lines
+    return sale_lines_by_key.get((farm, normalized_etag), [])
+
+
+def _has_other_farm_remittance(
+    sale_lines_by_key: dict[tuple[str, str], list[CattleSaleLine]],
+    farm: str,
+    etag: str | None,
+    event_date: dt.date | None,
+) -> bool:
+    """True when another herd's PDF covers this ear tag within 14 days."""
+    normalized_etag = normalize_etag(etag)
+    if not normalized_etag or event_date is None:
+        return False
+    for (line_farm, line_etag), lines in sale_lines_by_key.items():
+        if not line_farm or line_farm == farm or line_etag != normalized_etag:
+            continue
+        for line in lines:
+            if _sale_line_match_delta(line, event_date) <= EVENT_MATCH_WINDOW_DAYS:
+                return True
+    return False
 
 
 def _closest_sale_match(
@@ -326,6 +388,7 @@ def _row_to_dict(
     bonus_paid: bool = False,
     warrendale_split: bool = False,
     confirm_part: str | None = None,
+    dairycomp_farm: str | None = None,
 ) -> dict[str, Any]:
     normalized_cow_id = _normalize_key_part(cow_id)
     normalized_etag = _normalize_key_part(etag)
@@ -350,6 +413,7 @@ def _row_to_dict(
         "has_sale_amount": has_sale_amount,
         "paid_at": paid_at.isoformat() if paid_at else None,
         "archived_at": archived_at.isoformat() if archived_at else None,
+        "dairycomp_farm": dairycomp_farm,
         "payment_key": {
             "farm": farm,
             "cow_id": normalized_cow_id,
@@ -412,30 +476,41 @@ def _payment_flags_by_key(
     }
 
 
-def _latest_event_for_normalized_etag(db: Session, farm: str, etag: str) -> CowEvent | None:
-    exact = db.scalars(
-        select(CowEvent)
-        .where(CowEvent.farm == farm, CowEvent.etag == etag)
-        .order_by(CowEvent.event_date.desc(), CowEvent.id.desc())
-    ).first()
-    if exact is not None:
-        return exact
-    suffix = etag[-8:] if len(etag) >= 8 else etag
-    rows = db.scalars(
-        select(CowEvent).where(
-            CowEvent.farm == farm,
-            CowEvent.etag.isnot(None),
-            CowEvent.etag.like(f"%{suffix}"),
-        )
-    ).all()
-    matches = [row for row in rows if normalize_etag(row.etag) == etag]
-    if not matches:
-        return None
-    matches.sort(key=lambda row: (row.event_date or dt.date.min, row.id or 0), reverse=True)
-    return matches[0]
+def _identity_is_ofs_or_tb(identity) -> str | None:
+    remark = (getattr(identity, "remark", None) or "").strip().upper()
+    dest = (getattr(identity, "dest", None) or "").strip().upper()
+    event = (getattr(identity, "event", None) or "").strip().upper()
+    if remark == "OFS" or any(dest.startswith(prefix) for prefix in OFS_DEST_PREFIXES):
+        return "OFS"
+    if event == "DIED" and remark.startswith("CERT"):
+        return "OFS"
+    if remark in SALES_TB_REMARKS:
+        return "TB"
+    return None
+
+
+def _identity_is_beef_calf(identity) -> bool:
+    if identity is None or _identity_is_ofs_or_tb(identity):
+        return False
+    try:
+        lact = int(identity.lact) if identity.lact is not None else 0
+    except (TypeError, ValueError):
+        lact = 0
+    if lact != 0:
+        return False
+    try:
+        cbrd = int(identity.cbrd) if identity.cbrd is not None else None
+    except (TypeError, ValueError):
+        return False
+    return cbrd is not None and cbrd >= BEEF_CBREED_MIN
 
 
 def _remittance_sales_reason(buyer: str | None, identity) -> str:
+    prior = _identity_is_ofs_or_tb(identity) if identity is not None else None
+    if prior:
+        return prior
+    if _identity_is_beef_calf(identity):
+        return "Beef"
     remark = (getattr(identity, "remark", None) or "").strip().upper()
     if remark in SALES_BEEF_REMARKS:
         return "Beef"
@@ -456,18 +531,51 @@ def _unmatched_remittance_rows(
     event_from: dt.date | None,
     event_to: dt.date | None,
     has_amount: bool | None,
-    existing_etags: set[str],
+    shown_farm_etags: set[tuple[str, str]],
+    cow_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Show remittance lines that do not yet have a DairyComp SOLD event."""
+    """Show PDF rows that are not already listed as a sold event on that farm.
+
+    A sold event on another herd supplies the cow ID, age, and gender. The row
+    stays on the PDF farm.
+    """
     query = select(CattleSaleLine).where(CattleSaleLine.farm.in_(farms))
-    if event_from is not None:
-        query = query.where(CattleSaleLine.sale_date >= event_from)
-    if event_to is not None:
-        query = query.where(CattleSaleLine.sale_date <= event_to)
+    search_id = _normalize_key_part(cow_id)
+    if search_id:
+        raw_etags = {
+            etag
+            for etag in db.scalars(
+                select(CowEvent.etag).where(
+                    func.trim(CowEvent.cow_id) == search_id,
+                    CowEvent.etag.isnot(None),
+                )
+            ).all()
+            if etag
+        }
+        if not raw_etags:
+            return []
+        query = query.where(CattleSaleLine.etag.in_(raw_etags))
+    else:
+        if event_from is not None:
+            query = query.where(CattleSaleLine.sale_date >= event_from)
+        if event_to is not None:
+            query = query.where(CattleSaleLine.sale_date <= event_to)
+    sale_lines = list(db.scalars(query).all())
+    reference_dates = [line.sale_date for line in sale_lines]
+    reference_dates.extend(line.kill_date for line in sale_lines if line.kill_date is not None)
+    sold_by_key = {}
+    if reference_dates:
+        sold_by_key = _load_sold_events(
+            db,
+            list(HERD_FARM_OPTIONS),
+            {line.etag for line in sale_lines},
+            min(reference_dates),
+            max(reference_dates),
+        )
     extra: list[dict[str, Any]] = []
-    for line in db.scalars(query).all():
+    for line in sale_lines:
         etag = normalize_etag(line.etag)
-        if not etag or etag in existing_etags:
+        if not etag or (line.farm, etag) in shown_farm_etags:
             continue
         buyer = (line.buyer or "").strip()
         if not _dests_match(buyer, dest):
@@ -479,7 +587,16 @@ def _unmatched_remittance_rows(
             continue
         if has_amount is False and has_sale_amount:
             continue
-        identity = _latest_event_for_normalized_etag(db, line.farm, etag)
+        match, other_farm = _match_sale_to_sold_event(
+            sold_by_key,
+            farm=line.farm,
+            etag=etag,
+            sale_date=line.sale_date,
+            kill_date=line.kill_date,
+        )
+        if search_id and _normalize_key_part(match.cow_id if match else None) != search_id:
+            continue
+        identity = match
         sales_reason = _remittance_sales_reason(line.buyer, identity)
         if reasons and sales_reason not in reasons:
             continue
@@ -494,7 +611,7 @@ def _unmatched_remittance_rows(
             _row_to_dict(
                 line.farm,
                 identity.cow_id if identity else None,
-                identity.etag if identity else line.etag,
+                line.etag,
                 buyer,
                 event_date,
                 sales_reason,
@@ -512,6 +629,7 @@ def _unmatched_remittance_rows(
                     amount_paid=False,
                     bonus_paid=False,
                 ),
+                dairycomp_farm=other_farm,
             )
         )
     return extra
@@ -573,7 +691,7 @@ def list_sales_payments(
     if not selected_farms:
         return {"rows": [], "total": 0, "status": status, "date_bounds": None}
 
-    reason_expr = _sales_reason_expression()
+    reason_expr = _payment_sales_reason_expression()
     etag_suffix = func.substr(func.coalesce(CowEvent.etag, ""), -5)
 
     if status == "archived":
@@ -641,7 +759,7 @@ def list_sales_payments(
                 max_event = max_event.date()
             sale_lines_by_key = _load_cattle_sale_lines_by_farm_etag(
                 db,
-                selected_farms,
+                list(HERD_FARM_OPTIONS),
                 min_event,
                 max_event,
             )
@@ -661,11 +779,12 @@ def list_sales_payments(
             flag_min = min(flag_dates)
             flag_max = max(flag_dates)
     payment_flags = _payment_flags_by_key(db, selected_farms, flag_min, flag_max)
+    search_cow_id = _normalize_key_part(cow_id)
 
     rows = []
     for (
         farm,
-        cow_id,
+        event_cow_id,
         etag,
         event_date,
         sales_reason,
@@ -686,6 +805,10 @@ def list_sales_payments(
         sale_match = _sale_match_for_sold_event(
             sale_lines_by_key, farm, etag, event_date, sales_reason
         )
+        if sale_match is None and _has_other_farm_remittance(
+            sale_lines_by_key, farm, etag, event_date
+        ):
+            continue
         if sale_match is not None:
             calf_amount = sale_match.get("calf_amount_gbp")
             bonus_gbp = sale_match.get("bonus_gbp")
@@ -694,7 +817,7 @@ def list_sales_payments(
             remittance_dest = sale_match["buyer"]
             warrendale_split = bool(sale_match.get("warrendale_split"))
         record = payment_flags.get(
-            _payment_record_key(farm, cow_id, etag, event_date)
+            _payment_record_key(farm, event_cow_id, etag, event_date)
         )
         amount_paid = bool(record and record.amount_paid_at)
         bonus_paid = bool(record and record.bonus_paid_at)
@@ -714,7 +837,7 @@ def list_sales_payments(
         rows.append(
             _row_to_dict(
                 farm,
-                cow_id,
+                event_cow_id,
                 etag,
                 remittance_dest,
                 event_date,
@@ -740,8 +863,7 @@ def list_sales_payments(
             )
         )
 
-    search_id = _normalize_key_part(cow_id)
-    if status != "archived" and not search_id:
+    if status != "archived":
         extra_rows = _unmatched_remittance_rows(
             db,
             farms=selected_farms,
@@ -750,7 +872,10 @@ def list_sales_payments(
             event_from=event_from,
             event_to=event_to,
             has_amount=has_amount,
-            existing_etags={normalize_etag(row["etag"]) for row in rows},
+            shown_farm_etags={
+                (row["farm"], normalize_etag(row["etag"])) for row in rows
+            },
+            cow_id=search_cow_id or None,
         )
         rows.extend(extra_rows)
     rows.sort(key=lambda row: (row["event_date"], row["dest"], row["etag"]))
