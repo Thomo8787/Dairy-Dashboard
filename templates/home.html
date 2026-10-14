@@ -249,6 +249,15 @@
     return (d30 - d7) / d30 > 0.045 ? "red" : "unknown";
   }
 
+  function sccStatus(recent, baseline) {
+    if (recent === null || recent === undefined || recent === "") return "unknown";
+    if (baseline === null || baseline === undefined || baseline === "") return "unknown";
+    const d7 = Number(recent);
+    const d30 = Number(baseline);
+    if (!Number.isFinite(d7) || !Number.isFinite(d30) || d30 <= 0) return "unknown";
+    return d7 > 180 && (d7 - d30) / d30 > 0.30 ? "red" : "unknown";
+  }
+
   function setWidget(widget, main, sub, href) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
@@ -364,6 +373,9 @@
           );
           if (metric === "milk_per_cow") {
             setStatus(widget, milkPerCowStatus(d7[metric], d30[metric]));
+          }
+          if (metric === "scc") {
+            setStatus(widget, sccStatus(d7[metric], d30[metric]));
           }
         });
       });
