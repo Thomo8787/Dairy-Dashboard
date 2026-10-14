@@ -546,7 +546,8 @@ def _day_metrics(
     if bimodal_flags:
         bimodal_pct = 100.0 * sum(bimodal_flags) / len(bimodal_flags)
 
-    # ID Efficiency: unique cows ID'd on the rotary ÷ DairyComp cows in milk.
+    # ID Efficiency: unique cows ID'd on the rotary ÷ DairyComp cows in milk
+    # (includes fresh cows; no DIM > 4 delay).
     id_cow_count = _unique_identified_cows(entry_rows, cow_scope=id_cow_scope)
     id_efficiency_pct = None
     if cows_in_milk is not None and cows_in_milk > 0 and entry_rows is not None:
@@ -605,7 +606,10 @@ def _unique_identified_cows(
 
 
 def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
-    """Current DairyComp inventory cows-in-milk counts keyed by pen."""
+    """Current DairyComp inventory cows-in-milk counts keyed by pen.
+
+    Includes fresh cows (no DIM > 4) so ID Efficiency matches Entry IDs.
+    """
     rows = (
         session.query(HerdInventory.pen, HerdInventory.rpro, HerdInventory.lact, HerdInventory.dim)
         .filter(HerdInventory.farm == farm_code)
@@ -613,7 +617,7 @@ def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
     )
     counts: dict[str, int] = defaultdict(int)
     for pen, rpro, lact, dim in rows:
-        if not _is_milking_inventory_row(rpro, lact, dim):
+        if not _is_milking_inventory_row(rpro, lact, dim, min_dim=None):
             continue
         key = (pen or "").strip() or "Unknown"
         counts[key] += 1
@@ -922,7 +926,9 @@ def _compute_metrics_for_dates(
     if not dates:
         return result
 
-    cows_in_milk_by_date = cows_in_milk_for_dates(session, [farm.code], dates)
+    cows_in_milk_by_date = cows_in_milk_for_dates(
+        session, [farm.code], dates, min_dim=None
+    )
     any_overnight = any(spec["overnight"] for spec in shift_specs)
     for offset in range(0, len(dates), SUMMARY_DATE_CHUNK):
         chunk = dates[offset : offset + SUMMARY_DATE_CHUNK]
@@ -1257,7 +1263,7 @@ def build_pen_breakdown(farm_code: str, shift_id: str, milking_date: date) -> di
         pen_keys = sorted(by_pen.keys(), key=_pen_sort_key)
         stall_count = _resolve_stall_count(farm)
         cows_in_milk = cows_in_milk_for_dates(
-            session, [farm.code], [milking_date]
+            session, [farm.code], [milking_date], min_dim=None
         ).get((farm.code, milking_date))
         cows_in_milk_by_pen = _cows_in_milk_by_pen(session, farm.code)
         metrics_by_pen = {}
@@ -1425,7 +1431,9 @@ def build_metric_trend(
                 if row.milking_date is not None:
                     entry_by_date[row.milking_date].append(row)
 
-            cows_in_milk_by_date = cows_in_milk_for_dates(session, [farm.code], chunk_dates)
+            cows_in_milk_by_date = cows_in_milk_for_dates(
+                session, [farm.code], chunk_dates, min_dim=None
+            )
             cows_in_milk_by_pen = (
                 _cows_in_milk_by_pen(session, farm.code) if pen_id is not None else {}
             )

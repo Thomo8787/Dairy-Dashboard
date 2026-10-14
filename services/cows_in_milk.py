@@ -1,9 +1,11 @@
 """Daily cows-in-milk counts from herd inventory + DairyComp events.
 
-Inventory defines who is currently milking (LACT > 0, RPRO != DRY, and DIM > 4).
-Historical days are reconstructed from FRESH / DRY / SOLD / DIED events, with
-inventory freshen dates used for the current lactation. Fresh cows are only
-counted once DIM > 4.
+Inventory defines who is currently milking (LACT > 0, RPRO != DRY, and by
+default DIM > 4). Historical days are reconstructed from FRESH / DRY / SOLD /
+DIED events, with inventory freshen dates used for the current lactation.
+
+Pass ``min_dim=None`` to include fresh cows from the freshen date (used by
+Milking Efficiency ID Efficiency). Collections/Home keep the default DIM > 4.
 """
 
 from __future__ import annotations
@@ -21,7 +23,13 @@ _TRACKED_EVENTS = ("FRESH", "DRY", "SOLD", "DIED")
 MIN_DIM = 4
 
 
-def _is_milking_inventory_row(rpro: str | None, lact: object, dim: object) -> bool:
+def _is_milking_inventory_row(
+    rpro: str | None,
+    lact: object,
+    dim: object,
+    *,
+    min_dim: int | None = MIN_DIM,
+) -> bool:
     try:
         lact_n = float(lact) if lact is not None else 0.0
     except (TypeError, ValueError):
@@ -30,14 +38,21 @@ def _is_milking_inventory_row(rpro: str | None, lact: object, dim: object) -> bo
         return False
     if (rpro or "").strip().upper() == "DRY":
         return False
+    if min_dim is None:
+        return True
     try:
         dim_n = float(dim) if dim is not None else None
     except (TypeError, ValueError):
         dim_n = None
-    return dim_n is not None and dim_n > MIN_DIM
+    return dim_n is not None and dim_n > min_dim
 
 
-def current_cows_in_milk(db: Session, farm: str) -> int:
+def current_cows_in_milk(
+    db: Session,
+    farm: str,
+    *,
+    min_dim: int | None = MIN_DIM,
+) -> int:
     """Cows in milk from the latest inventory snapshot for ``farm``."""
     farm_key = (farm or "").strip().upper()
     rows = db.execute(
@@ -45,7 +60,11 @@ def current_cows_in_milk(db: Session, farm: str) -> int:
             HerdInventory.farm == farm_key
         )
     ).all()
-    return sum(1 for rpro, lact, dim in rows if _is_milking_inventory_row(rpro, lact, dim))
+    return sum(
+        1
+        for rpro, lact, dim in rows
+        if _is_milking_inventory_row(rpro, lact, dim, min_dim=min_dim)
+    )
 
 
 def _intervals_from_events(
@@ -69,9 +88,13 @@ def _intervals_from_events(
 
 def _apply_min_dim(
     intervals: list[tuple[dt.date, dt.date | None]],
+    *,
+    min_dim: int | None = MIN_DIM,
 ) -> list[tuple[dt.date, dt.date | None]]:
+    if min_dim is None:
+        return list(intervals)
     shifted: list[tuple[dt.date, dt.date | None]] = []
-    offset = dt.timedelta(days=MIN_DIM + 1)
+    offset = dt.timedelta(days=min_dim + 1)
     for start, end in intervals:
         countable_start = start + offset
         if end is not None and countable_start >= end:
@@ -86,10 +109,11 @@ def _cow_intervals(
     fdat: dt.date | None,
     currently_milking: bool | None,
     today: dt.date,
+    min_dim: int | None = MIN_DIM,
 ) -> list[tuple[dt.date, dt.date | None]]:
     base = _intervals_from_events(evs)
     if fdat is None or currently_milking is None:
-        return _apply_min_dim(base)
+        return _apply_min_dim(base, min_dim=min_dim)
 
     kept: list[tuple[dt.date, dt.date | None]] = []
     for start, end in base:
@@ -100,7 +124,7 @@ def _cow_intervals(
 
     if currently_milking:
         kept.append((fdat, None))
-        return _apply_min_dim(kept)
+        return _apply_min_dim(kept, min_dim=min_dim)
 
     dry_end = None
     for event_date, event in evs:
@@ -111,15 +135,20 @@ def _cow_intervals(
         dry_end = today
     if fdat < dry_end:
         kept.append((fdat, dry_end))
-    return _apply_min_dim(kept)
+    return _apply_min_dim(kept, min_dim=min_dim)
 
 
 def cows_in_milk_for_dates(
     db: Session,
     farms: Iterable[str],
     dates: Iterable[dt.date],
+    *,
+    min_dim: int | None = MIN_DIM,
 ) -> dict[tuple[str, dt.date], int]:
-    """Return ``{(farm, date): cows_in_milk}`` for the requested pairs."""
+    """Return ``{(farm, date): cows_in_milk}`` for the requested pairs.
+
+    ``min_dim=None`` includes fresh cows from the freshen date (no DIM delay).
+    """
     farm_keys = sorted({(f or "").strip().upper() for f in farms if f})
     date_list = sorted({d for d in dates if isinstance(d, dt.date)})
     if not farm_keys or not date_list:
@@ -179,7 +208,7 @@ def cows_in_milk_for_dates(
         inv_today = sum(
             1
             for row in inv_map.values()
-            if _is_milking_inventory_row(row.rpro, row.lact, row.dim)
+            if _is_milking_inventory_row(row.rpro, row.lact, row.dim, min_dim=min_dim)
         )
 
         cow_ids = set(by_farm_cow.get(farm, {})) | set(inv_map)
@@ -196,6 +225,7 @@ def cows_in_milk_for_dates(
                 fdat=fdat,
                 currently_milking=currently_milking,
                 today=today,
+                min_dim=min_dim,
             ):
                 if end is not None and end <= start:
                     continue
