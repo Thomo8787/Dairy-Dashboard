@@ -3,8 +3,8 @@
 Windows end yesterday (UK), so today's incomplete tanker volumes are excluded.
 The headline figure is a plain 7-day calendar mean (yesterday and the six days
 before). Daily quality points are litre-weighted from tanker loads. Days in the
-window with no figure are skipped. COF and BNK 7-day milk per cow uses only
-days with two collections that have a volume.
+window with no figure are skipped. COF and BNK milk per cow, for both the 7-day
+and 30-day figures, uses only days with two collections that have a volume.
 """
 
 from __future__ import annotations
@@ -159,9 +159,10 @@ def _apply_two_collection_milk_per_cow(
     bundle: dict[str, Any],
     points: list[dict[str, Any]],
     *,
+    days: int,
     window_end: dt.date,
 ) -> None:
-    """Replace 7-day milk per cow with days that have two collections with volume."""
+    """Replace milk per cow with days that have two collections with volume."""
     eligible = [
         point
         for point in points
@@ -170,7 +171,7 @@ def _apply_two_collection_milk_per_cow(
     per_cow = _metric_window(
         eligible,
         key="litres_per_cow",
-        days=_SHORT_WINDOW_DAYS,
+        days=days,
         dp=1,
         window_end=window_end,
     )
@@ -261,7 +262,10 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         d30 = _bundle_for_days(points, _LONG_WINDOW_DAYS, window_end=completed_through)
         if farm in _TWO_COLLECTION_FARMS:
             _apply_two_collection_milk_per_cow(
-                d7, points, window_end=completed_through
+                d7, points, days=_SHORT_WINDOW_DAYS, window_end=completed_through
+            )
+            _apply_two_collection_milk_per_cow(
+                d30, points, days=_LONG_WINDOW_DAYS, window_end=completed_through
             )
         farms_out.append(
             {
