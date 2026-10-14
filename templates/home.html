@@ -258,6 +258,13 @@
     return d7 > 180 && (d7 - d30) / d30 > 0.30 ? "red" : "unknown";
   }
 
+  function fatStatus(recent) {
+    if (recent === null || recent === undefined || recent === "") return "unknown";
+    const d7 = Number(recent);
+    if (!Number.isFinite(d7)) return "unknown";
+    return d7 <= 3.6 ? "red" : "unknown";
+  }
+
   function setWidget(widget, main, sub, href) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
@@ -376,6 +383,9 @@
           }
           if (metric === "scc") {
             setStatus(widget, sccStatus(d7[metric], d30[metric]));
+          }
+          if (metric === "butterfat_pct") {
+            setStatus(widget, fatStatus(d7[metric]));
           }
         });
       });
