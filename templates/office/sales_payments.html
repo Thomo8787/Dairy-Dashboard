@@ -152,6 +152,21 @@
       margin-bottom: 0.75rem;
     }
     .meta-line.is-loading { font-style: italic; }
+    .meta-line.is-loading::before {
+      content: "";
+      display: inline-block;
+      width: 0.85rem;
+      height: 0.85rem;
+      margin-right: 0.45rem;
+      border: 2px solid #cbd5e1;
+      border-top-color: #1e3a5f;
+      border-radius: 50%;
+      vertical-align: -0.15rem;
+      animation: sales-payments-spin 0.7s linear infinite;
+    }
+    @keyframes sales-payments-spin {
+      to { transform: rotate(360deg); }
+    }
     .view-tabs {
       display: flex;
       gap: 0.5rem;
@@ -521,8 +536,13 @@
     function setLoading(isLoading) {
       loadingCount = Math.max(0, loadingCount + (isLoading ? 1 : -1));
       const meta = document.getElementById("meta-line");
-      meta.classList.toggle("is-loading", loadingCount > 0);
-      if (loadingCount > 0 && !rows.length) meta.textContent = "Loading sales payments…";
+      if (loadingCount > 0) {
+        meta.classList.add("is-loading");
+        meta.textContent = "Loading sales payments…";
+        return;
+      }
+      meta.classList.remove("is-loading");
+      updateMetaFromRows();
     }
 
     function defaultSliderIndices(maxIdx) {
@@ -794,12 +814,10 @@
     function applyRowsResponse(data) {
       const empty = document.getElementById("empty-state");
       const wrap = document.getElementById("table-wrap");
-      const meta = document.getElementById("meta-line");
       rows = data.rows || [];
       selectedKeys.clear();
       rebuildRowIndex();
-      const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
-      meta.textContent = `${label}: ${rows.length.toLocaleString("en-GB")}`;
+      updateMetaFromRows();
       if (!rows.length) {
         empty.style.display = "";
         empty.textContent = currentStatus === "active"
@@ -921,6 +939,7 @@
     }
 
     function updateMetaFromRows() {
+      if (loadingCount > 0) return;
       const label = currentStatus === "active" ? "Unpaid sold animals" : "Archived paid animals";
       document.getElementById("meta-line").textContent =
         `${label}: ${rows.length.toLocaleString("en-GB")}`;
