@@ -438,7 +438,7 @@
     <section class="content-panel">
       {% if can_import %}
       <div class="action-bar">
-        <button type="button" id="import-btn">Import from email</button>
+        <button type="button" id="import-btn" class="secondary">Import from email</button>
         <label class="import-scope">
           <span>Range</span>
           <select id="import-scope" title="How far back to scan the mailboxes">
@@ -1815,7 +1815,7 @@
           showImportNotice('Enter a positive whole number of days.');
           return;
         }
-      } else if (!window.confirm('Check the mailbox for new Neilds, Pickstock, Gamechanger, and Market Drayton cattle-sale PDFs and import them now?')) {
+      } else if (!window.confirm('Check the mailbox for new Neilds, Pickstock, Gamechanger, Market Drayton, and Warrendale cattle-sale PDFs and import them now?')) {
         return;
       }
 
