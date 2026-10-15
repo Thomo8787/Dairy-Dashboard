@@ -21,7 +21,7 @@ _SELF_BILL_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 _QTY_PRICE_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+Zero\s+Rated",
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)\s+(\d+(?:,\d{3})*(?:\.\d+)?)\s+Zero\s+Rated",
     re.IGNORECASE,
 )
 _MONTHS = {
@@ -79,8 +79,8 @@ def _parse_self_bill_date(text: str) -> dt.date | None:
 def _unit_price(text: str, tag_count: int) -> float | None:
     match = _QTY_PRICE_RE.search(text)
     if match:
-        qty = float(match.group(1))
-        price = float(match.group(2))
+        qty = float(match.group(1).replace(",", ""))
+        price = float(match.group(2).replace(",", ""))
         if price >= 20 and (tag_count == 0 or abs(qty - tag_count) < 0.5 or qty >= 1):
             return round(price, 2)
     return None
