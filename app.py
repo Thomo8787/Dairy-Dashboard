@@ -141,6 +141,7 @@ from services.nml_results import (
 )
 from services.nml_statements import list_nml_statements
 from services.nml_sync import get_nml_import_status, start_nml_import_job
+from services.muller_collections_import import import_muller_uploads
 from services.nml_manual import (
     delete_collection_load,
     get_collection_day,
@@ -1163,6 +1164,29 @@ def milk_quality_api_import():
     if not started:
         return jsonify({"error": message}), 400
     return jsonify({"status": "started", "message": message})
+
+
+@app.route("/milk-quality/api/collections/muller", methods=["POST"])
+def milk_quality_api_muller_upload():
+    _user, error = _milk_quality_json_user()
+    if error:
+        return error
+    uploads = request.files.getlist("files")
+    payloads: list[tuple[str, bytes]] = []
+    for upload in uploads:
+        filename = upload.filename or ""
+        content = upload.read()
+        if not content:
+            continue
+        if len(content) > 8 * 1024 * 1024:
+            return jsonify({"error": f"{filename or 'File'} is larger than 8 MB."}), 400
+        payloads.append((filename, content))
+    if not payloads:
+        return jsonify({"error": "Choose at least one Müller CSV."}), 400
+    try:
+        return jsonify(import_muller_uploads(payloads))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/milk-quality/api/collections/manual")

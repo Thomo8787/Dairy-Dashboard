@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import io
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -79,32 +80,40 @@ def _is_real_sample(row: NmlMilkResult) -> bool:
     return bool(sample) and sample.isdigit()
 
 
-def parse_muller_csv(path: Path) -> list[dict[str, Any]]:
-    farm = farm_from_filename(path.name)
+def parse_muller_rows(filename: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    farm = farm_from_filename(filename)
     if farm is None:
-        raise ValueError(f"Cannot read a farm code from {path.name}")
+        raise ValueError(f"Cannot read a farm code from {filename}")
 
     records: list[dict[str, Any]] = []
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        for raw in reader:
-            sample = normalize_sample_id(raw.get("Sample Number"))
-            if not sample or not sample.isdigit():
-                continue
-            litres = _parse_litres(raw.get("Litres"))
-            if litres is None:
-                continue
-            records.append(
-                {
-                    "farm": farm,
-                    "sample_id": sample,
-                    "litres": litres,
-                    "temp_c": _parse_temp(raw.get("Collection Temperature")),
-                    "actual_date": _parse_date(raw.get("Actual Collection Date")),
-                    "payment_date": _parse_date(raw.get("Payment Date")),
-                }
-            )
+    for raw in rows:
+        sample = normalize_sample_id(raw.get("Sample Number"))
+        if not sample or not sample.isdigit():
+            continue
+        litres = _parse_litres(raw.get("Litres"))
+        if litres is None:
+            continue
+        records.append(
+            {
+                "farm": farm,
+                "sample_id": sample,
+                "litres": litres,
+                "temp_c": _parse_temp(raw.get("Collection Temperature")),
+                "actual_date": _parse_date(raw.get("Actual Collection Date")),
+                "payment_date": _parse_date(raw.get("Payment Date")),
+            }
+        )
     return records
+
+
+def parse_muller_csv_text(filename: str, text: str) -> list[dict[str, Any]]:
+    reader = csv.DictReader(io.StringIO(text))
+    return parse_muller_rows(filename, list(reader))
+
+
+def parse_muller_csv(path: Path) -> list[dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return parse_muller_rows(path.name, list(csv.DictReader(handle)))
 
 
 def _date_gap(
@@ -173,13 +182,16 @@ def _row_brief(record: dict[str, Any], rows: list[NmlMilkResult] | None = None) 
     return brief
 
 
-def import_muller_collections(path: Path, *, apply: bool = True) -> dict[str, Any]:
-    workbook = Path(path)
-    if not workbook.is_file():
-        raise FileNotFoundError(f"Müller CSV not found: {workbook}")
-
-    farm = farm_from_filename(workbook.name)
-    records = parse_muller_csv(workbook)
+def apply_muller_records(
+    farm: str,
+    records: list[dict[str, Any]],
+    *,
+    source_file: str,
+    fill_temp: bool = False,
+    repair_conflicts: bool = False,
+    apply: bool = True,
+) -> dict[str, Any]:
+    """Write Müller litres onto existing tickets. Does not insert rows."""
     updated_ids: set[int] = set()
     temp_filled = 0
     unmatched: list[dict[str, Any]] = []
@@ -216,19 +228,17 @@ def import_muller_collections(path: Path, *, apply: bool = True) -> dict[str, An
             if len(litres) > 1:
                 for record, _row in claims:
                     ambiguous.append(_row_brief(record, [row]))
-                # Two Müller loads share this sample and date, so neither litres
-                # value can be assigned. Drop a value this import would have written
-                # onto a row that has no farm-ticket volume.
-                if row.litres_load is None and row.litres_weighbridge in litres:
+                if repair_conflicts and row.litres_load is None and row.litres_weighbridge in litres:
                     row.litres_weighbridge = None
-                    temps = {record["temp_c"] for record, _row in claims}
-                    if row.temp_c in temps:
-                        row.temp_c = None
+                    if fill_temp:
+                        temps = {record["temp_c"] for record, _row in claims}
+                        if row.temp_c in temps:
+                            row.temp_c = None
                 continue
             record = claims[-1][0]
             row.litres_weighbridge = record["litres"]
             updated_ids.add(row.id)
-            if row.temp_c is None and record["temp_c"] is not None:
+            if fill_temp and row.temp_c is None and record["temp_c"] is not None:
                 row.temp_c = record["temp_c"]
                 temp_filled += 1
             if _date_gap(row.sample_date, record["actual_date"], record["payment_date"]):
@@ -240,7 +250,7 @@ def import_muller_collections(path: Path, *, apply: bool = True) -> dict[str, An
             session.rollback()
 
     return {
-        "source_file": workbook.name,
+        "source_file": source_file,
         "farm": farm,
         "rows_parsed": len(records),
         "rows_updated": len(updated_ids),
@@ -252,6 +262,83 @@ def import_muller_collections(path: Path, *, apply: bool = True) -> dict[str, An
         "ambiguous": ambiguous,
         "date_gaps": date_gaps,
         "applied": apply,
+    }
+
+
+def import_muller_collections(path: Path, *, apply: bool = True) -> dict[str, Any]:
+    workbook = Path(path)
+    if not workbook.is_file():
+        raise FileNotFoundError(f"Müller CSV not found: {workbook}")
+
+    farm = farm_from_filename(workbook.name)
+    if farm is None:
+        raise ValueError(f"Cannot read a farm code from {workbook.name}")
+    records = parse_muller_csv(workbook)
+    return apply_muller_records(
+        farm,
+        records,
+        source_file=workbook.name,
+        fill_temp=True,
+        repair_conflicts=True,
+        apply=apply,
+    )
+
+
+def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
+    """Apply uploaded Müller CSVs. Weighbridge only; ticket litres and temperature stay put."""
+    if not files:
+        raise ValueError("Choose at least one Müller CSV.")
+
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for filename, content in files:
+        name = Path(filename or "").name
+        if farm_from_filename(name) is None:
+            errors.append(
+                {
+                    "source_file": name or filename,
+                    "error": "Farm code not recognised. Name the file ALH_, BNK_, COF_, or SFR_.",
+                }
+            )
+            continue
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{name} is not a text CSV.") from exc
+        records = parse_muller_csv_text(name, text)
+        farm = farm_from_filename(name)
+        assert farm is not None
+        results.append(
+            apply_muller_records(
+                farm,
+                records,
+                source_file=name,
+                fill_temp=False,
+                repair_conflicts=False,
+                apply=True,
+            )
+        )
+
+    if not results:
+        detail = errors[0]["error"] if errors else "No Müller files were imported."
+        raise ValueError(detail)
+
+    return {
+        "files": [
+            {
+                "source_file": item["source_file"],
+                "farm": item["farm"],
+                "rows_parsed": item["rows_parsed"],
+                "rows_updated": item["rows_updated"],
+                "rows_unmatched": item["rows_unmatched"],
+                "rows_ambiguous": item["rows_ambiguous"],
+            }
+            for item in results
+        ],
+        "errors": errors,
+        "rows_updated": sum(item["rows_updated"] for item in results),
+        "rows_unmatched": sum(item["rows_unmatched"] for item in results),
+        "rows_ambiguous": sum(item["rows_ambiguous"] for item in results),
     }
 
 

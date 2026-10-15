@@ -351,6 +351,8 @@
       <div class="action-bar">
         <button type="button" class="btn ghost" id="download-csv-btn">Export CSV</button>
         <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
+        <button type="button" class="btn" id="import-muller-btn">Import Müller</button>
+        <input type="file" id="import-muller-input" accept=".csv,text/csv" multiple hidden>
         <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
       </div>
 
@@ -1069,6 +1071,40 @@
   });
   document.getElementById("download-xlsx-btn").addEventListener("click", () => {
     window.location.href = "/milk-quality/api/results/export.xlsx?" + buildQuery();
+  });
+
+  document.getElementById("import-muller-btn").addEventListener("click", () => {
+    document.getElementById("import-muller-input").click();
+  });
+  document.getElementById("import-muller-input").addEventListener("change", async function () {
+    const files = Array.from(this.files || []);
+    this.value = "";
+    if (!files.length) return;
+    const btn = document.getElementById("import-muller-btn");
+    btn.disabled = true;
+    showMessage("Importing Müller collections…");
+    try {
+      const body = new FormData();
+      files.forEach((file) => body.append("files", file));
+      const res = await fetch("/milk-quality/api/collections/muller", { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Müller import failed");
+      let message = "Müller: " + (data.rows_updated || 0) + " weighbridge value(s) written, " +
+        (data.rows_unmatched || 0) + " with no matching ticket.";
+      if (data.rows_ambiguous) {
+        message += " " + data.rows_ambiguous + " could not be matched to a single ticket.";
+      }
+      const rejected = (data.errors || []).map((item) => item.source_file).filter(Boolean);
+      if (rejected.length) {
+        message += " Skipped " + rejected.join(", ") + ".";
+      }
+      showMessage(message);
+      loadResults();
+    } catch (err) {
+      showMessage(err.message || String(err), true);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   document.getElementById("import-nml-btn").addEventListener("click", async function () {
