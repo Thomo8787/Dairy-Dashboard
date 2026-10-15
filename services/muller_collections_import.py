@@ -87,9 +87,13 @@ def parse_muller_rows(filename: str, rows: list[dict[str, Any]]) -> list[dict[st
 
     records: list[dict[str, Any]] = []
     for raw in rows:
-        sample = normalize_sample_id(raw.get("Sample Number"))
-        if not sample or not sample.isdigit():
-            continue
+        sample_raw = str(raw.get("Sample Number") or "").strip()
+        if sample_raw in {"", "-"}:
+            sample = ""
+        else:
+            sample = normalize_sample_id(sample_raw)
+            if not sample.isdigit():
+                continue
         litres = _parse_litres(raw.get("Litres"))
         if litres is None:
             continue
@@ -167,6 +171,43 @@ def _match_row(
     return None, "unmatched"
 
 
+def _litres_key(value: Any) -> int | None:
+    """Nearest whole litre, used to compare a ticket with a Müller load."""
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return int(round(number))
+
+
+def _match_by_volume(
+    rows: list[NmlMilkResult],
+    record: dict[str, Any],
+    taken_ids: set[int],
+) -> tuple[NmlMilkResult | None, str]:
+    """Farm, date, and ticket litres. Used when Müller has no sample number."""
+    target = _litres_key(record["litres"])
+    if target is None:
+        return None, "unmatched"
+    close = _close_dates(record["actual_date"], record["payment_date"])
+    hits = [
+        row
+        for row in rows
+        if row.id not in taken_ids
+        and row.sample_date in close
+        and _litres_key(row.litres_load) == target
+    ]
+    if len(hits) == 1:
+        return hits[0], "matched"
+    if len(hits) > 1:
+        return None, "ambiguous"
+    return None, "unmatched"
+
+
 def _row_brief(record: dict[str, Any], rows: list[NmlMilkResult] | None = None) -> dict[str, Any]:
     brief: dict[str, Any] = {
         "farm": record["farm"],
@@ -209,7 +250,9 @@ def apply_muller_records(
             index.setdefault(normalize_sample_id(row.sample_id), []).append(row)
 
         claimed: dict[int, list[tuple[dict[str, Any], NmlMilkResult]]] = defaultdict(list)
-        for record in records:
+        sampled = [record for record in records if record["sample_id"]]
+        blank = [record for record in records if not record["sample_id"]]
+        for record in sampled:
             candidates = index.get(record["sample_id"], [])
             chosen, status = _match_row(
                 candidates, record["actual_date"], record["payment_date"]
@@ -219,6 +262,16 @@ def apply_muller_records(
                 continue
             if status == "ambiguous" or chosen is None:
                 ambiguous.append(_row_brief(record, candidates))
+                continue
+            claimed[chosen.id].append((record, chosen))
+
+        for record in blank:
+            chosen, status = _match_by_volume(list(rows), record, set(claimed))
+            if status == "ambiguous":
+                ambiguous.append(_row_brief(record))
+                continue
+            if status != "matched" or chosen is None:
+                unmatched.append(_row_brief(record))
                 continue
             claimed[chosen.id].append((record, chosen))
 
@@ -238,7 +291,12 @@ def apply_muller_records(
             record = claims[-1][0]
             row.litres_weighbridge = record["litres"]
             updated_ids.add(row.id)
-            if fill_temp and row.temp_c is None and record["temp_c"] is not None:
+            if (
+                fill_temp
+                and record["sample_id"]
+                and row.temp_c is None
+                and record["temp_c"] is not None
+            ):
                 row.temp_c = record["temp_c"]
                 temp_filled += 1
             if _date_gap(row.sample_date, record["actual_date"], record["payment_date"]):
