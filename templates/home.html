@@ -275,6 +275,20 @@
     return high ? "red" : "unknown";
   }
 
+  function milkTempStatus(dailyValues) {
+    const recent = (dailyValues || []).slice(-4);
+    if (recent.length < 4) return "unknown";
+    const temps = [];
+    for (const value of recent) {
+      if (value === null || value === undefined || value === "") return "unknown";
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "unknown";
+      temps.push(Math.round(n * 10) / 10);
+    }
+    const rising = temps.every((n, index) => index === 0 || n > temps[index - 1]);
+    return rising && temps[temps.length - 1] >= 4 ? "red" : "unknown";
+  }
+
   function setWidget(widget, main, sub, href) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
@@ -376,6 +390,7 @@
         (data.farms || []).map((f) => [String(f.farm || "").toUpperCase(), f])
       );
       const bactoscanSeries = (data.bactoscan_chart && data.bactoscan_chart.series) || {};
+      const milkTempSeries = (data.milk_temp_days && data.milk_temp_days.series) || {};
       farmBlocks.forEach((block) => {
         const farm = (block.dataset.productionFarm || "").toUpperCase();
         const row = byFarm[farm] || {};
@@ -400,6 +415,9 @@
           }
           if (metric === "bactoscan") {
             setStatus(widget, bactoscanStatus(bactoscanSeries[farm]));
+          }
+          if (metric === "milk_temp") {
+            setStatus(widget, milkTempStatus(milkTempSeries[farm]));
           }
         });
       });

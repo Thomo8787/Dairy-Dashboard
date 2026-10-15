@@ -196,13 +196,21 @@ def _annotate_volume_and_cows(trend: dict[str, list[dict[str, Any]]]) -> None:
                 point["litres_per_cow"] = None
 
 
-def _daily_metric_value(point: dict[str, Any] | None, key: str) -> int | None:
+def _daily_metric_value(
+    point: dict[str, Any] | None,
+    key: str,
+    *,
+    dp: int = 0,
+) -> int | float | None:
     if point is None or point.get(key) is None:
         return None
     try:
-        return int(round(float(point[key])))
+        number = float(point[key])
     except (TypeError, ValueError):
         return None
+    if dp <= 0:
+        return int(round(number))
+    return round(number, dp)
 
 
 def _build_quality_chart(
@@ -211,6 +219,7 @@ def _build_quality_chart(
     window_end: dt.date,
     key: str,
     days: int = _SHORT_WINDOW_DAYS,
+    dp: int = 0,
 ) -> dict[str, Any]:
     """Multi-farm daily series for the last ``days`` calendar days ending ``window_end``."""
     start = window_end - dt.timedelta(days=days - 1)
@@ -226,11 +235,11 @@ def _build_quality_chart(
             points_by_date[day] = point
         by_farm[farm] = points_by_date
 
-    series: dict[str, list[int | None]] = {}
+    series: dict[str, list[int | float | None]] = {}
     for farm in HERD_FARM_OPTIONS:
         points_by_date = by_farm.get(farm) or {}
         series[farm] = [
-            _daily_metric_value(points_by_date.get(day), key) for day in dates
+            _daily_metric_value(points_by_date.get(day), key, dp=dp) for day in dates
         ]
 
     return {
@@ -283,5 +292,8 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         "farms": farms_out,
         "bactoscan_chart": _build_quality_chart(
             trend, window_end=completed_through, key="bactoscan"
+        ),
+        "milk_temp_days": _build_quality_chart(
+            trend, window_end=completed_through, key="temp_c", days=4, dp=1
         ),
     }
