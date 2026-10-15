@@ -125,7 +125,10 @@
       padding: 0.4rem 0.55rem; text-align: left;
       border-bottom: 1px solid var(--line); white-space: nowrap;
     }
-    #coll-table td.nml-status { text-align: center; }
+    #coll-table th:nth-child(n+3):nth-child(-n+16),
+    #coll-table td:nth-child(n+3):nth-child(-n+16) {
+      text-align: center;
+    }
     .nml-mark {
       display: inline-flex; align-items: center; justify-content: center;
       width: 1.35rem; height: 1.35rem;
