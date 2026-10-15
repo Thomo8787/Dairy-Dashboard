@@ -133,6 +133,8 @@
     }
     .nml-mark.ok { color: #15803d; }
     .nml-mark.bad { color: #b91c1c; }
+    .wb-cell { display: inline-flex; align-items: center; gap: 0.2rem; }
+    #wb-mismatch-btn { width: 100%; }
     #coll-table thead th {
       background: #1e3a5f; color: #fff; font-weight: 600;
       position: sticky; top: 0; z-index: 1; cursor: pointer; user-select: none;
@@ -230,6 +232,10 @@
             <label>To <select id="date-to"></select></label>
           </div>
           <button type="button" class="btn sidebar-add-btn" id="add-collection-btn">Milk Collection</button>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Weighbridge</span>
+          <button type="button" class="slicer-btn" id="wb-mismatch-btn" aria-pressed="false">Don't match</button>
         </div>
         <p class="help-text">
           Each row is one tanker load. Quality comes from NML; litres and weighbridge
@@ -864,6 +870,38 @@
     return "";
   }
 
+  let weighbridgeMismatchOnly = false;
+
+  function volumeKey(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n);
+  }
+
+  function weighbridgeMatch(row) {
+    const litres = volumeKey(row.litres_load);
+    const bridge = volumeKey(row.litres_weighbridge);
+    if (litres == null && bridge == null) return "none";
+    if (litres != null && bridge != null && litres === bridge) return "match";
+    return "mismatch";
+  }
+
+  function weighbridgeCell(row) {
+    const text = escapeHtml(intFmt(row.litres_weighbridge));
+    const status = weighbridgeMatch(row);
+    if (status === "none") return text;
+    const mark = status === "match"
+      ? '<span class="nml-mark ok" title="Weighbridge matches litres" aria-label="Weighbridge matches litres">✓</span>'
+      : '<span class="nml-mark bad" title="Weighbridge does not match litres" aria-label="Weighbridge does not match litres">✕</span>';
+    return `<span class="wb-cell">${text}${mark}</span>`;
+  }
+
+  function visibleRows() {
+    if (!weighbridgeMismatchOnly) return rows;
+    return rows.filter((row) => weighbridgeMatch(row) === "mismatch");
+  }
+
   function nmlCell(row) {
     if (row.matched || row.nml_status === "matched") {
       return '<span class="nml-mark ok" title="This load has volume and NML quality" aria-label="Matched to NML">✓</span>';
@@ -939,11 +977,12 @@
 
   function renderTable() {
     const tbody = document.getElementById("table-body");
-    if (!rows.length) {
+    const visible = visibleRows();
+    if (!visible.length) {
       tbody.innerHTML = '<tr><td colspan="17" class="empty-state">No collections match the current filters.</td></tr>';
       return;
     }
-    tbody.innerHTML = sortRows(rows).map((row) => {
+    tbody.innerHTML = sortRows(visible).map((row) => {
       const classes = [];
       if (row.sample_missing) classes.push("missing-sample");
       if (row.antibiotic_pass === false) classes.push("fail");
@@ -955,7 +994,7 @@
         `<td>${escapeHtml(row.sample_id)}</td>` +
         `<td class="nml-status">${nmlCell(row)}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.litres_load))}</td>` +
-        `<td class="num">${escapeHtml(intFmt(row.litres_weighbridge))}</td>` +
+        `<td class="num">${weighbridgeCell(row)}</td>` +
         `<td class="num">${escapeHtml(num(row.temp_c, 2))}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.cows_in_milk))}</td>` +
         `<td class="num">${escapeHtml(num(row.butterfat_pct, 2))}</td>` +
@@ -1071,6 +1110,13 @@
   });
   document.getElementById("download-xlsx-btn").addEventListener("click", () => {
     window.location.href = "/milk-quality/api/results/export.xlsx?" + buildQuery();
+  });
+
+  document.getElementById("wb-mismatch-btn").addEventListener("click", function () {
+    weighbridgeMismatchOnly = !weighbridgeMismatchOnly;
+    this.classList.toggle("selected", weighbridgeMismatchOnly);
+    this.setAttribute("aria-pressed", weighbridgeMismatchOnly ? "true" : "false");
+    renderTable();
   });
 
   document.getElementById("import-muller-btn").addEventListener("click", () => {
