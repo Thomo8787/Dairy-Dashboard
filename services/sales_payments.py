@@ -92,13 +92,30 @@ def _payment_beef_calf_clause():
     )
 
 
+def _payment_dairy_transfer_clause():
+    """Lactation 0 dairy heifer whose remark and dest are the same herd farm."""
+    remark = func.upper(func.trim(CowEvent.remark))
+    dest = func.upper(func.trim(CowEvent.dest))
+    return and_(
+        func.coalesce(CowEvent.lact, 0) == 0,
+        func.upper(func.trim(CowEvent.gndr)) == "F",
+        CowEvent.cbrd.isnot(None),
+        CowEvent.cbrd < BEEF_CBREED_MIN,
+        remark == dest,
+        remark.in_(list(HERD_FARM_OPTIONS)),
+    )
+
+
 def _payment_sales_reason_expression():
     return case(
         (or_(ofs_sales_clause(), died_cert_clause()), literal("OFS")),
         (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
         (_payment_beef_calf_clause(), literal("Beef")),
         (CowEvent.remark.in_(list(SALES_BEEF_REMARKS)), literal("Beef")),
-        (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),
+        (or_(
+            CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
+            _payment_dairy_transfer_clause(),
+        ), literal("Dairy")),
         else_=literal("CULL"),
     )
 
@@ -107,6 +124,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
     if not reasons:
         return None
     beef_calf = _payment_beef_calf_clause()
+    dairy_transfer = _payment_dairy_transfer_clause()
     ofs = or_(ofs_sales_clause(), died_cert_clause())
     conditions = []
     if "OFS" in reasons:
@@ -130,10 +148,13 @@ def _reason_filter_conditions(reasons: list[str] | None):
         )
     if "Dairy" in reasons:
         conditions.append(
-            and_(
-                CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
-                ~beef_calf,
-                ~ofs,
+            or_(
+                and_(
+                    CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
+                    ~beef_calf,
+                    ~ofs,
+                ),
+                dairy_transfer,
             )
         )
     if "CULL" in reasons:
@@ -145,6 +166,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
                 ),
                 ~beef_calf,
                 ~ofs,
+                ~dairy_transfer,
             )
         )
     if not conditions:
@@ -516,6 +538,28 @@ def _identity_is_beef_calf(identity) -> bool:
     return cbrd is not None and cbrd >= BEEF_CBREED_MIN
 
 
+def _identity_is_dairy_transfer(identity) -> bool:
+    if identity is None:
+        return False
+    remark = (getattr(identity, "remark", None) or "").strip().upper()
+    dest = (getattr(identity, "dest", None) or "").strip().upper()
+    if not remark or remark != dest or remark not in HERD_FARM_OPTIONS:
+        return False
+    if (getattr(identity, "gndr", None) or "").strip().upper() != "F":
+        return False
+    try:
+        lact = int(identity.lact) if identity.lact is not None else 0
+    except (TypeError, ValueError):
+        lact = 0
+    if lact != 0:
+        return False
+    try:
+        cbrd = int(identity.cbrd) if identity.cbrd is not None else None
+    except (TypeError, ValueError):
+        return False
+    return cbrd is not None and cbrd < BEEF_CBREED_MIN
+
+
 def _remittance_sales_reason(buyer: str | None, identity) -> str:
     prior = _identity_is_ofs_or_tb(identity) if identity is not None else None
     if prior:
@@ -525,7 +569,7 @@ def _remittance_sales_reason(buyer: str | None, identity) -> str:
     remark = (getattr(identity, "remark", None) or "").strip().upper()
     if remark in SALES_BEEF_REMARKS:
         return "Beef"
-    if remark in {"CAR18", "CAR19"}:
+    if remark in {"CAR18", "CAR19"} or _identity_is_dairy_transfer(identity):
         return "Dairy"
     buyer_u = (buyer or "").upper()
     if any(token in buyer_u for token in ("DRAYTON", "BLADE", "GAMECHANGER", "WARRENDALE", "WARREN")):
