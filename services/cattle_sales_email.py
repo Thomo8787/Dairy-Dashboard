@@ -4,7 +4,8 @@ Neilds: auctionmarts.com
 Pickstock: pickstocktelford.co.uk
 Gamechanger: gamechangerfarming.com
 Market Drayton: barbers-auctions.co.uk
-Warrendale: not fetched from email.
+Warrendale: messaging-service@post.xero.com when the subject contains
+Self-bill and Warrendale.
 """
 
 from __future__ import annotations
@@ -37,13 +38,14 @@ logger = logging.getLogger(__name__)
 CATTLE_SALES_LOOKBACK_DAYS = 45
 _MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
-# Sender domain -> parser hint used on import. Warrendale is local-file only.
+# Sender domain -> parser hint used on import.
 _SENDER_DOMAINS: tuple[tuple[str, str], ...] = (
     ("auctionmarts.com", "neilds"),
     ("pickstocktelford.co.uk", "pickstock"),
     ("gamechangerfarming.com", "gamechanger"),
     ("barbers-auctions.co.uk", "market_drayton"),
 )
+_WARRENDALE_SENDER = "messaging-service@post.xero.com"
 
 
 def _parse_received(raw: str | None) -> datetime | None:
@@ -83,7 +85,32 @@ def _parser_hint_for_sender(address: str) -> str | None:
     return None
 
 
+def _is_warrendale_subject(subject: str | None) -> bool:
+    text = (subject or "").lower()
+    return "self-bill" in text and "warrendale" in text
+
+
+def _parser_hint_for_message(address: str, subject: str | None = None) -> str | None:
+    if (address or "").strip().lower() == _WARRENDALE_SENDER and _is_warrendale_subject(subject):
+        return "warrendale"
+    return _parser_hint_for_sender(address)
+
+
+def _warrendale_pdf_text(content: bytes) -> bool:
+    """True only when the PDF text names Warrendale. A blank or filename-only file is not enough."""
+    try:
+        text = extract_pdf_text(content)
+    except Exception:
+        return False
+    haystack = (text or "").lower()
+    if not haystack.strip():
+        return False
+    return "warrendale" in haystack or "wagyu" in haystack
+
+
 def _pdf_matches_hint(content: bytes, name: str, hint: str) -> bool:
+    if hint == "warrendale":
+        return _warrendale_pdf_text(content)
     if hint == "neilds":
         looks = looks_like_neilds_pdf
     elif hint == "pickstock":
@@ -132,9 +159,13 @@ class CattleSalePdfEmailService:
             f"contains(from/emailAddress/address,'{domain}')"
             for domain, _hint in _SENDER_DOMAINS
         )
+        warrendale_clause = (
+            f"from/emailAddress/address eq '{_WARRENDALE_SENDER}' "
+            "and contains(subject,'Self-bill') and contains(subject,'Warrendale')"
+        )
         return (
             f"receivedDateTime ge {since_iso} and hasAttachments eq true "
-            f"and ({domain_clause})"
+            f"and ({domain_clause} or ({warrendale_clause}))"
         )
 
     def _folder_targets(self) -> list[tuple[str, str]]:
@@ -203,7 +234,9 @@ class CattleSalePdfEmailService:
                         continue
                     if not self._received_ok(message, since):
                         continue
-                    if not _parser_hint_for_sender(_message_sender(message)):
+                    if not _parser_hint_for_message(
+                        _message_sender(message), message.get("subject")
+                    ):
                         continue
                     message_id = message.get("id") or ""
                     if message_id:
@@ -294,7 +327,9 @@ class CattleSalePdfEmailService:
         logger.info("Cattle-sale mailbox scan: %s message(s)", len(by_id))
         for message in by_id.values():
             message_id = message.get("id") or ""
-            hint = _parser_hint_for_sender(_message_sender(message))
+            hint = _parser_hint_for_message(
+                _message_sender(message), message.get("subject")
+            )
             if not hint:
                 continue
             try:
