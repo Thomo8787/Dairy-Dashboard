@@ -288,7 +288,8 @@ class CattleSaleLine(Base):
             "farm",
             "etag",
             "sale_date",
-            name="uq_cattle_sale_farm_etag_date",
+            "is_bonus",
+            name="uq_cattle_sale_farm_etag_date_bonus",
         ),
     )
 
@@ -300,6 +301,7 @@ class CattleSaleLine(Base):
     reject_kg = Column(Float)
     kill_date = Column(Date)
     amount_gbp = Column(Float, nullable=False)
+    is_bonus = Column(Boolean, nullable=False, default=False)
     buyer = Column(String(64), index=True)
     source_message_id = Column(String(256))
     source_file = Column(String(256))
@@ -831,6 +833,107 @@ def _ensure_herd_inventory_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _cattle_sale_unique_sets(inspector) -> tuple[bool, list[str], list[str]]:
+    """Return whether the bonus unique key exists, plus old constraint and index names."""
+    has_new = False
+    old_constraints: list[str] = []
+    old_indexes: list[str] = []
+    for constraint in inspector.get_unique_constraints("cattle_sale_lines"):
+        columns = {name for name in (constraint.get("column_names") or []) if name}
+        if columns == {"farm", "etag", "sale_date", "is_bonus"}:
+            has_new = True
+        elif columns == {"farm", "etag", "sale_date"} and constraint.get("name"):
+            old_constraints.append(constraint["name"])
+    for index in inspector.get_indexes("cattle_sale_lines"):
+        if not index.get("unique"):
+            continue
+        columns = {name for name in (index.get("column_names") or []) if name}
+        if columns == {"farm", "etag", "sale_date", "is_bonus"}:
+            has_new = True
+        elif columns == {"farm", "etag", "sale_date"} and index.get("name"):
+            old_indexes.append(index["name"])
+    return has_new, old_constraints, old_indexes
+
+
+def _rebuild_sqlite_cattle_sale_lines(conn) -> None:
+    """SQLite cannot drop a table unique key, so copy rows onto the new key."""
+    index_names = [
+        row[1]
+        for row in conn.execute(text("PRAGMA index_list('cattle_sale_lines')")).all()
+        if row[1] and not str(row[1]).startswith("sqlite_autoindex")
+    ]
+    for index_name in index_names:
+        conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+    conn.execute(text("ALTER TABLE cattle_sale_lines RENAME TO cattle_sale_lines_old"))
+    CattleSaleLine.__table__.create(conn)
+    conn.execute(
+        text(
+            """
+            INSERT INTO cattle_sale_lines (
+                id, farm, etag, sale_date, cold_weight_kg, reject_kg, kill_date,
+                amount_gbp, is_bonus, buyer, source_message_id, source_file,
+                source_received, imported_at
+            )
+            SELECT
+                id, farm, etag, sale_date, cold_weight_kg, reject_kg, kill_date,
+                amount_gbp, is_bonus, buyer, source_message_id, source_file,
+                source_received, imported_at
+            FROM cattle_sale_lines_old
+            """
+        )
+    )
+    conn.execute(text("DROP TABLE cattle_sale_lines_old"))
+
+
+def _ensure_cattle_sale_bonus_key(engine) -> None:
+    """Let a Warrendale £80 bonus share a collection date with the calf price.
+
+    create_all does not add columns or replace unique keys on an existing table.
+    """
+    inspector = inspect(engine)
+    if "cattle_sale_lines" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("cattle_sale_lines")}
+    has_new, old_constraints, old_indexes = _cattle_sale_unique_sets(inspector)
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if "is_bonus" not in columns:
+            default = "FALSE" if dialect == "postgresql" else "0"
+            conn.execute(
+                text(
+                    "ALTER TABLE cattle_sale_lines "
+                    f"ADD COLUMN is_bonus BOOLEAN NOT NULL DEFAULT {default}"
+                )
+            )
+        flag = "TRUE" if dialect == "postgresql" else "1"
+        conn.execute(
+            text(
+                "UPDATE cattle_sale_lines SET is_bonus = "
+                f"{flag} WHERE TRIM(buyer) = 'Warrendale' "
+                "AND ABS(amount_gbp - 80) < 0.005"
+            )
+        )
+        if has_new and not old_constraints and not old_indexes:
+            return
+        if dialect == "postgresql":
+            for name in old_constraints:
+                conn.execute(
+                    text(f'ALTER TABLE cattle_sale_lines DROP CONSTRAINT IF EXISTS "{name}"')
+                )
+            for name in old_indexes:
+                conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+            if not has_new:
+                conn.execute(
+                    text(
+                        "ALTER TABLE cattle_sale_lines "
+                        "ADD CONSTRAINT uq_cattle_sale_farm_etag_date_bonus "
+                        "UNIQUE (farm, etag, sale_date, is_bonus)"
+                    )
+                )
+            return
+        _rebuild_sqlite_cattle_sale_lines(conn)
+
+
 def _ensure_sales_payment_columns(engine) -> None:
     """create_all will not add new columns to an existing sales_payment_records table."""
     inspector = inspect(engine)
@@ -881,6 +984,7 @@ def init_db():
     _ensure_herd_inventory_columns(engine)
     _ensure_nml_milk_result_columns(engine)
     _ensure_sales_payment_columns(engine)
+    _ensure_cattle_sale_bonus_key(engine)
     return engine
 
 

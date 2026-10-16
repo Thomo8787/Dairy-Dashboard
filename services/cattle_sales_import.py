@@ -18,7 +18,12 @@ from sqlalchemy.orm import Session
 
 from services.blade_pdf import looks_like_blade_pdf, parse_blade_pdf
 from services.cattle_sale_pdf import normalize_etag
-from services.cattle_sales import EVENT_MATCH_WINDOW_DAYS, cattle_sales_exit_event_clause
+from services.cattle_sales import (
+    BUYER_WARRENDALE,
+    EVENT_MATCH_WINDOW_DAYS,
+    WARRENDALE_BONUS_GBP,
+    cattle_sales_exit_event_clause,
+)
 from services.database import CattleSaleLine, CowEvent
 from services.farms import HERD_FARM_OPTIONS
 from services.market_drayton_pdf import looks_like_market_drayton_pdf, parse_market_drayton_pdf
@@ -183,6 +188,15 @@ def _farm_for_etag(
     return farm if farm in HERD_FARM_OPTIONS else None
 
 
+def _is_warrendale_bonus_line(buyer: str | None, amount: float | None) -> bool:
+    """True only for the Warrendale £80 bonus, so it can share a date with the calf price."""
+    if (buyer or "").strip() != BUYER_WARRENDALE:
+        return False
+    if amount is None:
+        return False
+    return abs(float(amount) - WARRENDALE_BONUS_GBP) < 0.005
+
+
 def _sale_values_match(row: CattleSaleLine, record: dict[str, Any]) -> bool:
     if abs((row.cold_weight_kg or 0.0) - float(record["cold_weight_kg"] or 0.0)) >= 0.005:
         return False
@@ -201,7 +215,7 @@ def _sale_values_match(row: CattleSaleLine, record: dict[str, Any]) -> bool:
 
 def _upsert(
     db: Session,
-    parsed_by_key: dict[tuple[str, str, dt.date], dict[str, Any]],
+    parsed_by_key: dict[tuple[str, str, dt.date, bool], dict[str, Any]],
 ) -> tuple[int, int]:
     if not parsed_by_key:
         return (0, 0)
@@ -215,7 +229,8 @@ def _upsert(
         )
     ).all()
     existing_by_key = {
-        (row.farm, row.etag, row.sale_date): row for row in existing_rows
+        (row.farm, row.etag, row.sale_date, bool(row.is_bonus)): row
+        for row in existing_rows
     }
 
     inserted = 0
@@ -316,7 +331,8 @@ def _import_one_result(
 
     message_id = source.get("message_id") or "local-file"
     received_at = _as_datetime(source.get("received_at")) or dt.datetime.now()
-    parsed_by_key: dict[tuple[str, str, dt.date], dict[str, Any]] = {}
+    parsed_by_key: dict[tuple[str, str, dt.date, bool], dict[str, Any]] = {}
+    buyer = result.get("buyer") or "Pickstock"
     for line in lines:
         line_sale_date = _as_date(line.get("kill_date")) or sale_date
         if not line_sale_date:
@@ -331,7 +347,8 @@ def _import_one_result(
         if not line_farm:
             summary["warnings"].append(f"{source_file}: could not determine farm for {etag}")
             continue
-        parsed_by_key[(line_farm, etag, line_sale_date)] = {
+        is_bonus = _is_warrendale_bonus_line(buyer, line["amount_gbp"])
+        parsed_by_key[(line_farm, etag, line_sale_date, is_bonus)] = {
             "farm": line_farm,
             "etag": etag,
             "sale_date": line_sale_date,
@@ -339,7 +356,8 @@ def _import_one_result(
             "reject_kg": line.get("reject_kg"),
             "kill_date": _as_date(line.get("kill_date")) or line_sale_date,
             "amount_gbp": line["amount_gbp"],
-            "buyer": result.get("buyer") or "Pickstock",
+            "is_bonus": is_bonus,
+            "buyer": buyer,
             "source_message_id": message_id,
             "source_file": source_file,
             "source_received": received_at,
