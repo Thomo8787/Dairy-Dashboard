@@ -40,6 +40,15 @@ def _normalize_key_part(value: str | None) -> str:
     return (value or "").strip()
 
 
+def _compact_etag(value: str | None) -> str:
+    return "".join((value or "").split()).upper()
+
+
+def _etag_contains(column, fragment: str):
+    compact = func.upper(func.replace(func.coalesce(column, ""), " ", ""))
+    return compact.contains(fragment, autoescape=True)
+
+
 def _format_gender(gndr: str | None) -> str:
     normalized = (gndr or "").strip().upper()
     if normalized == "M":
@@ -191,6 +200,7 @@ def _apply_sold_event_filters(
     event_from: dt.date | None,
     event_to: dt.date | None,
     cow_id: str | None = None,
+    etag_contains: str | None = None,
 ):
     query = query.where(cattle_sales_exit_event_clause()).where(
         CowEvent.event_date.isnot(None)
@@ -203,11 +213,39 @@ def _apply_sold_event_filters(
     if normalized_cow_id:
         query = query.where(func.trim(CowEvent.cow_id) == normalized_cow_id)
         return query
+    fragment = _compact_etag(etag_contains)
+    if fragment:
+        query = query.where(_etag_contains(CowEvent.etag, fragment))
+        return query
     if event_from is not None:
         query = query.where(CowEvent.event_date >= event_from)
     if event_to is not None:
         query = query.where(CowEvent.event_date <= event_to)
     return query
+
+
+def _exact_cow_id_in_view(
+    db: Session,
+    *,
+    status: str,
+    farms: list[str],
+    reasons: list[str] | None,
+    cow_id: str,
+) -> bool:
+    if status == "archived":
+        query = select(CowEvent.id).join(SalesPaymentRecord, _payment_match_conditions())
+    else:
+        query = select(CowEvent.id)
+    query = _apply_sold_event_filters(
+        query,
+        farms=farms,
+        reasons=reasons,
+        event_from=None,
+        event_to=None,
+        cow_id=cow_id,
+    )
+    query = _apply_status_filter(query, status)
+    return db.scalar(query.limit(1)) is not None
 
 
 def _append_sale_line(
@@ -587,6 +625,7 @@ def _unmatched_remittance_rows(
     has_amount: bool | None,
     shown_farm_etags: set[tuple[str, str]],
     cow_id: str | None = None,
+    etag_contains: str | None = None,
 ) -> list[dict[str, Any]]:
     """Show PDF rows that are not already listed as a sold event on that farm.
 
@@ -595,7 +634,10 @@ def _unmatched_remittance_rows(
     """
     query = select(CattleSaleLine).where(CattleSaleLine.farm.in_(farms))
     search_id = _normalize_key_part(cow_id)
-    if search_id:
+    etag_fragment = _compact_etag(etag_contains)
+    if etag_fragment:
+        query = query.where(_etag_contains(CattleSaleLine.etag, etag_fragment))
+    elif search_id:
         raw_etags = {
             etag
             for etag in db.scalars(
@@ -759,6 +801,19 @@ def list_sales_payments(
     if not selected_farms:
         return {"rows": [], "total": 0, "status": status, "date_bounds": None}
 
+    search_text = _normalize_key_part(cow_id)
+    exact_cow_id = bool(
+        search_text
+        and _exact_cow_id_in_view(
+            db,
+            status=status,
+            farms=selected_farms,
+            reasons=reasons,
+            cow_id=search_text,
+        )
+    )
+    etag_fragment = "" if exact_cow_id or not search_text else _compact_etag(search_text)
+
     reason_expr = _payment_sales_reason_expression()
     etag_suffix = func.substr(func.coalesce(CowEvent.etag, ""), -5)
 
@@ -797,7 +852,8 @@ def list_sales_payments(
         reasons=reasons,
         event_from=event_from,
         event_to=event_to,
-        cow_id=cow_id,
+        cow_id=search_text if exact_cow_id else None,
+        etag_contains=etag_fragment or None,
     )
     query = _apply_status_filter(query, status)
     query = query.order_by(
@@ -848,7 +904,7 @@ def list_sales_payments(
             flag_min = min(flag_dates)
             flag_max = max(flag_dates)
     payment_flags = _payment_flags_by_key(db, selected_farms, flag_min, flag_max)
-    search_cow_id = _normalize_key_part(cow_id)
+    search_cow_id = search_text if exact_cow_id else ""
 
     rows = []
     for (
@@ -945,6 +1001,7 @@ def list_sales_payments(
                 (row["farm"], normalize_etag(row["etag"])) for row in rows
             },
             cow_id=search_cow_id or None,
+            etag_contains=etag_fragment or None,
         )
         rows.extend(extra_rows)
     rows.sort(key=lambda row: (row["event_date"], row["dest"], row["etag"]))

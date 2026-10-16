@@ -30,6 +30,17 @@
       color: var(--muted);
       margin-bottom: 0.35rem;
     }
+    .id-search {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .id-search input {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+    }
+    .id-search button { flex: 0 0 auto; }
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .farm-slicer, .category-slicer { grid-template-columns: 1fr 1fr 1fr; }
     .slicer-btn {
@@ -423,6 +434,13 @@
             <label>To <select id="date-to"></select></label>
           </div>
         </div>
+        <div class="filter-section">
+          <label class="section-label" for="animal-search">ID</label>
+          <div class="id-search">
+            <input type="search" id="animal-search" placeholder="Cow ID or ear tag" autocomplete="off" enterkeyhint="search">
+            <button type="button" class="secondary small" id="animal-search-btn">Search</button>
+          </div>
+        </div>
         <div class="filter-section" id="range-filter">
           <div class="filter-actions">
             <button type="button" class="filter-funnel" id="range-filter-btn" aria-expanded="false" aria-controls="range-filter-panel" aria-label="Age, lactation, DIM and cold weight filters" title="Age, lactation, DIM and cold weight">
@@ -657,6 +675,7 @@
       dim: { title: 'Avg DIM by supplier', column: 'Avg DIM', field: 'dim', dp: 0, payable: false },
     };
     let allRows = [];
+    let appliedAnimalSearch = "";
     let sortKey = 'sale_date';
     let sortDir = -1;
     let loadingCount = 0;
@@ -764,7 +783,23 @@
       dateFilterReady = true;
     }
 
+    function compactEtag(value) {
+      return String(value || "").replace(/\s+/g, "").toUpperCase();
+    }
+
+    function rowsForAnimalSearch(rows) {
+      const typed = appliedAnimalSearch.trim();
+      if (!typed) return null;
+      const exact = rows.filter(row => String(row.cow_id || "").trim() === typed);
+      if (exact.length) return exact;
+      const fragment = compactEtag(typed);
+      if (!fragment) return rows;
+      return rows.filter(row => compactEtag(row.etag).includes(fragment));
+    }
+
     function filteredRows() {
+      const searched = rowsForAnimalSearch(allRows);
+      if (searched) return searched;
       if (!dateFilterReady) return allRows;
       let from = document.getElementById('date-from').value;
       let to = document.getElementById('date-to').value;
@@ -773,6 +808,13 @@
       const fromDate = monthToDateFrom(from);
       const toDate = monthToDateTo(to);
       return allRows.filter(r => r.sale_date >= fromDate && r.sale_date <= toDate);
+    }
+
+    function searchByAnimal() {
+      const input = document.getElementById("animal-search");
+      appliedAnimalSearch = (input.value || "").trim();
+      input.value = appliedAnimalSearch;
+      refreshView();
     }
 
     function buildQueryParams() {
@@ -2000,6 +2042,14 @@
     });
     document.querySelectorAll('#summary-popover [data-close]').forEach(el => {
       el.addEventListener('click', closeSummaryPopover);
+    });
+
+    document.getElementById("animal-search-btn").addEventListener("click", searchByAnimal);
+    document.getElementById("animal-search").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchByAnimal();
+      }
     });
 
     bindSlicers('.farm-slicer');
