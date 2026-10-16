@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from services.cattle_sale_pdf import is_rejected_sale, normalize_etag
 from services.database import STOCK_GROUP_CATEGORY, CattleSaleLine, CowEvent
-from services.events_common import normalize_farms, sales_classified_event_clause
+from services.events_common import (
+    SALES_TABLE_REASON_ORDER,
+    normalize_farms,
+    sales_classified_event_clause,
+)
 from services.farms import HERD_FARM_OPTIONS
 from services.stock_group import stock_group_from_event_fields
 
@@ -474,6 +478,7 @@ def list_cattle_sales(
     farms: list[str] | None = None,
     categories: list[str] | None = None,
     genders: list[str] | None = None,
+    reasons: list[str] | None = None,
     buyers: list[str] | None = None,
     age_min_days: int | None = None,
     age_max_days: int | None = None,
@@ -578,7 +583,10 @@ def list_cattle_sales(
             beef_line_ids.add(line.id)
     display_lines = _pair_warrendale_bonus_lines(sale_lines, related_lines, beef_line_ids)
 
-    from services.sales_payments import _remittance_sales_reason
+    from services.sales_payments import _remittance_sales_reason, normalize_sales_reasons
+
+    selected_reasons = set(normalize_sales_reasons(reasons))
+    reason_filter_active = selected_reasons != set(SALES_TABLE_REASON_ORDER)
 
     rows: list[dict[str, Any]] = []
     available_buyer_set: set[str] = set()
@@ -632,6 +640,9 @@ def list_cattle_sales(
             continue
         if age_filter_active and (age_days is None or age_days < age_lo or age_days > age_hi):
             continue
+        sales_reason = _remittance_sales_reason(buyer, match) if match is not None else ""
+        if reason_filter_active and sales_reason not in selected_reasons:
+            continue
 
         if buyer:
             available_buyer_set.add(buyer)
@@ -644,7 +655,6 @@ def list_cattle_sales(
         )
         farm_paid = (line.farm or "").strip()
         farm_sold = (match.farm or "").strip() if match is not None else ""
-        sales_reason = _remittance_sales_reason(buyer, match) if match is not None else ""
         rows.append(
             {
                 "farm": farm_paid,

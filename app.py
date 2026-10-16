@@ -413,6 +413,7 @@ def office_api_cattle_sales():
                 farms=request.args.getlist("farm") or None,
                 categories=request.args.getlist("category") or None,
                 genders=request.args.getlist("gender") or None,
+                reasons=request.args.getlist("reason") or None,
                 buyers=request.args.getlist("buyer") or None,
                 age_min_days=_parse_int_arg("age_min"),
                 age_max_days=_parse_int_arg("age_max"),

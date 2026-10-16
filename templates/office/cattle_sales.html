@@ -383,6 +383,16 @@
           </div>
         </div>
         <div class="filter-section">
+          <span class="section-label">Reason</span>
+          <div class="slicer-group reason-slicer" role="group" aria-label="Sales reason">
+            <button type="button" class="slicer-btn selected" data-value="CULL" aria-pressed="true">CULL</button>
+            <button type="button" class="slicer-btn selected" data-value="TB" aria-pressed="true">TB</button>
+            <button type="button" class="slicer-btn selected" data-value="OFS" aria-pressed="true">OFS</button>
+            <button type="button" class="slicer-btn selected" data-value="Beef" aria-pressed="true">Beef</button>
+            <button type="button" class="slicer-btn selected" data-value="Dairy" aria-pressed="true">Dairy</button>
+          </div>
+        </div>
+        <div class="filter-section">
           <span class="section-label">Gender</span>
           <div class="slicer-group gender-slicer" role="group" aria-label="Gender">
             <button type="button" class="slicer-btn selected" data-value="Male" aria-pressed="true">Male</button>
@@ -671,7 +681,7 @@
           if (selected && count <= minSelected) return;
           btn.classList.toggle('selected', !selected);
           btn.setAttribute('aria-pressed', btn.classList.contains('selected') ? 'true' : 'false');
-          if (selector === '.farm-slicer' || selector === '.category-slicer' || selector === '.gender-slicer') fetchData();
+          if (selector === '.farm-slicer' || selector === '.category-slicer' || selector === '.reason-slicer' || selector === '.gender-slicer') fetchData();
           else refreshView();
         });
       });
@@ -769,6 +779,7 @@
       const params = new URLSearchParams();
       selectedValues('.farm-slicer').forEach(f => params.append('farm', f));
       selectedValues('.category-slicer').forEach(c => params.append('category', c));
+      selectedValues('.reason-slicer').forEach(r => params.append('reason', r));
       selectedValues('.gender-slicer').forEach(g => params.append('gender', g));
       params.set('include_unmatched', 'true');
       return params;
@@ -1992,6 +2003,7 @@
     });
 
     bindSlicers('.farm-slicer');
+    bindSlicers('.reason-slicer');
     bindSlicers('.gender-slicer');
     bindExclusiveSlicer('.category-slicer', () => {
       clearRangeFilters();
