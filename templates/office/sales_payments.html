@@ -393,6 +393,7 @@
     let currentStatus = "active";
     let rows = [];
     let selectedKeys = new Set();
+    let lastSelectIndex = null;
     let monthList = [];
     let dateBounds = null;
     let loadController = null;
@@ -712,10 +713,56 @@
       rowByKey = new Map(rows.map(row => [rowKey(row), row]));
     }
 
+    function isRowTick(input) {
+      if (!(input instanceof HTMLInputElement)) return false;
+      if (input.matches(".row-select")) return true;
+      if (!input.matches(".row-paid")) return false;
+      const cell = input.closest("td");
+      return Boolean(cell && !cell.classList.contains("amount-cell") && !cell.classList.contains("bonus-cell"));
+    }
+
+    function paintRowTicks(tr, checked, { includePartTicks = true } = {}) {
+      tr.classList.toggle("row-selected", checked);
+      tr.querySelectorAll(".row-select, .row-paid").forEach(box => {
+        const cell = box.closest("td");
+        if (!includePartTicks && cell && (cell.classList.contains("amount-cell") || cell.classList.contains("bonus-cell"))) return;
+        box.checked = checked;
+      });
+    }
+
+    function syncSelectAll() {
+      const selectAll = document.getElementById("select-all");
+      if (selectAll) selectAll.checked = rows.length > 0 && selectedKeys.size === rows.length;
+    }
+
     function bindTableBodyEvents() {
       if (tableEventsBound) return;
       tableEventsBound = true;
       const body = document.getElementById("table-body");
+      body.addEventListener("mousedown", event => {
+        const input = event.target;
+        if (!event.shiftKey || event.button !== 0 || !isRowTick(input)) return;
+        const key = decodeURIComponent(input.dataset.key);
+        const index = rows.findIndex(row => rowKey(row) === key);
+        const anchor = lastSelectIndex;
+        if (index < 0 || anchor == null || anchor < 0 || anchor >= rows.length || anchor === index) return;
+        event.preventDefault();
+        const checked = !input.checked;
+        const start = Math.min(anchor, index);
+        const end = Math.max(anchor, index);
+        for (let i = start; i <= end; i += 1) toggleRowSelection(rows[i], checked);
+        for (let i = start; i <= end; i += 1) {
+          const encodedKey = encodeURIComponent(rowKey(rows[i]));
+          body.querySelectorAll(`tr[data-key="${encodedKey}"]`).forEach(tr => paintRowTicks(tr, checked, { includePartTicks: false }));
+        }
+        syncSelectAll();
+      });
+      body.addEventListener("click", event => {
+        const input = event.target;
+        if (event.shiftKey || !isRowTick(input)) return;
+        const index = rows.findIndex(row => rowKey(row) === decodeURIComponent(input.dataset.key));
+        if (index >= 0) lastSelectIndex = index;
+      });
       body.addEventListener("change", event => {
         const input = event.target;
         if (!input.matches(".row-select, .row-paid")) return;
@@ -724,12 +771,8 @@
         if (!row) return;
         toggleRowSelection(row, input.checked);
         const encodedKey = encodeURIComponent(key);
-        body.querySelectorAll(`tr[data-key="${encodedKey}"]`).forEach(tr => {
-          tr.classList.toggle("row-selected", input.checked);
-          tr.querySelectorAll(".row-select, .row-paid").forEach(box => { box.checked = input.checked; });
-        });
-        const selectAll = document.getElementById("select-all");
-        if (selectAll) selectAll.checked = rows.length > 0 && selectedKeys.size === rows.length;
+        body.querySelectorAll(`tr[data-key="${encodedKey}"]`).forEach(tr => paintRowTicks(tr, input.checked));
+        syncSelectAll();
       });
     }
 
@@ -866,6 +909,7 @@
       const wrap = document.getElementById("table-wrap");
       rows = data.rows || [];
       selectedKeys.clear();
+      lastSelectIndex = null;
       rebuildRowIndex();
       updateMetaFromRows();
       if (!rows.length) {
@@ -905,6 +949,7 @@
         meta.textContent = "";
         rows = [];
         selectedKeys.clear();
+        lastSelectIndex = null;
         rebuildRowIndex();
         return false;
       }
@@ -914,6 +959,7 @@
         meta.textContent = "";
         rows = [];
         selectedKeys.clear();
+        lastSelectIndex = null;
         rebuildRowIndex();
         return false;
       }
@@ -977,6 +1023,7 @@
       const keys = new Set(items.map(item => JSON.stringify(item)));
       rows = rows.filter(row => !keys.has(rowKey(row)));
       selectedKeys.clear();
+      lastSelectIndex = null;
       rebuildRowIndex();
     }
 
