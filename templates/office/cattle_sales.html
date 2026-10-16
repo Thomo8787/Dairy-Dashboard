@@ -276,7 +276,13 @@
       border-bottom: 1px solid var(--border); white-space: nowrap;
     }
     #cattle-sales-table th:first-child, #cattle-sales-table td:first-child,
-    #cattle-sales-table th:nth-child(2), #cattle-sales-table td:nth-child(2) { text-align: left; }
+    #cattle-sales-table th:nth-child(2), #cattle-sales-table td:nth-child(2),
+    #cattle-sales-table th:nth-child(3), #cattle-sales-table td:nth-child(3),
+    #cattle-sales-table th:nth-child(4), #cattle-sales-table td:nth-child(4),
+    #cattle-sales-table th:nth-child(6), #cattle-sales-table td:nth-child(6) { text-align: left; }
+    #cattle-sales-table th:nth-child(5), #cattle-sales-table td:nth-child(5) { text-align: center; }
+    .farm-match { color: #15803d; font-weight: 700; }
+    .farm-mismatch { color: #b91c1c; font-weight: 700; }
     #cattle-sales-table td { font-variant-numeric: tabular-nums; }
     #cattle-sales-table thead th {
       background: #1e3a5f; color: #fff; font-weight: 600;
@@ -581,6 +587,10 @@
             <tr>
               <th data-sort="cow_id">ID</th>
               <th data-sort="etag">ETAG</th>
+              <th data-sort="farm_sold">Farm Sold</th>
+              <th data-sort="farm">Farm Paid</th>
+              <th data-sort="farms_match" title="Farms match">Match</th>
+              <th data-sort="sales_reason">Reason</th>
               <th data-sort="lact">Lact</th>
               <th data-sort="age_days">Age</th>
               <th data-sort="dim">DIM</th>
@@ -1183,12 +1193,17 @@
         if (!row.event_matched) tr.classList.add('unmatched');
         const idNote = !row.event_matched
           ? ' <span title="No matching sale exit event (SOLD/GAME/PATH)" style="color:#b45309">⚠</span>'
-          : (row.dairycomp_farm
-            ? ` <span title="Sold on DairyComp ${row.dairycomp_farm}. Payment PDF is a different farm; accounts need an internal transfer." style="color:#b45309">DairyComp ${row.dairycomp_farm}</span>`
-            : '');
+          : '';
+        const farmMark = row.farms_match
+          ? '<span class="farm-match" title="Farms match">✓</span>'
+          : '<span class="farm-mismatch" title="Farms differ">✕</span>';
         tr.innerHTML = `
           <td data-label="ID">${row.cow_id || '—'}${idNote}</td>
           <td data-label="ETAG">${row.etag || '—'}</td>
+          <td data-label="Farm Sold">${escapeHtml(row.farm_sold || '—')}</td>
+          <td data-label="Farm Paid">${escapeHtml(row.farm || '—')}</td>
+          <td data-label="Match">${farmMark}</td>
+          <td data-label="Reason">${escapeHtml(row.sales_reason || '—')}</td>
           <td data-label="Lact">${row.lact != null ? row.lact : '—'}</td>
           <td data-label="Age">${row.age || '—'}</td>
           <td data-label="DIM">${row.dim != null ? row.dim : '—'}</td>

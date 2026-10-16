@@ -578,6 +578,8 @@ def list_cattle_sales(
             beef_line_ids.add(line.id)
     display_lines = _pair_warrendale_bonus_lines(sale_lines, related_lines, beef_line_ids)
 
+    from services.sales_payments import _remittance_sales_reason
+
     rows: list[dict[str, Any]] = []
     available_buyer_set: set[str] = set()
     for line, bonus_gbp, amount_gbp in display_lines:
@@ -640,9 +642,15 @@ def list_cattle_sales(
         price_per_kg = (
             None if rejected else compute_price_per_kg(amount_gbp, line.cold_weight_kg)
         )
+        farm_paid = (line.farm or "").strip()
+        farm_sold = (match.farm or "").strip() if match is not None else ""
+        sales_reason = _remittance_sales_reason(buyer, match) if match is not None else ""
         rows.append(
             {
-                "farm": line.farm,
+                "farm": farm_paid,
+                "farm_sold": farm_sold,
+                "farms_match": bool(farm_sold) and farm_sold.upper() == farm_paid.upper(),
+                "sales_reason": sales_reason,
                 "cow_id": cow_id,
                 "etag": line.etag,
                 "age": age_display,
