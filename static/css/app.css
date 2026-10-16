@@ -625,6 +625,7 @@ button.secondary {
   cursor: pointer;
 }
 button.secondary.small { font-size: 0.85rem; }
+button.farm-select-all { margin: 0 0 0.5rem; }
 button.secondary:hover { background: var(--accent-soft); }
 .btn.ghost {
   background: transparent;

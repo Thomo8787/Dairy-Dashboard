@@ -101,6 +101,29 @@
     committingClick = false;
   }
 
+  function selectAllFarms(group) {
+    if (isAllSelected(group)) return;
+    const buttons = [...group.querySelectorAll(".slicer-btn[data-value]")];
+    const stillOff = buttons.find((btn) => !btn.classList.contains("selected"));
+    if (!stillOff) return;
+    buttons.forEach((btn) => {
+      if (btn === stillOff) return;
+      btn.classList.add("selected");
+      btn.setAttribute("aria-pressed", "true");
+    });
+    commitClick(stillOff);
+  }
+
+  multiSelectGroups.forEach((group) => {
+    if (!group.parentElement) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary small farm-select-all";
+    button.textContent = "Select all";
+    button.addEventListener("click", () => selectAllFarms(group));
+    group.parentElement.insertBefore(button, group);
+  });
+
   restore();
 
   document.addEventListener("click", (event) => {
