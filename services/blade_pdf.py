@@ -19,8 +19,12 @@ BUYER_GAMECHANGER = "Gamechanger"
 
 _TAG_RE = re.compile(r"UK\s*\d{10,15}", re.IGNORECASE)
 _ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}:\d{2})?\b")
+_UK_DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b")
 _FILENAME_DATE_RE = re.compile(r"PaymentAdvice[_\-]?(\d{8})", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"-?[\d,]+\.\d{1,2}|-?\d+")
+_PENCE_TOKEN_RE = re.compile(r"-?[\d,]+\.\d{2}")
+_MIN_PRICE_GBP = 20.0
+_MAX_PRICE_GBP = 2500.0
 
 
 def looks_like_blade_pdf(text: str, source_file: str | None = None) -> bool:
@@ -73,12 +77,17 @@ def _date_from_filename(source_file: str | None) -> dt.date | None:
 
 def _date_from_text(text: str) -> dt.date | None:
     match = _ISO_DATE_RE.search(text)
-    if not match:
-        return None
-    try:
-        return dt.date.fromisoformat(match.group(1))
-    except ValueError:
-        return None
+    if match:
+        try:
+            return dt.date.fromisoformat(match.group(1))
+        except ValueError:
+            pass
+    for day, month, year in _UK_DATE_RE.findall(text):
+        try:
+            return dt.date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+    return None
 
 
 def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 14.0) -> list[list[dict[str, Any]]]:
@@ -104,11 +113,21 @@ _OCR_TAG_RE = re.compile(r"UK[\sI1]*\d(?:[\d\sOILSBZ]{8,24})", re.IGNORECASE)
 _OCR_DIGIT = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8", "Z": "2"})
 
 
-def _image_bytes_for_ocr(image: dict[str, Any]) -> bytes | None:
-    """Return PNG or JPEG bytes for one embedded page image.
+def _jpeg_bytes(image: Any, *, max_edge: int = 1600) -> bytes:
+    import io
 
-    Gamechanger scans store the page as a fax bitmap. Those bytes are not a
-    picture file, so they are wrapped before the text reader sees them.
+    image.thumbnail((max_edge, max_edge))
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=75)
+    return buffer.getvalue()
+
+
+def _image_bytes_for_ocr(image: dict[str, Any]) -> bytes | None:
+    """Return JPEG or PNG bytes for one embedded page image.
+
+    Gamechanger scans store the page as a fax bitmap. Sheet pages store the
+    table as a large colour picture. Both are turned into a picture file the
+    text reader can open, and a blank picture is left out.
     """
     stream = image.get("stream")
     if stream is None:
@@ -117,25 +136,76 @@ def _image_bytes_for_ocr(image: dict[str, Any]) -> bytes | None:
         data = stream.get_data()
     except Exception:
         return None
-    if not data or len(data) > 4 * 1024 * 1024:
+    if not data:
         return None
     if data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n":
+        if len(data) > 4 * 1024 * 1024:
+            return None
         return data
     src = image.get("srcsize") or ()
-    if image.get("bits") != 1 or len(src) != 2:
+    if len(src) != 2:
         return None
     width, height = int(src[0]), int(src[1])
-    row_bytes = (width + 7) // 8
-    if width < 1 or height < 1 or len(data) != row_bytes * height:
+    if width < 1 or height < 1:
         return None
     import io
 
     from PIL import Image
 
-    bitmap = Image.frombytes("1", (width, height), data)
-    buffer = io.BytesIO()
-    bitmap.save(buffer, format="PNG")
-    return buffer.getvalue()
+    if image.get("bits") == 1:
+        row_bytes = (width + 7) // 8
+        if len(data) != row_bytes * height or len(data) > 4 * 1024 * 1024:
+            return None
+        bitmap = Image.frombytes("1", (width, height), data)
+        buffer = io.BytesIO()
+        bitmap.save(buffer, format="PNG")
+        return buffer.getvalue()
+    if image.get("bits") == 8 and len(data) == width * height * 3:
+        picture = Image.frombytes("RGB", (width, height), data)
+        del data
+        if picture.convert("L").getextrema() == (255, 255):
+            return None
+        return _jpeg_bytes(picture)
+    return None
+
+
+def _is_pence_token(token: str) -> bool:
+    return _PENCE_TOKEN_RE.fullmatch(token) is not None
+
+
+def _price_in_range(value: float) -> bool:
+    return _MIN_PRICE_GBP <= value <= _MAX_PRICE_GBP
+
+
+def _pence_prices(text: str) -> list[float]:
+    prices: list[float] = []
+    for token in _PENCE_TOKEN_RE.findall(text):
+        value = _to_float(token)
+        if value is not None and _price_in_range(value):
+            prices.append(value)
+    return prices
+
+
+def _join_split_prices(raw_lines: list[str]) -> list[str]:
+    """Attach a Price column that OCR placed on the following line."""
+    joined: list[str] = []
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index]
+        if index + 1 < len(raw_lines):
+            nxt = raw_lines[index + 1]
+            if (
+                _TAG_RE.search(line)
+                and not _pence_prices(line)
+                and _TAG_RE.search(nxt) is None
+                and _pence_prices(nxt)
+            ):
+                joined.append(f"{line} {nxt}")
+                index += 2
+                continue
+        joined.append(line)
+        index += 1
+    return joined
 
 
 def _repair_ocr_line(line: str) -> str:
@@ -180,10 +250,13 @@ def _lines_from_scan(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 words = ocr_words_from_image(image_bytes, scale=2, prefer_rapid=True)
                 del image_bytes
                 if words:
+                    page_lines: list[str] = []
                     for row in _cluster_rows(words):
                         tokens = [word["text"] for word in sorted(row, key=lambda item: item["x"])]
                         raw_line = _repair_ocr_line(" ".join(tokens))
+                        page_lines.append(raw_line)
                         raw_lines.append(raw_line)
+                    for raw_line in _join_split_prices(page_lines):
                         parsed = _parse_animal_row(raw_line)
                         if parsed is None or parsed["etag"] in seen:
                             continue
@@ -202,17 +275,30 @@ def _parse_animal_row(line: str) -> dict[str, Any] | None:
     if not etag:
         return None
 
-    numbers = [_to_float(token) for token in _NUMBER_RE.findall(line[tag_match.end() :])]
-    numbers = [n for n in numbers if n is not None]
+    numbers = [
+        (value, _is_pence_token(token))
+        for token in _NUMBER_RE.findall(line[tag_match.end() :])
+        if (value := _to_float(token)) is not None
+    ]
     if not numbers:
         return None
 
-    amount = numbers[-1]
-    if amount < 20 or amount > 2500:
+    amount_index: int | None = None
+    for index, (value, is_pence) in enumerate(numbers):
+        if is_pence and _price_in_range(value):
+            amount_index = index
+    if amount_index is None:
+        for index, (value, _is_pence) in enumerate(numbers):
+            if _price_in_range(value):
+                amount_index = index
+    if amount_index is None:
         return None
+    amount = numbers[amount_index][0]
 
     weight = 0.0
-    for value in numbers[:-1]:
+    for index, (value, _is_pence) in enumerate(numbers):
+        if index == amount_index:
+            continue
         if 20 <= value <= 150:
             weight = value
             break
@@ -259,7 +345,7 @@ def parse_blade_pdf(
     if not looks_like_blade_pdf(text, source_file):
         warnings.append("PDF does not look like a Gamechanger payment advice")
 
-    sale_date = _date_from_text(text) or _date_from_filename(source_file)
+    sale_date = _date_from_filename(source_file) or _date_from_text(text)
     lines: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw_line in text.splitlines():
