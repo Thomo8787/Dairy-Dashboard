@@ -1,16 +1,19 @@
 """Parse ABP Gamechanger (Blade) calf Payment Advice PDFs.
 
-These are digital remittances. Farm is left unset so import can resolve it
-from the DairyComp ear-tag event — the letterhead is the office address.
+Digital remittances are read from the PDF text. A scan with no copyable text
+is read from its page images, one image at a time. Farm is left unset so
+import can resolve it from the DairyComp ear-tag event — the letterhead is
+the office address.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import gc
 import re
 from typing import Any
 
-from services.cattle_sale_pdf import extract_pdf_text, normalize_etag
+from services.cattle_sale_pdf import extract_pdf_text, normalize_etag, ocr_words_from_image
 
 BUYER_GAMECHANGER = "Gamechanger"
 
@@ -78,6 +81,119 @@ def _date_from_text(text: str) -> dt.date | None:
         return None
 
 
+def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 14.0) -> list[list[dict[str, Any]]]:
+    ordered = sorted(words, key=lambda word: (word["y"], word["x"]))
+    rows: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    anchor_y: float | None = None
+    for word in ordered:
+        if anchor_y is None or abs(word["y"] - anchor_y) <= y_tol:
+            current.append(word)
+            if anchor_y is None:
+                anchor_y = word["y"]
+        else:
+            rows.append(current)
+            current = [word]
+            anchor_y = word["y"]
+    if current:
+        rows.append(current)
+    return rows
+
+
+_OCR_TAG_RE = re.compile(r"UK[\sI1]*\d(?:[\d\sOILSBZ]{8,24})", re.IGNORECASE)
+_OCR_DIGIT = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8", "Z": "2"})
+
+
+def _image_bytes_for_ocr(image: dict[str, Any]) -> bytes | None:
+    """Return PNG or JPEG bytes for one embedded page image.
+
+    Gamechanger scans store the page as a fax bitmap. Those bytes are not a
+    picture file, so they are wrapped before the text reader sees them.
+    """
+    stream = image.get("stream")
+    if stream is None:
+        return None
+    try:
+        data = stream.get_data()
+    except Exception:
+        return None
+    if not data or len(data) > 4 * 1024 * 1024:
+        return None
+    if data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n":
+        return data
+    src = image.get("srcsize") or ()
+    if image.get("bits") != 1 or len(src) != 2:
+        return None
+    width, height = int(src[0]), int(src[1])
+    row_bytes = (width + 7) // 8
+    if width < 1 or height < 1 or len(data) != row_bytes * height:
+        return None
+    import io
+
+    from PIL import Image
+
+    bitmap = Image.frombytes("1", (width, height), data)
+    buffer = io.BytesIO()
+    bitmap.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _repair_ocr_line(line: str) -> str:
+    """Turn an OCR ear tag into UK plus 12 digits, leaving the rest of the row."""
+
+    def repl(match: re.Match[str]) -> str:
+        raw = re.sub(r"[^A-Z0-9]", "", match.group(0).upper())
+        if raw.startswith("UKI"):
+            raw = "UK1" + raw[3:]
+        digits = re.sub(r"\D", "", raw[2:].translate(_OCR_DIGIT))
+        if len(digits) < 12:
+            return match.group(0)
+        return f"UK{digits[:12]}"
+
+    return _OCR_TAG_RE.sub(repl, line)
+
+
+def _lines_from_scan(content: bytes) -> tuple[list[dict[str, Any]], list[str]]:
+    """Read animal rows from page images when the PDF has no copyable text."""
+    import io
+
+    import pdfplumber
+
+    lines: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    raw_lines: list[str] = []
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            bitmaps: list[bytes] = []
+            pictures: list[bytes] = []
+            for image in page.images or []:
+                blob = _image_bytes_for_ocr(image)
+                if blob is None:
+                    continue
+                if image.get("bits") == 1:
+                    bitmaps.append(blob)
+                else:
+                    pictures.append(blob)
+            chosen = bitmaps or pictures
+            while chosen:
+                image_bytes = chosen.pop()
+                words = ocr_words_from_image(image_bytes, scale=2, prefer_rapid=True)
+                del image_bytes
+                if words:
+                    for row in _cluster_rows(words):
+                        tokens = [word["text"] for word in sorted(row, key=lambda item: item["x"])]
+                        raw_line = _repair_ocr_line(" ".join(tokens))
+                        raw_lines.append(raw_line)
+                        parsed = _parse_animal_row(raw_line)
+                        if parsed is None or parsed["etag"] in seen:
+                            continue
+                        seen.add(parsed["etag"])
+                        lines.append(parsed)
+                del words
+                gc.collect()
+    return lines, raw_lines
+
+
 def _parse_animal_row(line: str) -> dict[str, Any] | None:
     tag_match = _TAG_RE.search(line)
     if tag_match is None:
@@ -120,11 +236,23 @@ def parse_blade_pdf(
     warnings: list[str] = []
     text = extract_pdf_text(content)
     if not text.strip():
+        lines, raw_lines = _lines_from_scan(content)
+        sale_date = _date_from_filename(source_file) or _date_from_text("\n".join(raw_lines))
+        for line in lines:
+            line["kill_date"] = sale_date
+        if not lines:
+            warnings.append(
+                "No sale lines extracted from PDF"
+                if raw_lines
+                else "PDF contained no extractable text"
+            )
+        if sale_date is None:
+            warnings.append("Could not parse sale date from payment advice")
         return {
             "farm": None,
-            "sale_date": _date_from_filename(source_file),
-            "lines": [],
-            "warnings": ["PDF contained no extractable text"],
+            "sale_date": sale_date,
+            "lines": lines,
+            "warnings": warnings,
             "buyer": BUYER_GAMECHANGER,
         }
 

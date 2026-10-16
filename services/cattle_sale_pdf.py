@@ -193,16 +193,25 @@ def ocr_image_bytes(image_bytes: bytes) -> str:
     return " ".join(word["text"] for word in ordered).strip()
 
 
-def ocr_words_from_image(image_bytes: bytes, *, scale: int = 2) -> list[dict[str, Any]]:
+def ocr_words_from_image(
+    image_bytes: bytes,
+    *,
+    scale: int = 2,
+    prefer_rapid: bool = False,
+) -> list[dict[str, Any]]:
     """OCR words with bounding boxes.
 
     Windows OCR is used when it is installed. Render's Linux cron uses RapidOCR.
+    prefer_rapid skips Windows OCR. Some fax bitmaps make that reader fault,
+    and the live site already uses RapidOCR.
     """
     try:
         image = _prepare_ocr_image(image_bytes, scale=scale)
     except Exception:
         logging.getLogger(__name__).exception("Could not open remittance image")
         return []
+    if prefer_rapid:
+        return _rapidocr_words(image)
     words = _winocr_words(image)
     if words:
         return words
