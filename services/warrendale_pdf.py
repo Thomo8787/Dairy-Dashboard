@@ -7,8 +7,11 @@ resolves it from the DairyComp ear-tag event.
 from __future__ import annotations
 
 import datetime as dt
+import io
 import re
 from typing import Any
+
+import pdfplumber
 
 from services.cattle_sale_pdf import extract_pdf_text, normalize_etag
 
@@ -24,6 +27,13 @@ _QTY_PRICE_RE = re.compile(
     r"(\d+(?:,\d{3})*(?:\.\d+)?)\s+(\d+(?:,\d{3})*(?:\.\d+)?)\s+Zero\s+Rated",
     re.IGNORECASE,
 )
+_FLEX_DATE_RE = re.compile(
+    r"(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4})",
+    re.IGNORECASE,
+)
+_NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+_ROW_TOP_TOLERANCE = 3.0
+_DATE_BELOW_LABEL = 22.0
 _MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
@@ -86,6 +96,124 @@ def _unit_price(text: str, tag_count: int) -> float | None:
     return None
 
 
+def _compact(text: str) -> str:
+    return "".join((text or "").split()).lower()
+
+
+def _is_self_bill(text: str) -> bool:
+    lowered = text.lower()
+    if "self-bill" in lowered or "self bill" in lowered or "selfbill" in _compact(text):
+        return True
+    return _parse_collection_date(text) is not None
+
+
+def _is_purchase_order(text: str) -> bool:
+    return "purchaseorder" in _compact(text) and not _is_self_bill(text)
+
+
+def _pdf_words(content: bytes) -> list[dict[str, Any]]:
+    words: list[dict[str, Any]] = []
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            words.extend(page.extract_words() or [])
+    return words
+
+
+def _word_rows(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    rows: list[list[dict[str, Any]]] = []
+    for word in sorted(words, key=lambda item: (item["top"], item["x0"])):
+        if rows and abs(word["top"] - rows[-1][0]["top"]) <= _ROW_TOP_TOLERANCE:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    for row in rows:
+        row.sort(key=lambda item: item["x0"])
+    return rows
+
+
+def _parse_flexible_date(text: str) -> dt.date | None:
+    match = _FLEX_DATE_RE.search(text)
+    if not match:
+        return None
+    month = _MONTHS.get(match.group(2)[:3].lower())
+    if month is None:
+        return None
+    try:
+        return dt.date(int(match.group(3)), month, int(match.group(1)))
+    except ValueError:
+        return None
+
+
+def _label_span(row: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    target = "purchaseorderdate"
+    for start in range(len(row)):
+        acc = ""
+        for end in range(start, min(start + 4, len(row))):
+            acc += _compact(row[end]["text"])
+            if acc == target:
+                return row[start : end + 1]
+            if not target.startswith(acc):
+                break
+    return None
+
+
+def _purchase_order_date(words: list[dict[str, Any]]) -> dt.date | None:
+    label: list[dict[str, Any]] | None = None
+    for row in _word_rows(words):
+        label = _label_span(row)
+        if label is not None:
+            break
+    if not label:
+        return None
+    x0 = min(word["x0"] for word in label)
+    x1 = max(word["x1"] for word in label)
+    top = min(word["top"] for word in label)
+    under = [
+        word
+        for word in words
+        if top + 1 < word["top"] <= top + _DATE_BELOW_LABEL
+        and word["x0"] <= x1 + 8
+        and word["x1"] >= x0 - 4
+    ]
+    under.sort(key=lambda word: (word["top"], word["x0"]))
+    return _parse_flexible_date("".join(word["text"] for word in under))
+
+
+def _plain_number(text: str) -> float | None:
+    token = (text or "").strip()
+    if not _NUMBER_RE.fullmatch(token):
+        return None
+    return float(token.replace(",", ""))
+
+
+def _purchase_order_price(words: list[dict[str, Any]]) -> float | None:
+    for row in _word_rows(words):
+        if any("total" in _compact(word["text"]) for word in row):
+            continue
+        for index, word in enumerate(row):
+            token = _compact(word["text"])
+            zero_rated = token == "zerorated" or (
+                token == "zero"
+                and index + 1 < len(row)
+                and _compact(row[index + 1]["text"]) == "rated"
+            )
+            if not zero_rated:
+                continue
+            for previous in reversed(row[:index]):
+                number = _plain_number(previous["text"])
+                if number is None:
+                    continue
+                if number >= 20:
+                    return round(number, 2)
+                break
+    return None
+
+
+def _purchase_order_layout(content: bytes) -> tuple[float | None, dt.date | None]:
+    words = _pdf_words(content)
+    return _purchase_order_price(words), _purchase_order_date(words)
+
+
 def parse_warrendale_pdf(
     content: bytes,
     *,
@@ -118,6 +246,12 @@ def parse_warrendale_pdf(
 
     amount = _unit_price(text, len(tags))
     sale_date = _parse_collection_date(text) or _parse_self_bill_date(text)
+    if _is_purchase_order(text) and (amount is None or sale_date is None):
+        po_amount, po_date = _purchase_order_layout(content)
+        if amount is None:
+            amount = po_amount
+        if sale_date is None:
+            sale_date = po_date
     lines: list[dict[str, Any]] = []
     if amount is None:
         warnings.append("Could not parse unit price from purchase order")
