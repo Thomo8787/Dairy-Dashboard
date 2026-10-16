@@ -144,6 +144,14 @@ def _amount_is_warrendale_bonus(amount: float | None) -> bool:
     return abs(float(amount) - WARRENDALE_BONUS_GBP) < 0.005
 
 
+def _is_warrendale_bonus_line(line: CattleSaleLine) -> bool:
+    """£80 Warrendale bonus. It can match a sale on any date."""
+    if bool(getattr(line, "is_bonus", False)):
+        return True
+    buyer = infer_cattle_sale_buyer(buyer=line.buyer, source_file=line.source_file)
+    return buyer == BUYER_WARRENDALE and _amount_is_warrendale_bonus(line.amount_gbp)
+
+
 def _warrendale_line_key(line: CattleSaleLine) -> tuple[str, str]:
     return (line.farm, normalize_etag(line.etag))
 
@@ -235,7 +243,7 @@ def _pair_warrendale_bonus_lines(
                 if best is None or best_delta is None or delta < best_delta:
                     best = calf
                     best_delta = delta
-            if best is not None:
+            if best is not None and best.id in in_range_ids:
                 paired[best.id] = bonus
                 used_bonus_ids.add(bonus.id)
 
@@ -275,6 +283,8 @@ def _load_sold_events(
     etags: set[str],
     min_date: dt.date,
     max_date: dt.date,
+    *,
+    bounded: bool = True,
 ) -> dict[tuple[str, str], list[CowEvent]]:
     if not etags:
         return {}
@@ -283,17 +293,19 @@ def _load_sold_events(
     if not normalized_etags:
         return {}
 
-    window_start = min_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
-    window_end = max_date + dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
-    rows = db.scalars(
-        select(CowEvent).where(
-            cattle_sales_exit_event_clause(),
-            CowEvent.farm.in_(farms),
-            CowEvent.event_date.isnot(None),
-            CowEvent.event_date >= window_start,
-            CowEvent.event_date <= window_end,
-        )
-    ).all()
+    filters = [
+        cattle_sales_exit_event_clause(),
+        CowEvent.farm.in_(farms),
+        CowEvent.event_date.isnot(None),
+    ]
+    if bounded:
+        window_start = min_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
+        window_end = max_date + dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
+        filters.append(CowEvent.event_date >= window_start)
+        filters.append(CowEvent.event_date <= window_end)
+    else:
+        filters.append(CowEvent.etag.in_(list(normalized_etags)))
+    rows = db.scalars(select(CowEvent).where(*filters)).all()
     grouped: dict[tuple[str, str], list[CowEvent]] = {}
     for row in rows:
         etag = normalize_etag(row.etag)
@@ -306,10 +318,28 @@ def _load_sold_events(
     return grouped
 
 
+def _merge_sold_events(
+    base: dict[tuple[str, str], list[CowEvent]],
+    extra: dict[tuple[str, str], list[CowEvent]],
+) -> dict[tuple[str, str], list[CowEvent]]:
+    for key, events in extra.items():
+        bucket = base.setdefault(key, [])
+        seen = {event.id for event in bucket}
+        for event in events:
+            if event.id in seen:
+                continue
+            bucket.append(event)
+            seen.add(event.id)
+        bucket.sort(key=lambda event: event.event_date or dt.date.min)
+    return base
+
+
 def _best_sold_match(
     events: list[CowEvent],
     sale_date: dt.date,
     kill_date: dt.date | None = None,
+    *,
+    max_days: int | None = EVENT_MATCH_WINDOW_DAYS,
 ) -> CowEvent | None:
     if not events:
         return None
@@ -323,7 +353,7 @@ def _best_sold_match(
             continue
         for reference_date in reference_dates:
             delta = abs((event.event_date - reference_date).days)
-            if delta > EVENT_MATCH_WINDOW_DAYS:
+            if max_days is not None and delta > max_days:
                 continue
             if best is None or best_delta is None or delta < best_delta:
                 best = event
@@ -338,6 +368,7 @@ def _match_sale_to_sold_event(
     etag: str,
     sale_date: dt.date,
     kill_date: dt.date | None,
+    max_days: int | None = EVENT_MATCH_WINDOW_DAYS,
 ) -> tuple[CowEvent | None, str | None]:
     """Prefer a sold event on the payment farm.
 
@@ -350,6 +381,7 @@ def _match_sale_to_sold_event(
         sold_by_key.get((farm, norm_etag), []),
         sale_date,
         kill_date,
+        max_days=max_days,
     )
     if same_farm is not None:
         return same_farm, None
@@ -367,7 +399,7 @@ def _match_sale_to_sold_event(
             if event.event_date is None:
                 continue
             delta = min(abs((event.event_date - ref).days) for ref in reference_dates)
-            if delta > EVENT_MATCH_WINDOW_DAYS:
+            if max_days is not None and delta > max_days:
                 continue
             if best is None or best_delta is None or delta < best_delta:
                 best = event
@@ -517,6 +549,19 @@ def list_cattle_sales(
     min_sale = min(reference_dates)
     max_sale = max(reference_dates)
     sold_by_key = _load_sold_events(db, list(HERD_FARM_OPTIONS), etags, min_sale, max_sale)
+    bonus_etags = {line.etag for line in event_lines if _is_warrendale_bonus_line(line)}
+    if bonus_etags:
+        sold_by_key = _merge_sold_events(
+            sold_by_key,
+            _load_sold_events(
+                db,
+                list(HERD_FARM_OPTIONS),
+                bonus_etags,
+                min_sale,
+                max_sale,
+                bounded=False,
+            ),
+        )
     beef_line_ids: set[int] = set()
     for line in event_lines:
         match, _other_farm = _match_sale_to_sold_event(
@@ -525,6 +570,7 @@ def list_cattle_sales(
             etag=line.etag,
             sale_date=line.sale_date,
             kill_date=line.kill_date,
+            max_days=None if _is_warrendale_bonus_line(line) else EVENT_MATCH_WINDOW_DAYS,
         )
         if match is None:
             continue
@@ -542,6 +588,7 @@ def list_cattle_sales(
             etag=line.etag,
             sale_date=line.sale_date,
             kill_date=line.kill_date,
+            max_days=None if _is_warrendale_bonus_line(line) else EVENT_MATCH_WINDOW_DAYS,
         )
         event_matched = match is not None
         if not event_matched and not include_unmatched:

@@ -13,8 +13,10 @@ from services.cattle_sales import (
     BUYER_WARRENDALE,
     EVENT_MATCH_WINDOW_DAYS,
     WARRENDALE_BONUS_GBP,
+    _is_warrendale_bonus_line,
     _load_sold_events,
     _match_sale_to_sold_event,
+    _merge_sold_events,
     cattle_sales_exit_event_clause,
 )
 
@@ -208,28 +210,53 @@ def _apply_sold_event_filters(
     return query
 
 
+def _append_sale_line(
+    grouped: dict[tuple[str, str], list[CattleSaleLine]],
+    line: CattleSaleLine,
+) -> None:
+    etag = normalize_etag(line.etag)
+    if not etag:
+        return
+    for key in ((line.farm, etag), ("", etag)):
+        bucket = grouped.setdefault(key, [])
+        if any(existing.id == line.id for existing in bucket):
+            continue
+        bucket.append(line)
+
+
 def _load_cattle_sale_lines_by_farm_etag(
     db: Session,
     farms: list[str],
     min_date: dt.date,
     max_date: dt.date,
+    bonus_etags: set[str] | None = None,
 ) -> dict[tuple[str, str], list[CattleSaleLine]]:
     window_start = min_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
     window_end = max_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
-    sale_lines = db.scalars(
-        select(CattleSaleLine).where(
-            CattleSaleLine.farm.in_(farms),
-            CattleSaleLine.sale_date >= window_start,
-            CattleSaleLine.sale_date <= window_end,
+    sale_lines = list(
+        db.scalars(
+            select(CattleSaleLine).where(
+                CattleSaleLine.farm.in_(farms),
+                CattleSaleLine.sale_date >= window_start,
+                CattleSaleLine.sale_date <= window_end,
+            )
+        ).all()
+    )
+    normalized_bonus_etags = {normalize_etag(etag) for etag in (bonus_etags or set())}
+    normalized_bonus_etags.discard("")
+    if normalized_bonus_etags:
+        sale_lines.extend(
+            db.scalars(
+                select(CattleSaleLine).where(
+                    CattleSaleLine.farm.in_(farms),
+                    CattleSaleLine.etag.in_(list(normalized_bonus_etags)),
+                    CattleSaleLine.is_bonus.is_(True),
+                )
+            ).all()
         )
-    ).all()
     grouped: dict[tuple[str, str], list[CattleSaleLine]] = {}
     for line in sale_lines:
-        etag = normalize_etag(line.etag)
-        if not etag:
-            continue
-        grouped.setdefault((line.farm, etag), []).append(line)
-        grouped.setdefault(("", etag), []).append(line)
+        _append_sale_line(grouped, line)
     for lines in grouped.values():
         lines.sort(key=lambda row: row.sale_date)
     return grouped
@@ -245,36 +272,11 @@ def _is_warrendale_line(line: CattleSaleLine) -> bool:
     return (line.buyer or "").strip() == BUYER_WARRENDALE
 
 
-def _line_dates(line: CattleSaleLine) -> list[dt.date]:
-    dates = [line.sale_date]
-    if line.kill_date is not None and line.kill_date != line.sale_date:
-        dates.append(line.kill_date)
-    return dates
-
-
-def _bonus_in_window(
-    line: CattleSaleLine,
-    event_date: dt.date,
-    calf_date: dt.date | None,
-) -> bool:
-    earliest = event_date - dt.timedelta(days=EVENT_MATCH_WINDOW_DAYS)
-    latest = event_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
-    calf_latest = None
-    if calf_date is not None:
-        calf_latest = calf_date + dt.timedelta(days=WARRENDALE_BONUS_LOOKAHEAD_DAYS)
-    for sale_date in _line_dates(line):
-        if earliest <= sale_date <= latest:
-            return True
-        if calf_date is not None and calf_latest is not None and calf_date <= sale_date <= calf_latest:
-            return True
-    return False
-
-
 def _warrendale_split_match(
     lines: list[CattleSaleLine],
     event_date: dt.date,
 ) -> dict[str, Any] | None:
-    """Calf price within 14 days; £80 bonus up to 28 days after the sale or calf price."""
+    """Calf price within 14 days. The £80 bonus matches on ear tag, and the nearest bonus wins."""
     calf_line: CattleSaleLine | None = None
     calf_delta: int | None = None
     for line in lines:
@@ -286,13 +288,10 @@ def _warrendale_split_match(
         if calf_line is None or calf_delta is None or delta < calf_delta:
             calf_line = line
             calf_delta = delta
-    calf_date = calf_line.sale_date if calf_line is not None else None
     bonus_line: CattleSaleLine | None = None
     bonus_delta: int | None = None
     for line in lines:
         if not _is_warrendale_line(line) or not _is_warrendale_bonus(line.amount_gbp):
-            continue
-        if not _bonus_in_window(line, event_date, calf_date):
             continue
         delta = _sale_line_match_delta(line, event_date)
         if bonus_line is None or bonus_delta is None or delta < bonus_delta:
@@ -627,6 +626,19 @@ def _unmatched_remittance_rows(
             min(reference_dates),
             max(reference_dates),
         )
+        bonus_etags = {line.etag for line in sale_lines if _is_warrendale_bonus_line(line)}
+        if bonus_etags:
+            sold_by_key = _merge_sold_events(
+                sold_by_key,
+                _load_sold_events(
+                    db,
+                    list(HERD_FARM_OPTIONS),
+                    bonus_etags,
+                    min(reference_dates),
+                    max(reference_dates),
+                    bounded=False,
+                ),
+            )
     extra: list[dict[str, Any]] = []
     for line in sale_lines:
         etag = normalize_etag(line.etag)
@@ -648,6 +660,7 @@ def _unmatched_remittance_rows(
             etag=etag,
             sale_date=line.sale_date,
             kill_date=line.kill_date,
+            max_days=None if _is_warrendale_bonus_line(line) else EVENT_MATCH_WINDOW_DAYS,
         )
         if search_id and _normalize_key_part(match.cow_id if match else None) != search_id:
             continue
@@ -817,6 +830,7 @@ def list_sales_payments(
                 list(HERD_FARM_OPTIONS),
                 min_event,
                 max_event,
+                bonus_etags={normalize_etag(row[2]) for row in result_rows if row[2]},
             )
 
     flag_min = None
