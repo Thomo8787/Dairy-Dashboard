@@ -138,6 +138,7 @@
     button.smooth-switch[aria-pressed="true"] .smooth-switch-knob { transform: translateX(1.4rem); }
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .meta-line.is-loading { font-style: italic; }
+    #meta-line { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
     #import-status.is-loading::before {
       content: "";
       display: inline-block;
@@ -471,7 +472,7 @@
       </div>
       {% endif %}
 
-      <p class="meta-line" id="meta-line">Loading cattle sales…</p>
+      <div class="meta-line" id="meta-line">Loading cattle sales…</div>
 
       <div class="summary-cards" id="summary-cards"></div>
       <div id="summary-popover" class="summary-popover" hidden>
@@ -1735,6 +1736,17 @@
       document.getElementById('meta-line').classList.toggle('is-loading', loadingCount > 0);
     }
 
+    function showCattleSalesLoadFailure() {
+      const meta = document.getElementById('meta-line');
+      meta.replaceChildren(document.createTextNode('Failed to load cattle sales.'));
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'secondary small';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => fetchData());
+      meta.append(retry);
+    }
+
     function refreshView() {
       renderBuyerFilter();
       syncRangeInputs(buyerScopedRows());
@@ -1760,7 +1772,7 @@
         populateMonthSelects(payload.date_bounds, { resetRange: isInitialCattleSalesLoad });
         isInitialCattleSalesLoad = false;
       } catch (err) {
-        document.getElementById('meta-line').textContent = 'Failed to load cattle sales.';
+        showCattleSalesLoadFailure();
         console.error(err);
         return;
       } finally {
@@ -1834,6 +1846,7 @@
         return;
       }
 
+      hideImportMessage();
       const btn = document.getElementById('import-btn');
       const statusEl = document.getElementById('import-status');
       btn.disabled = true;
@@ -1861,6 +1874,7 @@
     document.getElementById('upload-input').addEventListener('change', async (e) => {
       const files = e.target.files;
       if (!files?.length) return;
+      hideImportMessage();
       const btn = document.getElementById('upload-btn');
       const statusEl = document.getElementById('import-status');
       const fd = new FormData();
