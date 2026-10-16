@@ -78,20 +78,28 @@
   const multiSelectGroups = new Set(
     [...document.querySelectorAll(".farm-slicer")].filter(isAllSelected)
   );
+  const reasonGroups = new Set(
+    [...document.querySelectorAll(".reason-slicer")].filter(isAllSelected)
+  );
   multiSelectGroups.forEach((group) => {
     group.querySelectorAll(".slicer-btn[data-value]").forEach((btn) => {
       btn.title = "Double-click to show only this farm";
+    });
+  });
+  reasonGroups.forEach((group) => {
+    group.querySelectorAll(".slicer-btn[data-value]").forEach((btn) => {
+      btn.title = "Double-click to show only this reason";
     });
   });
 
   let committingClick = false;
   let pendingClick = null;
 
-  function farmButton(event) {
-    const btn = event.target.closest(".farm-slicer .slicer-btn");
+  function slicerButton(event) {
+    const btn = event.target.closest(".farm-slicer .slicer-btn, .reason-slicer .slicer-btn");
     if (!btn) return null;
-    const group = btn.closest(".farm-slicer");
-    if (!multiSelectGroups.has(group)) return null;
+    const group = btn.closest(".farm-slicer, .reason-slicer");
+    if (!multiSelectGroups.has(group) && !reasonGroups.has(group)) return null;
     return { btn, group };
   }
 
@@ -114,21 +122,29 @@
     commitClick(stillOff);
   }
 
-  multiSelectGroups.forEach((group) => {
-    if (!group.parentElement) return;
+  function addSelectAll(group) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "secondary small farm-select-all";
     button.textContent = "Select all";
     button.addEventListener("click", () => selectAllFarms(group));
+    if (group.classList.contains("farm-slicer")) {
+      button.className = "farm-select-all";
+      group.appendChild(button);
+      return;
+    }
+    if (!group.parentElement) return;
+    button.className = "secondary small farm-select-all";
     group.parentElement.insertBefore(button, group);
-  });
+  }
+
+  multiSelectGroups.forEach(addSelectAll);
+  reasonGroups.forEach(addSelectAll);
 
   restore();
 
   document.addEventListener("click", (event) => {
     if (committingClick) return;
-    const hit = farmButton(event);
+    const hit = slicerButton(event);
     if (!hit) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -140,7 +156,7 @@
   }, true);
 
   document.addEventListener("dblclick", (event) => {
-    const hit = farmButton(event);
+    const hit = slicerButton(event);
     if (!hit) return;
     event.preventDefault();
     event.stopImmediatePropagation();

@@ -626,6 +626,22 @@ button.secondary {
 }
 button.secondary.small { font-size: 0.85rem; }
 button.farm-select-all { margin: 0 0 0.5rem; }
+.farm-slicer > button.farm-select-all {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.25rem;
+  padding: 0.5rem 0.4rem;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
 button.secondary:hover { background: var(--accent-soft); }
 .btn.ghost {
   background: transparent;
