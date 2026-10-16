@@ -138,6 +138,21 @@
     button.smooth-switch[aria-pressed="true"] .smooth-switch-knob { transform: translateX(1.4rem); }
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .meta-line.is-loading { font-style: italic; }
+    #import-status.is-loading::before {
+      content: "";
+      display: inline-block;
+      width: 0.85rem;
+      height: 0.85rem;
+      margin-right: 0.45rem;
+      border: 2px solid #cbd5e1;
+      border-top-color: #1e3a5f;
+      border-radius: 50%;
+      vertical-align: -0.15rem;
+      animation: cattle-sales-spin 0.7s linear infinite;
+    }
+    @keyframes cattle-sales-spin {
+      to { transform: rotate(360deg); }
+    }
     .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
     button.summary-card {
       display: block; width: 100%; text-align: left; font: inherit;
@@ -1846,13 +1861,27 @@
     document.getElementById('upload-input').addEventListener('change', async (e) => {
       const files = e.target.files;
       if (!files?.length) return;
+      const btn = document.getElementById('upload-btn');
+      const statusEl = document.getElementById('import-status');
       const fd = new FormData();
       [...files].forEach(f => fd.append('files', f));
-      const res = await fetch('/office/api/cattle-sales/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      showImportMessage(data);
-      if (res.ok) fetchData();
-      e.target.value = '';
+      btn.disabled = true;
+      statusEl.classList.add('is-loading');
+      statusEl.textContent = 'Uploading…';
+      try {
+        const res = await fetch('/office/api/cattle-sales/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        showImportMessage(data);
+        if (res.ok) fetchData();
+      } catch (err) {
+        showImportNotice('Cattle sales upload failed.');
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        statusEl.classList.remove('is-loading');
+        statusEl.textContent = '';
+        e.target.value = '';
+      }
     });
     {% endif %}
 
