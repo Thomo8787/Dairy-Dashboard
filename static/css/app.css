@@ -626,7 +626,8 @@ button.secondary {
 }
 button.secondary.small { font-size: 0.85rem; }
 button.farm-select-all { margin: 0 0 0.5rem; }
-.farm-slicer > button.farm-select-all {
+.farm-slicer > button.farm-select-all,
+.reason-slicer > button.farm-select-all {
   margin: 0;
   display: flex;
   align-items: center;

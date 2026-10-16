@@ -42,29 +42,52 @@
     }
     .id-search button { flex: 0 0 auto; }
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .farm-slicer, .category-slicer { grid-template-columns: 1fr 1fr 1fr; }
     .slicer-btn {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 2.5rem;
-      padding: 0.4rem 0.35rem;
-      border: 2px solid var(--border);
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
       border-radius: 8px;
       background: #f3f4f6;
       color: var(--muted);
-      font-size: 0.75rem;
+      font-size: 0.8125rem;
       font-weight: 600;
       cursor: pointer;
     }
-    .slicer-btn.selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
-    .slicer-btn[data-value="CM"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
-    .slicer-btn[data-value="GAD"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .slicer-btn[data-value="CULL"].selected { background: #eef2f6; border-color: #64748b; color: #334155; }
+    .slicer-btn[data-value="TB"].selected { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
+    .slicer-btn[data-value="OFS"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+    .slicer-btn[data-value="Beef"].selected { background: #f5e6d3; border-color: #8B4513; color: #5c2e0a; }
     .slicer-btn[data-value="Dairy"].selected { background: #dbeafe; border-color: #3b82f6; color: #1e40af; }
     .slicer-btn[data-value="Youngstock"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
-    .slicer-btn[data-value="Beef"].selected { background: #ede9fe; border-color: #a78bfa; color: #5b21b6; }
     .slicer-btn[data-value="Male"].selected { background: #e0f2fe; border-color: #0ea5e9; color: #075985; }
     .slicer-btn[data-value="Female"].selected { background: #fce7f3; border-color: #ec4899; color: #9d174d; }
+    .series-slicer .slicer-btn.selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
     .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .date-row label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
     .date-row select, .date-row input { margin: 0; width: 100%; }
@@ -381,7 +404,10 @@
           <span class="section-label">Farm</span>
           <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
             {% for farm in farm_options %}
-            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">{{ farm }}</button>
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
             {% endfor %}
           </div>
         </div>

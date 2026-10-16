@@ -127,7 +127,7 @@
     button.type = "button";
     button.textContent = "Select all";
     button.addEventListener("click", () => selectAllFarms(group));
-    if (group.classList.contains("farm-slicer")) {
+    if (group.classList.contains("farm-slicer") || group.classList.contains("reason-slicer")) {
       button.className = "farm-select-all";
       group.appendChild(button);
       return;
