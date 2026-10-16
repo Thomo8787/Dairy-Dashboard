@@ -59,14 +59,16 @@ def _standardize_lsbrd(val: Any) -> str:
     val_str = str(val).strip() if pd.notna(val) else ""
     if val_str == "":
         return "Unknown"
-    if val_str in ("AA", "MS"):
+    if val_str == "AA":
         return "Angus"
     if val_str == "HE":
         return "Hereford"
     if val_str == "H":
         return "Holstein"
-    if val_str == "WA":
+    if val_str in ("WA", "MS", "KB"):
         return "Wagyu"
+    if val_str == "J":
+        return "Jersey"
     return val_str
 
 
