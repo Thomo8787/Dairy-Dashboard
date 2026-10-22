@@ -265,7 +265,11 @@
     return d7 <= 3.6 ? "red" : "unknown";
   }
 
-  function bactoscanStatus(dailyValues) {
+  function bactoscanStatus(dailyValues, average) {
+    if (average !== null && average !== undefined && average !== "") {
+      const avg = Number(average);
+      if (Number.isFinite(avg) && avg >= 30) return "red";
+    }
     const recent = (dailyValues || []).slice(-3);
     if (recent.length < 3) return "unknown";
     const high = recent.every((value) => {
@@ -415,7 +419,7 @@
             setStatus(widget, fatStatus(d7[metric]));
           }
           if (metric === "bactoscan") {
-            setStatus(widget, bactoscanStatus(bactoscanSeries[farm]));
+            setStatus(widget, bactoscanStatus(bactoscanSeries[farm], d7[metric]));
           }
           if (metric === "milk_temp") {
             setStatus(widget, milkTempStatus(milkTempSeries[farm]));
