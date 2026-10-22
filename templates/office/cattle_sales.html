@@ -313,10 +313,15 @@
     #cattle-sales-table th:nth-child(2), #cattle-sales-table td:nth-child(2),
     #cattle-sales-table th:nth-child(3), #cattle-sales-table td:nth-child(3),
     #cattle-sales-table th:nth-child(4), #cattle-sales-table td:nth-child(4),
-    #cattle-sales-table th:nth-child(6), #cattle-sales-table td:nth-child(6) { text-align: left; }
-    #cattle-sales-table th:nth-child(5), #cattle-sales-table td:nth-child(5) { text-align: center; }
-    .farm-match { color: #15803d; font-weight: 700; }
-    .farm-mismatch { color: #b91c1c; font-weight: 700; }
+    #cattle-sales-table th:nth-child(5), #cattle-sales-table td:nth-child(5) { text-align: left; }
+    .farm-paid-cell { display: inline-flex; align-items: center; gap: 0.2rem; }
+    .farm-paid-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.35rem; height: 1.35rem;
+      font-size: 1.05rem; font-weight: 700; line-height: 1;
+    }
+    .farm-paid-mark.ok { color: #15803d; }
+    .farm-paid-mark.bad { color: #b91c1c; }
     #cattle-sales-table td { font-variant-numeric: tabular-nums; }
     #cattle-sales-table thead th {
       background: #1e3a5f; color: #fff; font-weight: 600;
@@ -643,7 +648,6 @@
               <th data-sort="etag">ETAG</th>
               <th data-sort="farm_sold">Farm Sold</th>
               <th data-sort="farm">Farm Paid</th>
-              <th data-sort="farms_match" title="Farms match">Match</th>
               <th data-sort="sales_reason">Reason</th>
               <th data-sort="lact">Lact</th>
               <th data-sort="age_days">Age</th>
@@ -1273,15 +1277,18 @@
         const idNote = !row.event_matched
           ? ' <span title="No matching sale exit event (SOLD/GAME/PATH)" style="color:#b45309">⚠</span>'
           : '';
+        const paidName = (row.farm || '').trim();
         const farmMark = row.farms_match
-          ? '<span class="farm-match" title="Farms match">✓</span>'
-          : '<span class="farm-mismatch" title="Farms differ">✕</span>';
+          ? '<span class="farm-paid-mark ok" title="Farms match" aria-label="Farms match">✓</span>'
+          : '<span class="farm-paid-mark bad" title="Farms differ" aria-label="Farms differ">✕</span>';
+        const farmPaidCell = paidName
+          ? `<span class="farm-paid-cell">${escapeHtml(paidName)}${farmMark}</span>`
+          : farmMark;
         tr.innerHTML = `
           <td data-label="ID">${row.cow_id || '—'}${idNote}</td>
           <td data-label="ETAG">${row.etag || '—'}</td>
           <td data-label="Farm Sold">${escapeHtml(row.farm_sold || '—')}</td>
-          <td data-label="Farm Paid">${escapeHtml(row.farm || '—')}</td>
-          <td data-label="Match">${farmMark}</td>
+          <td data-label="Farm Paid">${farmPaidCell}</td>
           <td data-label="Reason">${escapeHtml(row.sales_reason || '—')}</td>
           <td data-label="Lact">${row.lact != null ? row.lact : '—'}</td>
           <td data-label="Age">${row.age || '—'}</td>
