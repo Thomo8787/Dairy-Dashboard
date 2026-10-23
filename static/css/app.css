@@ -510,6 +510,37 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+.home-screen-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.35rem 0 0.75rem;
+}
+
+.home-screen-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #1e3a5f;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-screen-btn.is-selected {
+  background: #1e3a5f;
+  border-color: #1e3a5f;
+  color: #fff;
+}
+
+.home-screen-switch + .home-section {
+  margin-top: 0;
+}
+
 .home-bactoscan-chart-card {
   margin: 1.1rem 0 0;
   padding: 0.85rem 1rem 0.75rem;
