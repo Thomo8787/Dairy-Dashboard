@@ -1912,3 +1912,151 @@ def build_dairy_semen_30d(db: Session) -> dict[str, Any]:
         "avg_status": status,
         "href": "/events/breedings?semen=dairy",
     }
+
+
+_HOME_HERD_DISEASE_KEYS = {
+    "MAST": "mastitis",
+    "LAME": "lameness",
+    "METR": "metritis",
+}
+
+
+def _empty_home_herd_row(farm: str) -> dict[str, Any]:
+    return {
+        "farm": farm,
+        "services": 0,
+        "days_to_first_service": None,
+        "mortality": 0,
+        "mastitis": 0,
+        "lameness": 0,
+        "metritis": 0,
+    }
+
+
+def build_home_herd_summary(db: Session) -> dict[str, Any]:
+    """Home Fertility and Health tiles: counts for the last 30 days through today."""
+    today = dt.date.today()
+    start_30 = today - dt.timedelta(days=30)
+    farms = list(HERD_FARM_OPTIONS)
+    rows = {code: _empty_home_herd_row(code) for code in farms}
+
+    bred_rows = db.execute(
+        select(
+            CowEvent.farm,
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.lact,
+            CowEvent.dim,
+            CowEvent.event_date,
+        )
+        .where(CowEvent.event == "BRED")
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date >= start_30)
+        .where(CowEvent.event_date <= today)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    prior_rows = db.execute(
+        select(CowEvent.farm, CowEvent.cow_id, CowEvent.etag, CowEvent.lact)
+        .where(CowEvent.event == "BRED")
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date < start_30)
+        .where(CowEvent.farm.in_(farms))
+        .distinct()
+    ).all()
+    prior_services = set()
+    for farm, cow_id, etag, lact in prior_rows:
+        animal = _animal_identifier(cow_id, etag)
+        if farm in rows and animal:
+            prior_services.add((farm, animal, lact))
+
+    earliest_first: dict[tuple, tuple] = {}
+    for farm, cow_id, etag, lact, dim, event_date in bred_rows:
+        if farm not in rows:
+            continue
+        rows[farm]["services"] += 1
+        event_day = _coerce_date(event_date)
+        animal = _animal_identifier(cow_id, etag)
+        # Days to first service is days after calving. Lact 0 is a heifer service.
+        if event_day is None or animal is None or not lact or lact < 1:
+            continue
+        key = (farm, animal, lact)
+        if key in prior_services:
+            continue
+        current = earliest_first.get(key)
+        if current is None or event_day < current[0] or (
+            event_day == current[0] and current[1] is None and dim is not None
+        ):
+            earliest_first[key] = (event_day, dim)
+
+    first_dims: dict[str, list[float]] = {code: [] for code in farms}
+    for (farm, _animal, _lact), (_event_day, dim) in earliest_first.items():
+        if dim is None:
+            continue
+        try:
+            number = float(dim)
+        except (TypeError, ValueError):
+            continue
+        if number != number:
+            continue
+        first_dims[farm].append(number)
+    for farm, dims in first_dims.items():
+        if dims:
+            rows[farm]["days_to_first_service"] = int(round(sum(dims) / len(dims)))
+
+    death_rows = db.execute(
+        select(
+            CowEvent.farm,
+            CowEvent.lact,
+            CowEvent.remark,
+            CowEvent.event_date,
+            CowEvent.bdat,
+        )
+        .where(death_report_event_clause())
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date >= start_30)
+        .where(CowEvent.event_date <= today)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    for farm, lact, remark, event_date, bdat in death_rows:
+        if farm not in rows:
+            continue
+        if lact == 0 and _exclude_youngstock_death(remark, event_date, bdat):
+            continue
+        rows[farm]["mortality"] += 1
+
+    lookback = start_30 - dt.timedelta(days=DEFAULT_DISEASE_EPISODE_GAP_DAYS)
+    disease_rows = db.execute(
+        select(
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.event,
+            CowEvent.event_date,
+            CowEvent.farm,
+        )
+        .where(CowEvent.event.in_(tuple(_HOME_HERD_DISEASE_KEYS)))
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date >= lookback)
+        .where(CowEvent.event_date <= today)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    kept = filter_disease_episode_records(
+        [
+            {
+                "cow_id": cow_id,
+                "etag": etag,
+                "event": event,
+                "event_date": event_date,
+                "farm": farm,
+            }
+            for cow_id, etag, event, event_date, farm in disease_rows
+        ]
+    )
+    for record in kept:
+        event_day = _disease_event_date(record)
+        farm = record.get("farm")
+        metric = _HOME_HERD_DISEASE_KEYS.get(record.get("event"))
+        if event_day is None or farm not in rows or metric is None or event_day < start_30:
+            continue
+        rows[farm][metric] += 1
+
+    return {"farms": [rows[code] for code in farms]}

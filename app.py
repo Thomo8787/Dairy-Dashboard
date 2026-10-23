@@ -28,7 +28,11 @@ from services.auth import (
     user_to_template,
     PermissionContext,
 )
-from services.events_common import build_dairy_semen_30d, build_events_page_report
+from services.events_common import (
+    build_dairy_semen_30d,
+    build_events_page_report,
+    build_home_herd_summary,
+)
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
 from services.cattle_sales import list_cattle_sales
 from services.cattle_sales_email import CATTLE_SALES_LOOKBACK_DAYS, outlook_cattle_sales_configured
@@ -1872,6 +1876,15 @@ def events_api_dairy_semen_30d():
         return error
     with get_session() as session:
         return jsonify(build_dairy_semen_30d(session))
+
+
+@app.route("/api/events/home-herd-summary")
+def events_api_home_herd_summary():
+    user, error = _events_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(build_home_herd_summary(session))
 
 
 @app.route("/events/api/<slug>")

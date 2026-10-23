@@ -180,12 +180,12 @@
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget" aria-label="{{ farm.code }} services">
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="services" aria-label="{{ farm.code }} services">
           <p class="widget-kicker">Services</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget" aria-label="{{ farm.code }} days to first service">
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="days_to_first_service" aria-label="{{ farm.code }} days to first service">
           <p class="widget-kicker">Days to first service</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
@@ -204,22 +204,22 @@
         <span class="home-herd-file-mark {{ 'ok' if file_ok else 'bad' }}" title="{{ file_status.title if file_status else 'No herd file imported' }}" aria-label="{{ file_status.aria if file_status else farm.code ~ ' has no herd file' }}">{% if file_ok %}✓{% else %}✕{% endif %}</span>
       </div>
       <div class="home-widgets">
-        <a href="{{ url_for('events_deaths') }}?farm={{ farm.code }}" class="home-widget" aria-label="{{ farm.code }} mortality">
+        <a href="{{ url_for('events_deaths') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="mortality" aria-label="{{ farm.code }} mortality">
           <p class="widget-kicker">Mortality</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=MAST" class="home-widget" aria-label="{{ farm.code }} mastitis">
+        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=MAST" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="mastitis" aria-label="{{ farm.code }} mastitis">
           <p class="widget-kicker">Mastitis</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=LAME" class="home-widget" aria-label="{{ farm.code }} lameness">
+        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=LAME" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="lameness" aria-label="{{ farm.code }} lameness">
           <p class="widget-kicker">Lameness</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=METR" class="home-widget" aria-label="{{ farm.code }} metritis">
+        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=METR" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="metritis" aria-label="{{ farm.code }} metritis">
           <p class="widget-kicker">Metritis</p>
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
@@ -273,6 +273,52 @@
   }
 
   loadDairySemen();
+})();
+</script>
+<script>
+(() => {
+  const tiles = [...document.querySelectorAll("#home-fertility [data-metric], #home-health [data-metric]")];
+  if (!tiles.length) return;
+
+  function leaveDash() {
+    tiles.forEach((tile) => {
+      tile.className = "home-widget";
+      const title = tile.querySelector(".widget-title");
+      if (title) title.textContent = "—";
+    });
+  }
+
+  async function loadHerdSummary() {
+    try {
+      const res = await fetch("/api/events/home-herd-summary");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        leaveDash();
+        return;
+      }
+      const byFarm = {};
+      for (const row of data.farms || []) {
+        if (row && row.farm) byFarm[row.farm] = row;
+      }
+      tiles.forEach((tile) => {
+        const row = byFarm[tile.dataset.farm];
+        const value = row ? row[tile.dataset.metric] : null;
+        const title = tile.querySelector(".widget-title");
+        tile.className = "home-widget status-unknown";
+        if (!title) return;
+        if (value === null || value === undefined || value === "") {
+          title.textContent = "—";
+          return;
+        }
+        const n = Number(value);
+        title.textContent = Number.isFinite(n) ? Math.round(n).toLocaleString("en-GB") : "—";
+      });
+    } catch (_err) {
+      leaveDash();
+    }
+  }
+
+  loadHerdSummary();
 })();
 </script>
 {% endif %}

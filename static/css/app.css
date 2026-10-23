@@ -593,10 +593,13 @@ html, body {
   color: var(--muted);
 }
 
-.home-production .home-widget {
+.home-production .home-widget,
+#home-fertility .home-widget,
+#home-health .home-widget {
   min-width: 6.75rem;
   flex: 1 1 6.75rem;
   max-width: 10rem;
+  min-height: 7.15rem;
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
 }
@@ -616,7 +619,9 @@ html, body {
 }
 
 @media (max-width: 560px) {
-  .home-production .home-widget {
+  .home-production .home-widget,
+  #home-fertility .home-widget,
+  #home-health .home-widget {
     max-width: none;
   }
 }
