@@ -215,33 +215,36 @@ def _sale_values_match(row: CattleSaleLine, record: dict[str, Any]) -> bool:
 
 def _upsert(
     db: Session,
-    parsed_by_key: dict[tuple[str, str, dt.date, bool], dict[str, Any]],
+    parsed_by_key: dict[tuple[str, bool], dict[str, Any]],
 ) -> tuple[int, int]:
     if not parsed_by_key:
         return (0, 0)
 
-    farms = {key[0] for key in parsed_by_key}
-    etags = {key[1] for key in parsed_by_key}
+    etags = {key[0] for key in parsed_by_key}
     existing_rows = db.scalars(
-        select(CattleSaleLine).where(
-            CattleSaleLine.farm.in_(farms),
-            CattleSaleLine.etag.in_(etags),
-        )
+        select(CattleSaleLine).where(CattleSaleLine.etag.in_(etags))
     ).all()
-    existing_by_key = {
-        (row.farm, row.etag, row.sale_date, bool(row.is_bonus)): row
-        for row in existing_rows
-    }
+    existing_by_key: dict[tuple[str, bool], CattleSaleLine] = {}
+    for row in existing_rows:
+        key = (row.etag, bool(row.is_bonus))
+        current = existing_by_key.get(key)
+        if current is None or (row.id or 0) > (current.id or 0):
+            existing_by_key[key] = row
 
     inserted = 0
     updated = 0
     for key, record in parsed_by_key.items():
         row = existing_by_key.get(key)
         if row is None:
-            db.add(CattleSaleLine(**record))
+            row = CattleSaleLine(**record)
+            db.add(row)
+            existing_by_key[key] = row
             inserted += 1
             continue
-        if _sale_values_match(row, record):
+        identity_changed = (
+            row.farm != record.get("farm") or row.sale_date != record.get("sale_date")
+        )
+        if not identity_changed and _sale_values_match(row, record):
             if record.get("buyer") and row.buyer != record.get("buyer"):
                 row.buyer = record.get("buyer")
             message_id = record.get("source_message_id")
@@ -249,6 +252,8 @@ def _upsert(
                 row.source_message_id = message_id
             continue
         for field in (
+            "farm",
+            "sale_date",
             "cold_weight_kg",
             "reject_kg",
             "kill_date",
@@ -331,7 +336,7 @@ def _import_one_result(
 
     message_id = source.get("message_id") or "local-file"
     received_at = _as_datetime(source.get("received_at")) or dt.datetime.now()
-    parsed_by_key: dict[tuple[str, str, dt.date, bool], dict[str, Any]] = {}
+    parsed_by_key: dict[tuple[str, bool], dict[str, Any]] = {}
     buyer = result.get("buyer") or "Pickstock"
     for line in lines:
         line_sale_date = _as_date(line.get("kill_date")) or sale_date
@@ -348,7 +353,7 @@ def _import_one_result(
             summary["warnings"].append(f"{source_file}: could not determine farm for {etag}")
             continue
         is_bonus = _is_warrendale_bonus_line(buyer, line["amount_gbp"])
-        parsed_by_key[(line_farm, etag, line_sale_date, is_bonus)] = {
+        parsed_by_key[(etag, is_bonus)] = {
             "farm": line_farm,
             "etag": etag,
             "sale_date": line_sale_date,

@@ -1,7 +1,7 @@
 """Parse Pickstock Telford FPF remittance PDFs.
 
 Each remittance lists sold animals with ear tag, cold weight (kg), kill date,
-and amount (£). Farm is inferred from the vendor / delivery name.
+and amount (£). Farm comes from the dashed vendor line under the VAT number.
 """
 
 from __future__ import annotations
@@ -23,11 +23,15 @@ _KILL_DATE_RE = re.compile(
 )
 _NUMBER_RE = re.compile(r"-?[\d,]+(?:\.\d+)?")
 _FARM_MARKERS: tuple[tuple[str, str], ...] = (
+    ("THE PARKES", "PRK"),
     ("ASTON LOWER HALL", "ALH"),
     ("BANK FARM", "BNK"),
     ("PARK HALL", "SFR"),
-    ("THE PARKES", "PRK"),
     ("CHERRY ORCHARD", "COF"),
+)
+_VENDOR_LINE_RE = re.compile(
+    r"M\s*J\s*&\s*M\s*C\s*THOMASSON\s*-\s*(.+)",
+    re.IGNORECASE,
 )
 
 
@@ -66,6 +70,26 @@ def _parse_kill_date(text: str) -> dt.date | None:
     return None
 
 
+def _farm_from_site(site: str) -> str | None:
+    for marker, farm in _FARM_MARKERS:
+        if marker in site:
+            return farm
+    return None
+
+
+def _farm_from_vendor_line(text: str) -> str | None:
+    """The herd is the site after the dash, not the postal address."""
+    for raw_line in (text or "").splitlines():
+        match = _VENDOR_LINE_RE.search(raw_line)
+        if match is None:
+            continue
+        site = re.sub(r"\s+", " ", match.group(1)).strip().upper()
+        farm = _farm_from_site(site)
+        if farm:
+            return farm
+    return None
+
+
 def _farm_from_text(text: str, source_file: str | None) -> str | None:
     haystack = f"{source_file or ''}\n{text}".upper()
     for marker, farm in _FARM_MARKERS:
@@ -75,6 +99,14 @@ def _farm_from_text(text: str, source_file: str | None) -> str | None:
         if re.search(rf"\b{farm}\b", haystack):
             return farm
     return None
+
+
+def _pickstock_farm(
+    text: str,
+    source_file: str | None,
+    mailbox_farm: str | None,
+) -> str | None:
+    return _farm_from_vendor_line(text) or mailbox_farm or _farm_from_text(text, source_file)
 
 
 def _parse_animal_row(line: str) -> dict[str, Any] | None:
@@ -138,7 +170,7 @@ def parse_pickstock_pdf(
     name = (source_file or "").lower()
     if "kill sheet" in text.lower() or name.startswith("lot summary"):
         return {
-            "farm": mailbox_farm or _farm_from_text(text, source_file),
+            "farm": _pickstock_farm(text, source_file, mailbox_farm),
             "sale_date": None,
             "lines": [],
             "warnings": [
@@ -151,7 +183,7 @@ def parse_pickstock_pdf(
         warnings.append("PDF does not look like a Pickstock remittance")
 
     sale_date = _parse_kill_date(text)
-    farm = mailbox_farm or _farm_from_text(text, source_file)
+    farm = _pickstock_farm(text, source_file, mailbox_farm)
 
     lines: list[dict[str, Any]] = []
     seen: set[str] = set()

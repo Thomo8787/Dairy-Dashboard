@@ -285,11 +285,9 @@ class CattleSaleLine(Base):
     __tablename__ = "cattle_sale_lines"
     __table_args__ = (
         UniqueConstraint(
-            "farm",
             "etag",
-            "sale_date",
             "is_bonus",
-            name="uq_cattle_sale_farm_etag_date_bonus",
+            name="uq_cattle_sale_etag_bonus",
         ),
     )
 
@@ -833,26 +831,51 @@ def _ensure_herd_inventory_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+_CATTLE_SALE_ETAG_KEY = {"etag", "is_bonus"}
+_CATTLE_SALE_OLD_KEYS = (
+    {"farm", "etag", "sale_date", "is_bonus"},
+    {"farm", "etag", "sale_date"},
+)
+
+
 def _cattle_sale_unique_sets(inspector) -> tuple[bool, list[str], list[str]]:
-    """Return whether the bonus unique key exists, plus old constraint and index names."""
+    """Return whether the ear-tag key exists, plus older constraint and index names."""
     has_new = False
     old_constraints: list[str] = []
     old_indexes: list[str] = []
     for constraint in inspector.get_unique_constraints("cattle_sale_lines"):
         columns = {name for name in (constraint.get("column_names") or []) if name}
-        if columns == {"farm", "etag", "sale_date", "is_bonus"}:
+        if columns == _CATTLE_SALE_ETAG_KEY:
             has_new = True
-        elif columns == {"farm", "etag", "sale_date"} and constraint.get("name"):
+        elif columns in _CATTLE_SALE_OLD_KEYS and constraint.get("name"):
             old_constraints.append(constraint["name"])
     for index in inspector.get_indexes("cattle_sale_lines"):
         if not index.get("unique"):
             continue
         columns = {name for name in (index.get("column_names") or []) if name}
-        if columns == {"farm", "etag", "sale_date", "is_bonus"}:
+        if columns == _CATTLE_SALE_ETAG_KEY:
             has_new = True
-        elif columns == {"farm", "etag", "sale_date"} and index.get("name"):
+        elif columns in _CATTLE_SALE_OLD_KEYS and index.get("name"):
             old_indexes.append(index["name"])
     return has_new, old_constraints, old_indexes
+
+
+def _collapse_cattle_sale_etag_rows(conn) -> None:
+    """Keep the newest row for each ear tag and bonus flag."""
+    conn.execute(
+        text(
+            """
+            DELETE FROM cattle_sale_lines
+            WHERE id NOT IN (
+                SELECT keep_id FROM (
+                    SELECT MAX(id) AS keep_id
+                    FROM cattle_sale_lines
+                    GROUP BY etag, is_bonus
+                ) AS kept
+            )
+            """
+        )
+    )
 
 
 def _rebuild_sqlite_cattle_sale_lines(conn) -> None:
@@ -886,7 +909,7 @@ def _rebuild_sqlite_cattle_sale_lines(conn) -> None:
 
 
 def _ensure_cattle_sale_bonus_key(engine) -> None:
-    """Let a Warrendale £80 bonus share a collection date with the calf price.
+    """Keep one sale row per ear tag, plus a separate £80 bonus row.
 
     create_all does not add columns or replace unique keys on an existing table.
     """
@@ -913,6 +936,7 @@ def _ensure_cattle_sale_bonus_key(engine) -> None:
                 "AND ABS(amount_gbp - 80) < 0.005"
             )
         )
+        _collapse_cattle_sale_etag_rows(conn)
         if has_new and not old_constraints and not old_indexes:
             return
         if dialect == "postgresql":
@@ -926,8 +950,8 @@ def _ensure_cattle_sale_bonus_key(engine) -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE cattle_sale_lines "
-                        "ADD CONSTRAINT uq_cattle_sale_farm_etag_date_bonus "
-                        "UNIQUE (farm, etag, sale_date, is_bonus)"
+                        "ADD CONSTRAINT uq_cattle_sale_etag_bonus "
+                        "UNIQUE (etag, is_bonus)"
                     )
                 )
             return
