@@ -708,6 +708,7 @@
 
     let rowByKey = new Map();
     let tableEventsBound = false;
+    let shiftRangeClick = false;
 
     function rebuildRowIndex() {
       rowByKey = new Map(rows.map(row => [rowKey(row), row]));
@@ -747,6 +748,7 @@
         const anchor = lastSelectIndex;
         if (index < 0 || anchor == null || anchor < 0 || anchor >= rows.length || anchor === index) return;
         event.preventDefault();
+        shiftRangeClick = true;
         const checked = !input.checked;
         const start = Math.min(anchor, index);
         const end = Math.max(anchor, index);
@@ -759,11 +761,17 @@
       });
       body.addEventListener("click", event => {
         const input = event.target;
-        if (event.shiftKey || !isRowTick(input)) return;
+        if (event.shiftKey && isRowTick(input)) {
+          event.preventDefault();
+          setTimeout(() => { shiftRangeClick = false; }, 0);
+          return;
+        }
+        if (!isRowTick(input)) return;
         const index = rows.findIndex(row => rowKey(row) === decodeURIComponent(input.dataset.key));
         if (index >= 0) lastSelectIndex = index;
       });
       body.addEventListener("change", event => {
+        if (shiftRangeClick) return;
         const input = event.target;
         if (!input.matches(".row-select, .row-paid")) return;
         const key = decodeURIComponent(input.dataset.key);
