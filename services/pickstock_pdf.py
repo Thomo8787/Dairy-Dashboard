@@ -92,11 +92,9 @@ def _parse_animal_row(line: str) -> dict[str, Any] | None:
         return None
 
     amount = numbers[-1]
-    # Typical Pickstock tail: Hot, Rebate, Cold, Cond, p/Kg, Value
-    if len(numbers) >= 6:
-        cold_weight = numbers[-4]
-        reject_kg = 0.0
-    elif len(numbers) >= 4:
+    # Paid weight is the third figure from the end: Weight, p/Kg, Value.
+    # A condemned weight sits just before that and must not be used.
+    if len(numbers) >= 4:
         cold_weight = numbers[-3]
         reject_kg = 0.0
     else:
