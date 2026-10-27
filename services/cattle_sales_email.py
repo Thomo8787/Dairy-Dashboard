@@ -16,7 +16,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from services.blade_pdf import looks_like_blade_pdf
 from services.cattle_sale_pdf import extract_pdf_text
@@ -382,3 +382,34 @@ class CattleSalePdfEmailService:
                 top=top,
             )
         )
+
+
+def _outlook_web_link(value: str | None) -> str | None:
+    link = (value or "").strip()
+    parsed = urlparse(link)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https":
+        return None
+    if host == "outlook.office.com" or host.endswith(".outlook.office.com"):
+        return link
+    if host in {"outlook.office365.com", "outlook.live.com"}:
+        return link
+    return None
+
+
+def outlook_message_web_link(message_id: str) -> str | None:
+    """Outlook address that opens one imported remittance message."""
+    if not outlook_cattle_sales_configured():
+        return None
+    cleaned = (message_id or "").strip()
+    if not cleaned:
+        return None
+    try:
+        service = CattleSalePdfEmailService()
+        root = service._mailbox_root()
+        encoded = quote(cleaned, safe="")
+        message = graph_get(f"{GRAPH_BASE}/{root}/messages/{encoded}?$select=webLink")
+    except Exception:
+        logger.exception("Could not open cattle-sale message")
+        return None
+    return _outlook_web_link(message.get("webLink"))

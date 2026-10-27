@@ -35,7 +35,11 @@ from services.events_common import (
 )
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
 from services.cattle_sales import list_cattle_sales
-from services.cattle_sales_email import CATTLE_SALES_LOOKBACK_DAYS, outlook_cattle_sales_configured
+from services.cattle_sales_email import (
+    CATTLE_SALES_LOOKBACK_DAYS,
+    outlook_cattle_sales_configured,
+    outlook_message_web_link,
+)
 from services.cattle_sales_import import (
     import_cattle_sale_sources,
     sync_outlook_cattle_sales,
@@ -45,6 +49,7 @@ from services.sales_payments import (
     list_dest_filter_options as list_sales_dest_filter_options,
     list_sales_payments,
     normalize_sales_reasons,
+    sale_has_outlook_message,
     unarchive_payments,
 )
 from services.births_report import build_births_report
@@ -524,6 +529,29 @@ def office_stock_valuations():
 @permission_required("perm_office")
 def office_purchases():
     return _render_office_placeholder("office_purchases", "Purchases")
+
+
+def _remittance_email_unavailable() -> Response:
+    return Response(
+        "<!doctype html><meta charset=\"utf-8\"><title>Email</title>"
+        "<p>This email could not be opened.</p>",
+        status=404,
+        mimetype="text/html",
+    )
+
+
+@app.route("/office/api/sales-payments/email")
+@permission_required("perm_office")
+def office_api_sales_payment_email():
+    message_id = (request.args.get("message_id") or "").strip()
+    with get_session() as session:
+        known = sale_has_outlook_message(session, message_id)
+    if not known:
+        return _remittance_email_unavailable()
+    link = outlook_message_web_link(message_id)
+    if not link:
+        return _remittance_email_unavailable()
+    return redirect(link)
 
 
 @app.route("/office/api/sales-payments")

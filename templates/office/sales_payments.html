@@ -891,8 +891,13 @@
       const links = docs.map(doc => {
         const label = escapeHtml(doc.label || "");
         const file = escapeHtml(doc.file || doc.label || "");
-        const query = encodeURIComponent(doc.label || "");
-        return `<a class="doc-link" href="https://outlook.office.com/mail/0/search?q=${query}" target="_blank" rel="noopener" title="${file}">${label}</a>`;
+        const messageId = doc.message_id || "";
+        if (!messageId) {
+          return `<span title="${file}">${label}</span>`;
+        }
+        const href = "/office/api/sales-payments/email?message_id="
+          + encodeURIComponent(messageId);
+        return `<a class="doc-link" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${file}">${label}</a>`;
       });
       return `<span class="doc-links">${links.join("")}</span>`;
     }

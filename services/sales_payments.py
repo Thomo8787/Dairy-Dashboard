@@ -304,6 +304,32 @@ def _load_cattle_sale_lines_by_farm_etag(
 _PO_NUMBER_RE = re.compile(r"(PO\d{2}-\d+)", re.IGNORECASE)
 
 
+_PLACEHOLDER_MESSAGE_IDS = frozenset({"local-file", "outlook"})
+
+
+def _outlook_message_id(value: str | None) -> str | None:
+    """Graph message id. Uploads and disk imports have no mailbox message."""
+    message_id = (value or "").strip()
+    if not message_id or message_id in _PLACEHOLDER_MESSAGE_IDS:
+        return None
+    if message_id.lower().startswith("upload:"):
+        return None
+    return message_id
+
+
+def sale_has_outlook_message(db: Session, message_id: str | None) -> bool:
+    """True when this Graph id is stored on a cattle sale line."""
+    cleaned = _outlook_message_id(message_id)
+    if cleaned is None:
+        return False
+    found = db.scalar(
+        select(CattleSaleLine.id)
+        .where(CattleSaleLine.source_message_id == cleaned)
+        .limit(1)
+    )
+    return found is not None
+
+
 def _document_from_filename(source_file: str | None) -> dict[str, str] | None:
     """Short document number from a remittance PDF name, plus the full name."""
     name = (source_file or "").strip()
@@ -317,14 +343,19 @@ def _document_from_filename(source_file: str | None) -> dict[str, str] | None:
     return {"label": label, "file": name}
 
 
-def _documents_for_files(*names: str | None) -> list[dict[str, str]]:
+def _documents_for_files(
+    *items: tuple[str | None, str | None],
+) -> list[dict[str, str]]:
     documents: list[dict[str, str]] = []
     seen: set[str] = set()
-    for name in names:
+    for name, message_id in items:
         document = _document_from_filename(name)
         if document is None or document["label"] in seen:
             continue
         seen.add(document["label"])
+        outlook_id = _outlook_message_id(message_id)
+        if outlook_id:
+            document["message_id"] = outlook_id
         documents.append(document)
     return documents
 
@@ -383,6 +414,12 @@ def _warrendale_split_match(
         "warrendale_split": True,
         "source_file": calf_line.source_file if calf_line is not None else None,
         "bonus_source_file": bonus_line.source_file if bonus_line is not None else None,
+        "source_message_id": (
+            calf_line.source_message_id if calf_line is not None else None
+        ),
+        "bonus_source_message_id": (
+            bonus_line.source_message_id if bonus_line is not None else None
+        ),
     }
 
 
@@ -454,6 +491,8 @@ def _closest_sale_match(
         "warrendale_split": False,
         "source_file": best_line.source_file,
         "bonus_source_file": None,
+        "source_message_id": best_line.source_message_id,
+        "bonus_source_message_id": None,
     }
 
 
@@ -786,7 +825,9 @@ def _unmatched_remittance_rows(
                 dairycomp_farm=other_farm,
                 farm_sold=other_farm or "",
                 farm_paid=line.farm,
-                documents=_documents_for_files(line.source_file),
+                documents=_documents_for_files(
+                    (line.source_file, line.source_message_id)
+                ),
             )
         )
     return extra
@@ -1049,8 +1090,14 @@ def list_sales_payments(
                 ),
                 farm_paid=farm if sale_match is not None else "",
                 documents=_documents_for_files(
-                    sale_match.get("source_file") if sale_match else None,
-                    sale_match.get("bonus_source_file") if sale_match else None,
+                    (
+                        sale_match.get("source_file") if sale_match else None,
+                        sale_match.get("source_message_id") if sale_match else None,
+                    ),
+                    (
+                        sale_match.get("bonus_source_file") if sale_match else None,
+                        sale_match.get("bonus_source_message_id") if sale_match else None,
+                    ),
                 ),
             )
         )
