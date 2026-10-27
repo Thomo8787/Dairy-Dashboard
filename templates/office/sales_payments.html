@@ -233,6 +233,14 @@
       text-align: left;
       white-space: nowrap;
     }
+    .farm-paid-cell { display: inline-flex; align-items: center; gap: 0.2rem; }
+    .farm-paid-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.35rem; height: 1.35rem;
+      font-size: 1.05rem; font-weight: 700; line-height: 1;
+    }
+    .farm-paid-mark.ok { color: #15803d; }
+    .farm-paid-mark.bad { color: #b91c1c; }
     #sales-payments-table thead th {
       background: #1e3a5f;
       color: #fff;
@@ -808,7 +816,8 @@
         <tr>
           ${selectCol}
           <th>ID</th>
-          <th>Farm</th>
+          <th>Farm Sold</th>
+          <th>Farm Paid</th>
           <th>ETAG</th>
           <th>Age (mo)</th>
           <th>Gender</th>
@@ -882,14 +891,19 @@
           hasAmount ? "row-has-amount" : "",
           highlightEtag && row.etag === highlightEtag ? "row-highlight" : "",
         ].filter(Boolean).join(" ");
-        const farmNote = row.dairycomp_farm
-          ? ' <span title="Sold on DairyComp ' + row.dairycomp_farm + '. Payment PDF is a different farm; accounts need an internal transfer." style="color:#b45309">DairyComp ' + row.dairycomp_farm + '</span>'
-          : "";
+        const paidName = (row.farm_paid || "").trim();
+        const farmMark = row.farms_match
+          ? '<span class="farm-paid-mark ok" title="Farms match" aria-label="Farms match">✓</span>'
+          : '<span class="farm-paid-mark bad" title="Farms differ" aria-label="Farms differ">✕</span>';
+        const farmPaidCell = paidName
+          ? `<span class="farm-paid-cell">${paidName}${farmMark}</span>`
+          : farmMark;
         return `
           <tr class="${rowClasses}" data-key="${encodeURIComponent(key)}">
             ${selectCell}
-            <td>${row.cow_id || "—"}${farmNote}</td>
-            <td>${row.farm || "—"}</td>
+            <td>${row.cow_id || "—"}</td>
+            <td>${row.farm_sold || "—"}</td>
+            <td>${farmPaidCell}</td>
             <td>${row.etag || "—"}</td>
             <td>${row.age_months != null ? row.age_months : "—"}</td>
             <td>${row.gender || "—"}</td>

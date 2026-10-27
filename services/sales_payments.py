@@ -459,13 +459,20 @@ def _row_to_dict(
     warrendale_split: bool = False,
     confirm_part: str | None = None,
     dairycomp_farm: str | None = None,
+    farm_sold: str | None = None,
+    farm_paid: str | None = None,
 ) -> dict[str, Any]:
     normalized_cow_id = _normalize_key_part(cow_id)
     normalized_etag = _normalize_key_part(etag)
     gender = _format_gender(gndr)
     age_months = _age_months_at_sale(bdat, event_date)
+    sold_name = (farm if farm_sold is None else farm_sold).strip()
+    paid_name = (farm_paid or "").strip()
     return {
         "farm": farm,
+        "farm_sold": sold_name,
+        "farm_paid": paid_name,
+        "farms_match": bool(sold_name) and sold_name.upper() == paid_name.upper(),
         "cow_id": normalized_cow_id,
         "etag": normalized_etag,
         "gender": gender,
@@ -742,6 +749,8 @@ def _unmatched_remittance_rows(
                     bonus_paid=False,
                 ),
                 dairycomp_farm=other_farm,
+                farm_sold=other_farm or "",
+                farm_paid=line.farm,
             )
         )
     return extra
@@ -1002,6 +1011,7 @@ def list_sales_payments(
                     amount_paid=amount_paid,
                     bonus_paid=bonus_paid,
                 ),
+                farm_paid=farm if sale_match is not None else "",
             )
         )
 
