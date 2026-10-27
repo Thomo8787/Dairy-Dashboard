@@ -630,7 +630,8 @@ def _unmatched_remittance_rows(
     """Show PDF rows that are not already listed as a sold event on that farm.
 
     A sold event on another herd supplies the cow ID, age, and gender. The row
-    stays on the PDF farm.
+    stays on the PDF farm. An ear tag that has already been archived as paid
+    stays out of Active.
     """
     query = select(CattleSaleLine).where(CattleSaleLine.farm.in_(farms))
     search_id = _normalize_key_part(cow_id)
@@ -681,10 +682,11 @@ def _unmatched_remittance_rows(
                     bounded=False,
                 ),
             )
+    archived_etags = _archived_payment_etags(db) if sale_lines else set()
     extra: list[dict[str, Any]] = []
     for line in sale_lines:
         etag = normalize_etag(line.etag)
-        if not etag or (line.farm, etag) in shown_farm_etags:
+        if not etag or etag in archived_etags or (line.farm, etag) in shown_farm_etags:
             continue
         buyer = (line.buyer or "").strip()
         if not _dests_match(buyer, dest):
@@ -743,6 +745,21 @@ def _unmatched_remittance_rows(
             )
         )
     return extra
+
+
+def _archived_payment_etags(db: Session) -> set[str]:
+    """Ear tags whose sale has been archived as paid."""
+    archived: set[str] = set()
+    for etag in db.scalars(
+        select(SalesPaymentRecord.etag).where(
+            SalesPaymentRecord.archived_at.isnot(None),
+            SalesPaymentRecord.etag.isnot(None),
+        )
+    ).all():
+        normalized = normalize_etag(etag)
+        if normalized:
+            archived.add(normalized)
+    return archived
 
 
 def _apply_status_filter(query, status: str):
