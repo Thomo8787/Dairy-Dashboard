@@ -241,6 +241,8 @@
     }
     .farm-paid-mark.ok { color: #15803d; }
     .farm-paid-mark.bad { color: #b91c1c; }
+    a.doc-link { color: #1d4ed8; text-decoration: underline; }
+    .doc-links { display: flex; flex-direction: column; gap: 0.15rem; }
     #sales-payments-table thead th {
       background: #1e3a5f;
       color: #fff;
@@ -823,6 +825,7 @@
           <th>Gender</th>
           <th>Date sold</th>
           <th>DEST</th>
+          <th>Document</th>
           <th>Reason</th>
           <th class="amount-cell">Amount (£)</th>
           <th class="bonus-col">Bonus (£)</th>
@@ -874,6 +877,26 @@
       updateActionBar();
     }
 
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function documentLinks(row) {
+      const docs = Array.isArray(row.documents) ? row.documents : [];
+      if (!docs.length) return "—";
+      const links = docs.map(doc => {
+        const label = escapeHtml(doc.label || "");
+        const file = escapeHtml(doc.file || doc.label || "");
+        const query = encodeURIComponent(doc.label || "");
+        return `<a class="doc-link" href="https://outlook.office.com/mail/0/search?q=${query}" target="_blank" rel="noopener" title="${file}">${label}</a>`;
+      });
+      return `<span class="doc-links">${links.join("")}</span>`;
+    }
+
     function renderTableBody() {
       const body = document.getElementById("table-body");
       const showPaidCol = currentStatus === "active" && CAN_EDIT;
@@ -909,6 +932,7 @@
             <td>${row.gender || "—"}</td>
             <td>${fmtDate(row.event_date)}</td>
             <td>${row.dest || "—"}</td>
+            <td>${documentLinks(row)}</td>
             <td><span class="reason-pill reason-pill-${row.sales_reason}">${row.sales_reason}</span></td>
             <td class="amount-cell">${formatAmountCell(row)}${row.amount_paid ? paidTick() : ""}${partCheckbox(row, "amount")}${partCheckbox(row, "both")}</td>
             <td class="bonus-cell bonus-col">${row.bonus_gbp != null ? `£${fmtNum(row.bonus_gbp)}` : "—"}${row.bonus_paid ? paidTick() : ""}${partCheckbox(row, "bonus")}</td>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Any
 
 from sqlalchemy import and_, case, exists, func, literal, or_, select
@@ -300,6 +301,34 @@ def _load_cattle_sale_lines_by_farm_etag(
     return grouped
 
 
+_PO_NUMBER_RE = re.compile(r"(PO\d{2}-\d+)", re.IGNORECASE)
+
+
+def _document_from_filename(source_file: str | None) -> dict[str, str] | None:
+    """Short document number from a remittance PDF name, plus the full name."""
+    name = (source_file or "").strip()
+    if not name:
+        return None
+    stem = name[:-4] if name.lower().endswith(".pdf") else name
+    match = _PO_NUMBER_RE.search(name)
+    label = match.group(1).upper() if match else stem.strip()
+    if not label:
+        return None
+    return {"label": label, "file": name}
+
+
+def _documents_for_files(*names: str | None) -> list[dict[str, str]]:
+    documents: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for name in names:
+        document = _document_from_filename(name)
+        if document is None or document["label"] in seen:
+            continue
+        seen.add(document["label"])
+        documents.append(document)
+    return documents
+
+
 def _is_warrendale_bonus(amount: float | None) -> bool:
     if amount is None:
         return False
@@ -352,6 +381,8 @@ def _warrendale_split_match(
         "has_sale_amount": has_sale_amount,
         "buyer": BUYER_WARRENDALE,
         "warrendale_split": True,
+        "source_file": calf_line.source_file if calf_line is not None else None,
+        "bonus_source_file": bonus_line.source_file if bonus_line is not None else None,
     }
 
 
@@ -421,6 +452,8 @@ def _closest_sale_match(
         "has_sale_amount": has_sale_amount,
         "buyer": (best_line.buyer or "").strip(),
         "warrendale_split": False,
+        "source_file": best_line.source_file,
+        "bonus_source_file": None,
     }
 
 
@@ -461,6 +494,7 @@ def _row_to_dict(
     dairycomp_farm: str | None = None,
     farm_sold: str | None = None,
     farm_paid: str | None = None,
+    documents: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     normalized_cow_id = _normalize_key_part(cow_id)
     normalized_etag = _normalize_key_part(etag)
@@ -491,6 +525,7 @@ def _row_to_dict(
         "paid_at": paid_at.isoformat() if paid_at else None,
         "archived_at": archived_at.isoformat() if archived_at else None,
         "dairycomp_farm": dairycomp_farm,
+        "documents": documents or [],
         "payment_key": {
             "farm": farm,
             "cow_id": normalized_cow_id,
@@ -751,6 +786,7 @@ def _unmatched_remittance_rows(
                 dairycomp_farm=other_farm,
                 farm_sold=other_farm or "",
                 farm_paid=line.farm,
+                documents=_documents_for_files(line.source_file),
             )
         )
     return extra
@@ -1012,6 +1048,10 @@ def list_sales_payments(
                     bonus_paid=bonus_paid,
                 ),
                 farm_paid=farm if sale_match is not None else "",
+                documents=_documents_for_files(
+                    sale_match.get("source_file") if sale_match else None,
+                    sale_match.get("bonus_source_file") if sale_match else None,
+                ),
             )
         )
 
