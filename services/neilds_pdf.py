@@ -56,7 +56,7 @@ def looks_like_neilds_pdf(text: str, source_file: str | None = None) -> bool:
     if "nield" in haystack or "enield" in haystack:
         return True
     name = (source_file or "").lower()
-    if name.startswith("t13") or "t13-statement" in name:
+    if name.startswith(("t13", "f4", "t28", "t59")):
         return True
     return "seller remittance" in haystack and "thomasson" in haystack
 
