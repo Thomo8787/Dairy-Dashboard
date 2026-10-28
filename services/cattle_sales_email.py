@@ -4,7 +4,7 @@ Neilds: auctionmarts.com
 Pickstock: pickstocktelford.co.uk
 Gamechanger: gamechangerfarming.com
 Market Drayton: barbers-auctions.co.uk
-Mold: jbradburne-price.co.uk when the subject or message contains
+Mold: contact@jbradburneprice.com when the subject or message contains
 Mold Stock Sale.
 Warrendale: messaging-service@post.xero.com when the subject contains
 Self-bill and Warrendale.
@@ -49,7 +49,7 @@ _SENDER_DOMAINS: tuple[tuple[str, str], ...] = (
     ("barbers-auctions.co.uk", "market_drayton"),
 )
 _WARRENDALE_SENDER = "messaging-service@post.xero.com"
-_MOLD_SENDER_DOMAIN = "jbradburne-price.co.uk"
+_MOLD_SENDER_DOMAIN = "contact@jbradburneprice.com"
 _MOLD_SALE_PHRASE = "mold stock sale"
 
 
@@ -97,7 +97,7 @@ def _is_warrendale_subject(subject: str | None) -> bool:
 
 def _is_mold_message(address: str, subject: str | None, body: str | None) -> bool:
     """Mold stock sale. The auctioneer's town is also Mold, so the sale name is required."""
-    if _MOLD_SENDER_DOMAIN not in (address or "").lower():
+    if (address or "").strip().lower() != _MOLD_SENDER_DOMAIN:
         return False
     haystack = f"{subject or ''}\n{body or ''}".lower()
     return _MOLD_SALE_PHRASE in haystack
@@ -184,7 +184,7 @@ class CattleSalePdfEmailService:
             f"from/emailAddress/address eq '{_WARRENDALE_SENDER}' "
             "and contains(subject,'Self-bill') and contains(subject,'Warrendale')"
         )
-        mold_clause = f"contains(from/emailAddress/address,'{_MOLD_SENDER_DOMAIN}')"
+        mold_clause = f"from/emailAddress/address eq '{_MOLD_SENDER_DOMAIN}'"
         return (
             f"receivedDateTime ge {since_iso} and hasAttachments eq true "
             f"and ({domain_clause} or ({warrendale_clause}) or ({mold_clause}))"
