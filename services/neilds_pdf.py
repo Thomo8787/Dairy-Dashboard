@@ -21,13 +21,13 @@ from services.farms import HERD_FARM_OPTIONS
 
 BUYER_NEILDS = "Neilds"
 
-_TAG_RE = re.compile(
-    r"(?:UK\s*[0-9A-Z]{10,15}|[A-Z]{2}\s*[0-9A-Z]{6,18})",
-    re.IGNORECASE,
-)
+_TAG_RE = re.compile(r"UK\s*[0-9A-Z]{10,15}", re.IGNORECASE)
 _DATE_RE = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b")
 _FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{8})(?!\d)")
-_NUMBER_RE = re.compile(r"-?[\d,]+\.\d{1,2}|-?\d{2,4}")
+_STATEMENT_TAIL_RE = re.compile(
+    r"\b(goods|total|deduction|disposal)\b",
+    re.IGNORECASE,
+)
 _OCR_DIGIT = str.maketrans({
     "O": "0",
     "Q": "0",
@@ -137,38 +137,6 @@ def _collection_date(text: str, source_file: str | None) -> dt.date | None:
     return max(recent)
 
 
-def _parse_weight_and_amount(text: str) -> tuple[float | None, float | None]:
-    low = text.lower()
-    weight = None
-    amount = None
-
-    wt_match = re.search(r"([\d,]+\.\d+)\s*(?:kg|wt)\b", low)
-    if wt_match:
-        weight = _to_float(wt_match.group(1))
-    pph_match = re.search(r"([\d,]+\.\d+)\s*pph\b", low)
-    if pph_match:
-        amount = _to_float(pph_match.group(1))
-    if amount is None:
-        goods = re.search(r"\bgoods\b[^0-9]{0,20}([\d,]+\.\d{2})", low)
-        if goods:
-            amount = _to_float(goods.group(1))
-    if amount is None:
-        values = [_to_float(m.group(0)) for m in re.finditer(r"\b[\d,]+\.\d{2}\b", text)]
-        values = [v for v in values if v is not None and 50 <= v <= 20000]
-        # Skip obvious p/kg-in-pence figures like 350.00 when a larger GR value exists.
-        large = [v for v in values if v >= 400]
-        if large:
-            amount = large[0]
-        elif values:
-            amount = values[-1]
-    if weight is None:
-        weights = [_to_float(m.group(0)) for m in re.finditer(r"\b\d{2,3}\.\d\b", text)]
-        weights = [v for v in weights if v is not None and 40 <= v <= 900]
-        if weights:
-            weight = weights[0]
-    return weight, amount
-
-
 def _repair_uk_tag(value: str | None) -> str:
     """Turn an OCR ear tag into UK plus 12 digits."""
     raw = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
@@ -212,49 +180,45 @@ def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 14.0) -> list[list
     return rows
 
 
-def _parse_statement_row(row: list[dict[str, Any]]) -> dict[str, Any] | None:
-    tokens = [word["text"] for word in sorted(row, key=lambda item: item["x"])]
-    text = " ".join(tokens)
-    if re.search(r"\b(total|goods|deduction|charges|vendor|collection)\b", text, re.IGNORECASE):
-        return None
-    tag_at = None
-    etag = ""
-    for index, token in enumerate(tokens):
-        repaired = _repair_uk_tag(token)
-        if repaired:
-            tag_at = index
-            etag = repaired
-            break
-        nxt = tokens[index + 1] if index + 1 < len(tokens) else ""
-        if token.upper().startswith("U") and nxt:
-            repaired = _repair_uk_tag(token + nxt)
-            if repaired:
-                tag_at = index + 1
-                etag = repaired
-                break
-    if not etag or tag_at is None:
-        return None
-
+def _decimal_numbers(text: str) -> list[tuple[str, float]]:
     numbers: list[tuple[str, float]] = []
-    for token in tokens[tag_at + 1 :]:
-        for match in re.finditer(r"(\d+)\.(\d{1,2})", token):
-            whole, frac = match.group(1), match.group(2)
-            # A collection date glued to the weight reads as 24/08/24213.1.
-            if len(frac) == 1 and len(whole) > 3:
-                whole = whole[-3:]
-            elif len(whole) > 4:
-                whole = whole[-4:]
-            literal = f"{int(whole)}.{frac}"
-            value = _to_float(literal)
-            if value is not None:
-                numbers.append((literal, value))
+    for match in re.finditer(r"(\d+)\.(\d{1,2})", text):
+        whole, frac = match.group(1), match.group(2)
+        # A collection date glued to the weight reads as 24/08/24213.1.
+        if len(frac) == 1 and len(whole) > 3:
+            whole = whole[-3:]
+        elif len(whole) > 4:
+            whole = whole[-4:]
+        literal = f"{int(whole)}.{frac}"
+        value = _to_float(literal)
+        if value is not None:
+            numbers.append((literal, value))
+    return numbers
+
+
+def _animal_line(etag: str, numbers: list[tuple[str, float]]) -> dict[str, Any] | None:
+    """Paid row uses its own GR VALUE. No price, with a carcass weight, is Rejected."""
     money = [
         (token, value)
         for token, value in numbers
         if re.fullmatch(r"\d+\.\d{2}", token) and 20 <= value <= 20000
     ]
     if not money:
-        return None
+        weight = None
+        for token, value in reversed(numbers):
+            if re.fullmatch(r"\d+\.\d", token) and 50 <= value <= 900:
+                weight = value
+                break
+        if weight is None:
+            return None
+        weight = round(float(weight), 2)
+        return {
+            "etag": etag,
+            "cold_weight_kg": weight,
+            "amount_gbp": 0.0,
+            "reject_kg": weight,
+            "is_rejected": True,
+        }
     amount_index = max(
         index
         for index, (token, value) in enumerate(numbers)
@@ -279,6 +243,59 @@ def _parse_statement_row(row: list[dict[str, Any]]) -> dict[str, Any] | None:
         "reject_kg": 0.0,
         "is_rejected": False,
     }
+
+
+def _parse_statement_row(row: list[dict[str, Any]]) -> dict[str, Any] | None:
+    tokens = [word["text"] for word in sorted(row, key=lambda item: item["x"])]
+    text = " ".join(tokens)
+    if re.search(r"\b(total|goods|deduction|charges|vendor|collection)\b", text, re.IGNORECASE):
+        return None
+    tag_at = None
+    etag = ""
+    for index, token in enumerate(tokens):
+        repaired = _repair_uk_tag(token)
+        if repaired:
+            tag_at = index
+            etag = repaired
+            break
+        nxt = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if token.upper().startswith("U") and nxt:
+            repaired = _repair_uk_tag(token + nxt)
+            if repaired:
+                tag_at = index + 1
+                etag = repaired
+                break
+    if not etag or tag_at is None:
+        return None
+    return _animal_line(etag, _decimal_numbers(" ".join(tokens[tag_at + 1 :])))
+
+
+def _lines_from_statement_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """One line per ear tag. Stop before the statement totals so Goods is not a price."""
+    lines: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    tag_matches = [
+        match
+        for match in _TAG_RE.finditer(text)
+        if re.fullmatch(r"[A-Z]{2}\d{8,}", repair_etag(match.group(0)) or "")
+    ]
+    for index, match in enumerate(tag_matches):
+        etag = repair_etag(match.group(0))
+        if not etag or etag in seen:
+            continue
+        seen.add(etag)
+        end = tag_matches[index + 1].start() if index + 1 < len(tag_matches) else len(text)
+        span = text[match.end() : end]
+        tail = _STATEMENT_TAIL_RE.search(span)
+        if tail:
+            span = span[: tail.start()]
+        line = _animal_line(etag, _decimal_numbers(span))
+        if line is None:
+            warnings.append(f"No amount found for {etag}")
+            continue
+        lines.append(line)
+    return lines, warnings
 
 
 def _lines_from_ocr_words(
@@ -356,42 +373,11 @@ def parse_neilds_pdf(
 
     sale_date = _collection_date(text, source_file)
     farm = mailbox_farm or _farm_from_text(text, source_file)
-    weight, amount = _parse_weight_and_amount(text)
 
-    lines: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for match in _TAG_RE.finditer(text):
-        etag = repair_etag(match.group(0))
-        if not etag or etag in seen:
-            continue
-        if not re.fullmatch(r"[A-Z]{2}\d{8,}", etag):
-            continue
-        seen.add(etag)
-        line_weight = weight
-        line_amount = amount
-        after = text[match.end() : match.end() + 80]
-        local_nums = [_to_float(n) for n in _NUMBER_RE.findall(after)]
-        local_nums = [n for n in local_nums if n is not None]
-        for num in local_nums:
-            if line_weight is None and 40 <= num <= 900:
-                line_weight = num
-            elif line_amount is None and num >= 80:
-                line_amount = num
-        if line_weight is None:
-            line_weight = 0.0
-        if line_amount is None:
-            warnings.append(f"No amount found for {etag}")
-            continue
-        lines.append(
-            {
-                "etag": etag,
-                "cold_weight_kg": round(float(line_weight), 2),
-                "amount_gbp": round(float(line_amount), 2),
-                "reject_kg": 0.0,
-                "kill_date": sale_date,
-                "is_rejected": False,
-            }
-        )
+    lines, line_warnings = _lines_from_statement_text(text)
+    warnings.extend(line_warnings)
+    for line in lines:
+        line["kill_date"] = sale_date
 
     if not lines:
         warnings.append("No sale lines extracted from PDF")
