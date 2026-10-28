@@ -27,6 +27,7 @@ from services.cattle_sales import (
 from services.database import CattleSaleLine, CowEvent
 from services.farms import HERD_FARM_OPTIONS
 from services.market_drayton_pdf import looks_like_market_drayton_pdf, parse_market_drayton_pdf
+from services.mold_pdf import looks_like_mold_pdf, parse_mold_pdf
 from services.neilds_pdf import looks_like_neilds_pdf, parse_neilds_pdf
 from services.pickstock_pdf import looks_like_pickstock_pdf, parse_pickstock_pdf
 from services.warrendale_pdf import looks_like_warrendale_pdf, parse_warrendale_pdf
@@ -40,7 +41,7 @@ QUEUE_PATH = LOCAL_SALES_DIR / "cron_queue.json"
 OCR_RESULT_PATH = LOCAL_SALES_DIR / "ocr_result.json"
 # These buyers send scanned pages. OCR runs in a fresh process so it does not
 # sit on top of the database libraries and blow the 512MB cron.
-SCANNED_PARSER_HINTS = frozenset({"neilds", "market_drayton"})
+SCANNED_PARSER_HINTS = frozenset({"neilds", "market_drayton", "mold"})
 
 
 def _parse_sale_pdf(
@@ -65,6 +66,8 @@ def _parse_sale_pdf(
         return parse_market_drayton_pdf(
             content, mailbox_farm=mailbox_farm, source_file=source_file
         )
+    if hint == "mold":
+        return parse_mold_pdf(content, mailbox_farm=mailbox_farm, source_file=source_file)
     if looks_like_warrendale_pdf(text, name) or looks_like_warrendale_pdf("", name):
         return parse_warrendale_pdf(
             content,
@@ -79,6 +82,12 @@ def _parse_sale_pdf(
         )
     if looks_like_market_drayton_pdf(text, name) or looks_like_market_drayton_pdf("", name):
         return parse_market_drayton_pdf(
+            content,
+            mailbox_farm=mailbox_farm,
+            source_file=source_file,
+        )
+    if looks_like_mold_pdf(text, name) or looks_like_mold_pdf("", name):
+        return parse_mold_pdf(
             content,
             mailbox_farm=mailbox_farm,
             source_file=source_file,

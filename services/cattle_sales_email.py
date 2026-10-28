@@ -4,6 +4,8 @@ Neilds: auctionmarts.com
 Pickstock: pickstocktelford.co.uk
 Gamechanger: gamechangerfarming.com
 Market Drayton: barbers-auctions.co.uk
+Mold: jbradburne-price.co.uk when the subject or message contains
+Mold Stock Sale.
 Warrendale: messaging-service@post.xero.com when the subject contains
 Self-bill and Warrendale.
 """
@@ -30,6 +32,7 @@ from services.graph_client import (
     require_azure_config,
 )
 from services.market_drayton_pdf import looks_like_market_drayton_pdf
+from services.mold_pdf import looks_like_mold_pdf
 from services.neilds_pdf import looks_like_neilds_pdf
 from services.pickstock_pdf import looks_like_pickstock_pdf
 
@@ -46,6 +49,8 @@ _SENDER_DOMAINS: tuple[tuple[str, str], ...] = (
     ("barbers-auctions.co.uk", "market_drayton"),
 )
 _WARRENDALE_SENDER = "messaging-service@post.xero.com"
+_MOLD_SENDER_DOMAIN = "jbradburne-price.co.uk"
+_MOLD_SALE_PHRASE = "mold stock sale"
 
 
 def _parse_received(raw: str | None) -> datetime | None:
@@ -90,7 +95,21 @@ def _is_warrendale_subject(subject: str | None) -> bool:
     return "self-bill" in text and "warrendale" in text
 
 
-def _parser_hint_for_message(address: str, subject: str | None = None) -> str | None:
+def _is_mold_message(address: str, subject: str | None, body: str | None) -> bool:
+    """Mold stock sale. The auctioneer's town is also Mold, so the sale name is required."""
+    if _MOLD_SENDER_DOMAIN not in (address or "").lower():
+        return False
+    haystack = f"{subject or ''}\n{body or ''}".lower()
+    return _MOLD_SALE_PHRASE in haystack
+
+
+def _parser_hint_for_message(
+    address: str,
+    subject: str | None = None,
+    body: str | None = None,
+) -> str | None:
+    if _is_mold_message(address, subject, body):
+        return "mold"
     if (address or "").strip().lower() == _WARRENDALE_SENDER and _is_warrendale_subject(subject):
         return "warrendale"
     return _parser_hint_for_sender(address)
@@ -119,6 +138,8 @@ def _pdf_matches_hint(content: bytes, name: str, hint: str) -> bool:
         looks = looks_like_blade_pdf
     elif hint == "market_drayton":
         looks = looks_like_market_drayton_pdf
+    elif hint == "mold":
+        looks = looks_like_mold_pdf
     else:
         return False
     if looks("", name):
@@ -163,9 +184,10 @@ class CattleSalePdfEmailService:
             f"from/emailAddress/address eq '{_WARRENDALE_SENDER}' "
             "and contains(subject,'Self-bill') and contains(subject,'Warrendale')"
         )
+        mold_clause = f"contains(from/emailAddress/address,'{_MOLD_SENDER_DOMAIN}')"
         return (
             f"receivedDateTime ge {since_iso} and hasAttachments eq true "
-            f"and ({domain_clause} or ({warrendale_clause}))"
+            f"and ({domain_clause} or ({warrendale_clause}) or ({mold_clause}))"
         )
 
     def _folder_targets(self) -> list[tuple[str, str]]:
@@ -235,7 +257,9 @@ class CattleSalePdfEmailService:
                     if not self._received_ok(message, since):
                         continue
                     if not _parser_hint_for_message(
-                        _message_sender(message), message.get("subject")
+                        _message_sender(message),
+                        message.get("subject"),
+                        message.get("bodyPreview"),
                     ):
                         continue
                     message_id = message.get("id") or ""
@@ -255,7 +279,7 @@ class CattleSalePdfEmailService:
                 "$filter": self._from_filter(since),
                 "$orderby": "receivedDateTime desc",
                 "$top": str(min(50, max(top, 1))),
-                "$select": "id,subject,receivedDateTime,from,sender,hasAttachments",
+                "$select": "id,subject,bodyPreview,receivedDateTime,from,sender,hasAttachments",
             }
         )
         url = f"{GRAPH_BASE}/{root}/mailFolders/{folder_id}/messages?{query}"
@@ -268,7 +292,7 @@ class CattleSalePdfEmailService:
                 "$filter": self._from_filter(since),
                 "$orderby": "receivedDateTime desc",
                 "$top": str(min(50, max(top, 1))),
-                "$select": "id,subject,receivedDateTime,from,sender,hasAttachments",
+                "$select": "id,subject,bodyPreview,receivedDateTime,from,sender,hasAttachments",
             }
         )
         url = f"{GRAPH_BASE}/{root}/messages?{query}"
@@ -328,7 +352,9 @@ class CattleSalePdfEmailService:
         for message in by_id.values():
             message_id = message.get("id") or ""
             hint = _parser_hint_for_message(
-                _message_sender(message), message.get("subject")
+                _message_sender(message),
+                message.get("subject"),
+                message.get("bodyPreview"),
             )
             if not hint:
                 continue

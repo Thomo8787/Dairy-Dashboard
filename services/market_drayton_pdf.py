@@ -27,7 +27,7 @@ def looks_like_market_drayton_pdf(text: str, source_file: str | None = None) -> 
     if "market drayton" in haystack or "barbers-auction" in haystack:
         return True
     name = (source_file or "").lower()
-    if name.startswith("t304") or "sellers list" in name:
+    if "sellers list" in name:
         return True
     return False
 

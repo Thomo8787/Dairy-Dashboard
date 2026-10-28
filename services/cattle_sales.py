@@ -34,6 +34,7 @@ BUYER_GAMECHANGER = "Gamechanger"
 BUYER_PICKSTOCK = "Pickstock"
 BUYER_NEILDS = "Neilds"
 BUYER_MARKET_DRAYTON = "Market Drayton"
+BUYER_MOLD = "Mold"
 BUYER_WARRENDALE = "Warrendale"
 WARRENDALE_BONUS_GBP = 80.0
 KNOWN_BUYERS: tuple[str, ...] = (
@@ -42,6 +43,7 @@ KNOWN_BUYERS: tuple[str, ...] = (
     BUYER_GAMECHANGER,
     BUYER_GAME_CHANGER,
     BUYER_MARKET_DRAYTON,
+    BUYER_MOLD,
     BUYER_WARRENDALE,
     BUYER_EUROFARM,
     BUYER_PATHWAY,
@@ -71,6 +73,8 @@ def infer_cattle_sale_buyer(
     compact = name.replace(" ", "").replace("_", "")
     if "neild" in name:
         return BUYER_NEILDS
+    if "mold stock sale" in name:
+        return BUYER_MOLD
     if "drayton" in name or "barber" in name:
         return BUYER_MARKET_DRAYTON
     if "warrendale" in name:

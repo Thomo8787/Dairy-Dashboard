@@ -44,6 +44,10 @@ def _parse(pdf_path: Path, hint: str, source_file: str) -> dict[str, Any]:
         from services.market_drayton_pdf import parse_market_drayton_pdf
 
         return parse_market_drayton_pdf(content, source_file=source_file)
+    if hint == "mold":
+        from services.mold_pdf import parse_mold_pdf
+
+        return parse_mold_pdf(content, source_file=source_file)
     from services.neilds_pdf import parse_neilds_pdf
 
     return parse_neilds_pdf(content, source_file=source_file)
