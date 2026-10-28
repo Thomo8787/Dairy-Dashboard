@@ -1462,6 +1462,66 @@ def _record_for_confirm(
     return record
 
 
+def _parse_edit_money(value: Any) -> float | None:
+    text = str(value or "").strip().replace("£", "").replace(",", "")
+    if not text:
+        return None
+    try:
+        return round(float(text), 2)
+    except ValueError:
+        return None
+
+
+def _edited_document(label: str | None, existing: list[dict[str, Any]]) -> dict[str, str] | None:
+    text = (label or "").strip()
+    if not text:
+        return None
+    for doc in existing:
+        if (doc.get("label") or "").strip().upper() != text.upper():
+            continue
+        kept = {"label": doc.get("label") or text, "file": doc.get("file") or text}
+        if doc.get("message_id"):
+            kept["message_id"] = str(doc["message_id"])
+        return kept
+    return {"label": text, "file": text}
+
+
+def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, Any]:
+    """Use the popup figures on the saved archive row."""
+    farm_paid = (edit.get("farm_paid") or "").strip().upper()
+    if farm_paid in HERD_FARM_OPTIONS:
+        row["farm_paid"] = farm_paid
+    sold_name = (row.get("farm_sold") or "").strip()
+    paid_name = (row.get("farm_paid") or "").strip()
+    row["farms_match"] = bool(sold_name) and sold_name.upper() == paid_name.upper()
+    row["dest"] = (edit.get("dest") or "").strip()[:128]
+    amount = _parse_edit_money(edit.get("amount_gbp"))
+    bonus = _parse_edit_money(edit.get("bonus_gbp"))
+    row["amount_gbp"] = amount
+    row["bonus_gbp"] = bonus
+    row["has_sale_amount"] = amount is not None or bonus is not None or bool(row.get("sale_rejected"))
+    existing = row.get("documents") if isinstance(row.get("documents"), list) else []
+    documents: list[dict[str, str]] = []
+    amount_doc = _edited_document(edit.get("amount_document"), existing)
+    bonus_doc = _edited_document(edit.get("bonus_document"), existing)
+    if amount_doc:
+        documents.append(amount_doc)
+    if bonus_doc and (amount_doc is None or bonus_doc["label"].upper() != amount_doc["label"].upper()):
+        documents.append(bonus_doc)
+    row["documents"] = documents
+    row["note"] = (edit.get("note") or "").strip()[:500]
+    if bonus is not None:
+        row["warrendale_split"] = True
+        row["amount_paid"] = amount is not None
+        row["bonus_paid"] = True
+    else:
+        row["warrendale_split"] = False
+        row["amount_paid"] = False
+        row["bonus_paid"] = False
+    row["confirm_part"] = None
+    return row
+
+
 def confirm_payments(
     db: Session,
     items: list[dict[str, Any]],
@@ -1471,6 +1531,7 @@ def confirm_payments(
     existing = _load_payment_records_for_items(db, items)
     confirmed = 0
     to_freeze: list[SalesPaymentRecord] = []
+    edits: dict[tuple[str, str, str, dt.date], dict[str, Any]] = {}
     for item in items:
         farm, cow_id, etag, event_date = _parse_payment_item(item)
         record = _record_for_confirm(db, existing, farm, cow_id, etag, event_date, user)
@@ -1492,8 +1553,11 @@ def confirm_payments(
         confirmed += 1
         if archive_now and not already_archived:
             to_freeze.append(record)
+            edit = item.get("edit")
+            if isinstance(edit, dict):
+                edits[_payment_record_key(farm, cow_id, etag, event_date)] = edit
     if to_freeze:
-        _save_archive_snapshots(db, to_freeze, now)
+        _save_archive_snapshots(db, to_freeze, now, edits)
     return {"confirmed": confirmed}
 
 
@@ -1501,6 +1565,7 @@ def _save_archive_snapshots(
     db: Session,
     records: list[SalesPaymentRecord],
     now: dt.datetime,
+    edits: dict[tuple[str, str, str, dt.date], dict[str, Any]] | None = None,
 ) -> None:
     """Store the row as it stands, then mark it archived."""
     farms = sorted({record.farm for record in records if record.farm})
@@ -1530,7 +1595,15 @@ def _save_archive_snapshots(
         record.unarchived_at = None
         key = _payment_record_key(record.farm, record.cow_id, record.etag, record.event_date)
         row = by_key.get(key) or _minimal_archive_snapshot(record)
-        record.archive_snapshot = _encode_archive_snapshot(_snapshot_from_live_row(row, record))
+        frozen = _snapshot_from_live_row(row, record)
+        edit = (edits or {}).get(key)
+        if edit:
+            frozen = _apply_payment_edit(frozen, edit)
+            if frozen.get("bonus_paid"):
+                record.bonus_paid_at = now
+            if frozen.get("amount_paid"):
+                record.amount_paid_at = now
+        record.archive_snapshot = _encode_archive_snapshot(frozen)
 
 
 def unarchive_payments(

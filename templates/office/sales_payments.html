@@ -243,6 +243,47 @@
     .farm-paid-mark.bad { color: #b91c1c; }
     a.doc-link { color: #1d4ed8; text-decoration: underline; }
     .doc-links { display: flex; flex-direction: column; gap: 0.15rem; }
+    .edit-note {
+      display: block;
+      white-space: normal;
+      max-width: 16rem;
+      color: #475569;
+      font-size: 0.8rem;
+    }
+    #edit-payment-dialog {
+      border: none;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem 1.5rem;
+      width: min(28rem, calc(100vw - 2rem));
+    }
+    #edit-payment-dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+    .edit-etag {
+      margin: 0 0 1rem;
+      text-align: center;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+    .edit-readonly {
+      display: grid;
+      grid-template-columns: 7.5rem 1fr;
+      gap: 0.2rem 0.75rem;
+      margin: 0 0 1rem;
+      font-size: 0.9rem;
+    }
+    .edit-readonly dt { color: #64748b; }
+    .edit-readonly dd { margin: 0; }
+    .edit-fields { display: flex; flex-direction: column; gap: 0.7rem; }
+    .edit-fields label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; font-weight: 600; }
+    .edit-fields input,
+    .edit-fields select,
+    .edit-fields textarea {
+      font: inherit;
+      font-weight: 400;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+    }
+    .edit-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
     #sales-payments-table thead th {
       background: #1e3a5f;
       color: #fff;
@@ -393,6 +434,49 @@
       </div>
     </section>
   </div>
+  <dialog id="edit-payment-dialog" aria-labelledby="edit-etag">
+    <form id="edit-payment-form">
+      <p class="edit-etag" id="edit-etag"></p>
+      <dl class="edit-readonly">
+        <dt>Cow</dt><dd id="edit-cow"></dd>
+        <dt>Farm Sold</dt><dd id="edit-farm-sold"></dd>
+        <dt>Age (mo)</dt><dd id="edit-age"></dd>
+        <dt>Gender</dt><dd id="edit-gender"></dd>
+        <dt>Date sold</dt><dd id="edit-date"></dd>
+        <dt>Reason</dt><dd id="edit-reason"></dd>
+      </dl>
+      <div class="edit-fields">
+        <label>Farm Paid
+          <select id="edit-farm-paid"></select>
+        </label>
+        <label>DEST
+          <select id="edit-dest"></select>
+        </label>
+        <label id="edit-dest-new-label" hidden>New DEST
+          <input id="edit-dest-new" type="text" maxlength="128" autocomplete="off">
+        </label>
+        <label>Amount
+          <input id="edit-amount" inputmode="decimal" autocomplete="off">
+        </label>
+        <label>Document
+          <input id="edit-amount-doc" type="text" maxlength="128" autocomplete="off">
+        </label>
+        <label>Bonus
+          <input id="edit-bonus" inputmode="decimal" autocomplete="off">
+        </label>
+        <label>Document
+          <input id="edit-bonus-doc" type="text" maxlength="128" autocomplete="off">
+        </label>
+        <label>Notes
+          <textarea id="edit-note" rows="3" maxlength="500"></textarea>
+        </label>
+      </div>
+      <div class="edit-actions">
+        <button type="button" class="secondary small" id="edit-cancel">Cancel</button>
+        <button type="submit" class="primary small" id="edit-confirm">Confirm payment</button>
+      </div>
+    </form>
+  </dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -411,6 +495,8 @@
     let loadingCount = 0;
     let highlightEtag = null;
     let appliedCowId = "";
+    let destChoices = [];
+    let editingRow = null;
 
     function fmtNum(v, dp = 2) {
       if (v == null || v === "") return "—";
@@ -770,6 +856,13 @@
         syncSelectAll();
       });
       body.addEventListener("click", event => {
+        const editBtn = event.target.closest(".row-edit");
+        if (editBtn) {
+          event.preventDefault();
+          const row = rowByKey.get(decodeURIComponent(editBtn.dataset.key));
+          if (row) openEditDialog(row);
+          return;
+        }
         const input = event.target;
         if (event.shiftKey && isRowTick(input)) {
           event.preventDefault();
@@ -804,6 +897,7 @@
         opt.textContent = dest;
         select.appendChild(opt);
       });
+      destChoices = options || [];
       if (current && [...select.options].some(o => o.value === current)) select.value = current;
     }
 
@@ -814,6 +908,7 @@
       const selectCol = CAN_EDIT
         ? `<th><input type="checkbox" id="select-all" aria-label="Select all visible rows"></th>` : "";
       const paidCol = currentStatus === "active" && CAN_EDIT ? "<th>Paid?</th>" : "";
+      const editCol = currentStatus === "active" && CAN_EDIT ? "<th></th>" : "";
       head.innerHTML = `
         <tr>
           ${selectCol}
@@ -830,6 +925,7 @@
           <th class="amount-cell">Amount (£)</th>
           <th class="bonus-col">Bonus (£)</th>
           ${paidCol}
+          ${editCol}
         </tr>`;
       if (CAN_EDIT) document.getElementById("select-all")?.addEventListener("change", onSelectAllChange);
     }
@@ -887,7 +983,6 @@
 
     function documentLinks(row) {
       const docs = Array.isArray(row.documents) ? row.documents : [];
-      if (!docs.length) return "—";
       const links = docs.map(doc => {
         const label = escapeHtml(doc.label || "");
         const file = escapeHtml(doc.file || doc.label || "");
@@ -899,7 +994,11 @@
           + encodeURIComponent(messageId);
         return `<a class="doc-link" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${file}">${label}</a>`;
       });
-      return `<span class="doc-links">${links.join("")}</span>`;
+      const note = row.note
+        ? `<span class="edit-note">${escapeHtml(row.note)}</span>`
+        : "";
+      if (!docs.length && !note) return "—";
+      return `<span class="doc-links">${links.join("")}${note}</span>`;
     }
 
     function renderTableBody() {
@@ -913,6 +1012,9 @@
         const paidCell = showPaidCol && !row.warrendale_split
           ? `<td><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></td>`
           : (showPaidCol ? "<td></td>" : "");
+        const editCell = showPaidCol
+          ? `<td><button type="button" class="secondary small row-edit" data-key="${encodeURIComponent(key)}">Edit</button></td>`
+          : "";
         const hasAmount = rowHasSaleAmount(row);
         const rowClasses = [
           selected ? "row-selected" : "",
@@ -942,6 +1044,7 @@
             <td class="amount-cell">${formatAmountCell(row)}${row.amount_paid ? paidTick() : ""}${partCheckbox(row, "amount")}${partCheckbox(row, "both")}</td>
             <td class="bonus-cell bonus-col">${row.bonus_gbp != null ? `£${fmtNum(row.bonus_gbp)}` : "—"}${row.bonus_paid ? paidTick() : ""}${partCheckbox(row, "bonus")}</td>
             ${paidCell}
+            ${editCell}
           </tr>`;
       }).join("");
     }
@@ -1106,6 +1209,75 @@
       updateActionBar();
     }
 
+    function popupAmount(row) {
+      const amount = row.amount_gbp == null ? null : Number(row.amount_gbp);
+      const bonus = row.bonus_gbp == null ? null : Number(row.bonus_gbp);
+      if (
+        row.warrendale_split
+        && amount != null
+        && bonus != null
+        && !row.amount_paid
+        && !row.bonus_paid
+      ) {
+        return String(Math.round((amount - bonus) * 100) / 100);
+      }
+      return amount != null && amount > 0 ? String(amount) : "";
+    }
+
+    function splitEditDocuments(row) {
+      const docs = Array.isArray(row.documents) ? row.documents : [];
+      const labels = docs.map(doc => doc.label || "");
+      const hasAmount = row.amount_gbp != null && Number(row.amount_gbp) > 0;
+      const hasBonus = row.bonus_gbp != null;
+      if (labels.length >= 2) return { amount: labels[0], bonus: labels[1] };
+      if (labels.length === 1 && hasBonus && !hasAmount) return { amount: "", bonus: labels[0] };
+      return { amount: labels[0] || "", bonus: "" };
+    }
+
+    function fillSelect(select, values, selected, extra) {
+      select.innerHTML = "";
+      values.forEach(value => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = value;
+        select.appendChild(opt);
+      });
+      if (extra) {
+        const opt = document.createElement("option");
+        opt.value = extra.value;
+        opt.textContent = extra.label;
+        select.appendChild(opt);
+      }
+      if (selected && [...select.options].some(opt => opt.value === selected)) {
+        select.value = selected;
+      }
+    }
+
+    function openEditDialog(row) {
+      editingRow = row;
+      document.getElementById("edit-etag").textContent = row.etag || "—";
+      document.getElementById("edit-cow").textContent = row.cow_id || "—";
+      document.getElementById("edit-farm-sold").textContent = row.farm_sold || "—";
+      document.getElementById("edit-age").textContent = row.age_months != null ? row.age_months : "—";
+      document.getElementById("edit-gender").textContent = row.gender || "—";
+      document.getElementById("edit-date").textContent = fmtDate(row.event_date);
+      document.getElementById("edit-reason").textContent = row.sales_reason || "—";
+      const farms = [...document.querySelectorAll(".farm-slicer .slicer-btn")].map(btn => btn.dataset.value);
+      fillSelect(document.getElementById("edit-farm-paid"), farms, row.farm_paid || row.farm_sold || "");
+      const dests = [...destChoices];
+      if (row.dest && !dests.includes(row.dest)) dests.unshift(row.dest);
+      fillSelect(document.getElementById("edit-dest"), dests, row.dest || "", { value: "__new__", label: "Add new" });
+      document.getElementById("edit-dest-new").value = "";
+      document.getElementById("edit-dest-new-label").hidden = true;
+      document.getElementById("edit-amount").value = popupAmount(row);
+      const docs = splitEditDocuments(row);
+      document.getElementById("edit-amount-doc").value = docs.amount;
+      document.getElementById("edit-bonus").value = row.bonus_gbp != null ? String(row.bonus_gbp) : "";
+      document.getElementById("edit-bonus-doc").value = docs.bonus;
+      document.getElementById("edit-note").value = "";
+      document.getElementById("edit-payment-dialog").showModal();
+    }
+
     function selectedItems() {
       return rows.filter(row => selectedKeys.has(rowKey(row))).map(row => {
         const item = { ...row.payment_key };
@@ -1157,6 +1329,44 @@
           unarchiveBtn.textContent = prevLabel || "Unarchive";
           updateActionBar();
         }
+      }
+    }
+
+    async function confirmEditedPayment(event) {
+      event.preventDefault();
+      if (!editingRow) return;
+      const destSelect = document.getElementById("edit-dest");
+      const dest = destSelect.value === "__new__"
+        ? document.getElementById("edit-dest-new").value.trim()
+        : destSelect.value.trim();
+      const confirmBtn = document.getElementById("edit-confirm");
+      confirmBtn.disabled = true;
+      try {
+        const res = await fetch("/office/api/sales-payments/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: [{
+              ...editingRow.payment_key,
+              edit: {
+                farm_paid: document.getElementById("edit-farm-paid").value,
+                dest,
+                amount_gbp: document.getElementById("edit-amount").value,
+                amount_document: document.getElementById("edit-amount-doc").value,
+                bonus_gbp: document.getElementById("edit-bonus").value,
+                bonus_document: document.getElementById("edit-bonus-doc").value,
+                note: document.getElementById("edit-note").value,
+              },
+            }],
+          }),
+        });
+        if (!res.ok) { alert("Failed to confirm payments."); return; }
+        document.getElementById("edit-payment-dialog").close();
+        editingRow = null;
+        selectedKeys.clear();
+        await fetchRows(null, { manageLoading: false });
+      } finally {
+        confirmBtn.disabled = false;
       }
     }
 
@@ -1249,6 +1459,14 @@
       }
     });
     document.getElementById("confirm-btn")?.addEventListener("click", confirmSelected);
+    document.getElementById("edit-dest").addEventListener("change", () => {
+      document.getElementById("edit-dest-new-label").hidden = document.getElementById("edit-dest").value !== "__new__";
+    });
+    document.getElementById("edit-cancel").addEventListener("click", () => {
+      editingRow = null;
+      document.getElementById("edit-payment-dialog").close();
+    });
+    document.getElementById("edit-payment-form").addEventListener("submit", confirmEditedPayment);
     document.getElementById("select-amount-btn")?.addEventListener("click", selectAllWithAmount);
     document.getElementById("unarchive-btn")?.addEventListener("click", unarchiveSelected);
     bindSlicers(".farm-slicer");
