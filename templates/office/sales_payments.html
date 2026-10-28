@@ -461,6 +461,9 @@
         <label>Document
           <input id="edit-amount-doc" type="text" maxlength="128" autocomplete="off">
         </label>
+        <label>Cold weight
+          <input id="edit-weight" inputmode="decimal" autocomplete="off">
+        </label>
         <label>Bonus
           <input id="edit-bonus" inputmode="decimal" autocomplete="off">
         </label>
@@ -921,6 +924,7 @@
           <th>Date sold</th>
           <th>DEST</th>
           <th>Document</th>
+          <th>Cold Wt (kg)</th>
           <th>Reason</th>
           <th class="amount-cell">Amount (£)</th>
           <th class="bonus-col">Bonus (£)</th>
@@ -1040,6 +1044,7 @@
             <td>${fmtDate(row.event_date)}</td>
             <td>${row.dest || "—"}</td>
             <td>${documentLinks(row)}</td>
+            <td>${row.cold_weight_kg != null ? fmtNum(row.cold_weight_kg, 1) : "—"}</td>
             <td><span class="reason-pill reason-pill-${row.sales_reason}">${row.sales_reason}</span></td>
             <td class="amount-cell">${formatAmountCell(row)}${row.amount_paid ? paidTick() : ""}${partCheckbox(row, "amount")}${partCheckbox(row, "both")}</td>
             <td class="bonus-cell bonus-col">${row.bonus_gbp != null ? `£${fmtNum(row.bonus_gbp)}` : "—"}${row.bonus_paid ? paidTick() : ""}${partCheckbox(row, "bonus")}</td>
@@ -1272,6 +1277,7 @@
       document.getElementById("edit-amount").value = popupAmount(row);
       const docs = splitEditDocuments(row);
       document.getElementById("edit-amount-doc").value = docs.amount;
+      document.getElementById("edit-weight").value = row.cold_weight_kg != null ? String(row.cold_weight_kg) : "";
       document.getElementById("edit-bonus").value = row.bonus_gbp != null ? String(row.bonus_gbp) : "";
       document.getElementById("edit-bonus-doc").value = docs.bonus;
       document.getElementById("edit-note").value = "";
@@ -1353,6 +1359,7 @@
                 dest,
                 amount_gbp: document.getElementById("edit-amount").value,
                 amount_document: document.getElementById("edit-amount-doc").value,
+                cold_weight_kg: document.getElementById("edit-weight").value,
                 bonus_gbp: document.getElementById("edit-bonus").value,
                 bonus_document: document.getElementById("edit-bonus-doc").value,
                 note: document.getElementById("edit-note").value,

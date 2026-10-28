@@ -425,6 +425,7 @@ def _warrendale_split_match(
         "bonus_source_message_id": (
             bonus_line.source_message_id if bonus_line is not None else None
         ),
+        "cold_weight_kg": _cold_weight_kg(calf_line if calf_line is not None else bonus_line),
     }
 
 
@@ -498,6 +499,7 @@ def _closest_sale_match(
         "bonus_source_file": None,
         "source_message_id": best_line.source_message_id,
         "bonus_source_message_id": None,
+        "cold_weight_kg": _cold_weight_kg(best_line),
     }
 
 
@@ -514,6 +516,25 @@ def _sale_match_for_sold_event(
         if split is not None:
             return split
     return _closest_sale_match(lines, event_date)
+
+
+def _cold_weight_kg(line: CattleSaleLine | None) -> float | None:
+    if line is None or line.cold_weight_kg is None:
+        return None
+    weight = float(line.cold_weight_kg)
+    if weight <= 0:
+        return None
+    return weight
+
+
+def _price_per_kg(
+    amount: float | None,
+    weight: float | None,
+    rejected: bool,
+) -> float | None:
+    if rejected or amount is None or weight is None or weight <= 0:
+        return None
+    return round(float(amount) / float(weight), 2)
 
 
 def _row_to_dict(
@@ -539,6 +560,8 @@ def _row_to_dict(
     farm_sold: str | None = None,
     farm_paid: str | None = None,
     documents: list[dict[str, str]] | None = None,
+    cold_weight_kg: float | None = None,
+    price_per_kg: float | None = None,
 ) -> dict[str, Any]:
     normalized_cow_id = _normalize_key_part(cow_id)
     normalized_etag = _normalize_key_part(etag)
@@ -560,6 +583,8 @@ def _row_to_dict(
         "sales_reason": sales_reason,
         "amount_gbp": amount_gbp,
         "bonus_gbp": bonus_gbp,
+        "cold_weight_kg": cold_weight_kg,
+        "price_per_kg": price_per_kg,
         "amount_paid": amount_paid,
         "bonus_paid": bonus_paid,
         "warrendale_split": warrendale_split,
@@ -833,6 +858,8 @@ def _unmatched_remittance_rows(
                 documents=_documents_for_files(
                     (line.source_file, line.source_message_id)
                 ),
+                cold_weight_kg=_cold_weight_kg(line),
+                price_per_kg=_price_per_kg(calf_amount, _cold_weight_kg(line), rejected),
             )
         )
     return extra
@@ -1089,6 +1116,8 @@ def list_sales_payments(
             continue
         if not _dests_match(remittance_dest, dest):
             continue
+        weight = sale_match.get("cold_weight_kg") if sale_match else None
+        price_base = calf_amount if warrendale_split else amount_gbp
         rows.append(
             _row_to_dict(
                 farm,
@@ -1126,6 +1155,8 @@ def list_sales_payments(
                         sale_match.get("bonus_source_message_id") if sale_match else None,
                     ),
                 ),
+                cold_weight_kg=weight,
+                price_per_kg=_price_per_kg(price_base, weight, sale_rejected),
             )
         )
 
@@ -1510,6 +1541,11 @@ def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, 
         documents.append(bonus_doc)
     row["documents"] = documents
     row["note"] = (edit.get("note") or "").strip()[:500]
+    weight = _parse_edit_money(edit.get("cold_weight_kg"))
+    if weight is not None and weight <= 0:
+        weight = None
+    row["cold_weight_kg"] = weight
+    row["price_per_kg"] = _price_per_kg(amount, weight, bool(row.get("sale_rejected")))
     if bonus is not None:
         row["warrendale_split"] = True
         row["amount_paid"] = amount is not None
