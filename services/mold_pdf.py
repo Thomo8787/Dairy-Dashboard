@@ -18,7 +18,6 @@ from services.cattle_sale_pdf import extract_pdf_images, ocr_words_from_image
 BUYER_MOLD = "Mold"
 
 _SALE_PHRASE = "mold stock sale"
-_TAG_BODY_RE = re.compile(r"^[0-9A-Z]{10,16}$")
 _SHORT_DATE_RE = re.compile(r"(\d{2})/(\d{2})/(\d{2})")
 _FILENAME_DATE_RE = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)")
 _AMOUNT_RE = re.compile(r"-?\d+\.\d{2}")
@@ -124,21 +123,31 @@ def _farm_from_words(words: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _twelve_digits_after(raw: str, start: int) -> str | None:
+    """Next 12 ear-tag digits. Stops before a letter that is not an OCR digit."""
+    digits: list[str] = []
+    for char in raw[start:]:
+        mapped = char.translate(_OCR_DIGIT)
+        if not mapped.isdigit():
+            break
+        digits.append(mapped)
+        if len(digits) == 12:
+            return "".join(digits)
+    return None
+
+
 def _etag_from_token(token: str) -> str | None:
+    """UK ear tag, including one glued to the description such as CALF UK1611..."""
     raw = re.sub(r"[^A-Za-z0-9]", "", token).upper()
-    if raw.startswith("UK"):
-        body = raw[2:]
-    elif raw.startswith("K") and len(raw) > 1:
-        body = raw[1:]
-    else:
-        return None
-    if not _TAG_BODY_RE.match(body):
-        return None
-    body = body.translate(_OCR_DIGIT)
-    body = re.sub(r"\D", "", body)
-    if len(body) != 12:
-        return None
-    return f"UK{body}"
+    for match in re.finditer(r"UK", raw):
+        body = _twelve_digits_after(raw, match.end())
+        if body:
+            return f"UK{body}"
+    if raw.startswith("K"):
+        body = _twelve_digits_after(raw, 1)
+        if body:
+            return f"UK{body}"
+    return None
 
 
 def _row_etag(row: list[dict[str, Any]]) -> str | None:
