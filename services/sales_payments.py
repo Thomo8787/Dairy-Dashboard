@@ -51,6 +51,14 @@ def _etag_contains(column, fragment: str):
     return compact.contains(fragment, autoescape=True)
 
 
+_BREED_NAMES = {
+    1: "Holstein",
+    104: "Jersey",
+    121: "Angus",
+    254: "Wagyu",
+}
+
+
 def _format_gender(gndr: str | None) -> str:
     normalized = (gndr or "").strip().upper()
     if normalized == "M":
@@ -58,6 +66,17 @@ def _format_gender(gndr: str | None) -> str:
     if normalized == "F":
         return "Female"
     return (gndr or "").strip()
+
+
+def _format_breed(cbrd: int | None) -> str:
+    """Named breed for the four DairyComp codes. Any other code stays as the number."""
+    if cbrd is None:
+        return ""
+    try:
+        code = int(cbrd)
+    except (TypeError, ValueError):
+        return ""
+    return _BREED_NAMES.get(code, str(code))
 
 
 def _age_months_at_sale(bdat: dt.date | None, event_date: dt.date) -> int | None:
@@ -546,6 +565,7 @@ def _row_to_dict(
     sales_reason: str,
     gndr: str | None = None,
     bdat: dt.date | None = None,
+    cbrd: int | None = None,
     paid_at: dt.datetime | None = None,
     archived_at: dt.datetime | None = None,
     amount_gbp: float | None = None,
@@ -577,6 +597,7 @@ def _row_to_dict(
         "cow_id": normalized_cow_id,
         "etag": normalized_etag,
         "gender": gender,
+        "breed": _format_breed(cbrd),
         "age_months": age_months,
         "dest": dest or "",
         "event_date": event_date.isoformat(),
@@ -840,6 +861,7 @@ def _unmatched_remittance_rows(
                 sales_reason,
                 identity.gndr if identity else None,
                 identity.bdat if identity else None,
+                getattr(identity, "cbrd", None) if identity else None,
                 amount_gbp=calf_amount,
                 sale_rejected=rejected,
                 has_sale_amount=has_sale_amount,
@@ -984,6 +1006,7 @@ def list_sales_payments(
                 reason_expr.label("sales_reason"),
                 CowEvent.gndr,
                 CowEvent.bdat,
+                CowEvent.cbrd,
                 SalesPaymentRecord.paid_at,
                 SalesPaymentRecord.archived_at,
             )
@@ -999,6 +1022,7 @@ def list_sales_payments(
             reason_expr.label("sales_reason"),
             CowEvent.gndr,
             CowEvent.bdat,
+            CowEvent.cbrd,
             literal(None).label("paid_at"),
             literal(None).label("archived_at"),
         )
@@ -1072,6 +1096,7 @@ def list_sales_payments(
         sales_reason,
         gndr,
         bdat,
+        cbrd,
         paid_at,
         archived_at,
     ) in result_rows:
@@ -1128,6 +1153,7 @@ def list_sales_payments(
                 sales_reason,
                 gndr,
                 bdat,
+                cbrd,
                 paid_at if paid_at is not None else (record.paid_at if record else None),
                 archived_at if archived_at is not None else (record.archived_at if record else None),
                 amount_gbp=amount_gbp,

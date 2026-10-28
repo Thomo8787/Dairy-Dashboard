@@ -497,6 +497,7 @@
         <dt>Farm Sold</dt><dd id="edit-farm-sold"></dd>
         <dt>Age (mo)</dt><dd id="edit-age"></dd>
         <dt>Gender</dt><dd id="edit-gender"></dd>
+        <dt>Breed</dt><dd id="edit-breed"></dd>
         <dt>Date sold</dt><dd id="edit-date"></dd>
         <dt>Reason</dt><dd id="edit-reason"></dd>
       </dl>
@@ -976,6 +977,7 @@
           <th>ETAG</th>
           <th>Age (mo)</th>
           <th>Gender</th>
+          <th>Breed</th>
           <th>Date sold</th>
           <th>DEST</th>
           <th>Document</th>
@@ -1096,6 +1098,7 @@
             <td>${row.etag || "—"}</td>
             <td>${row.age_months != null ? row.age_months : "—"}</td>
             <td>${row.gender || "—"}</td>
+            <td>${row.breed || "—"}</td>
             <td>${fmtDate(row.event_date)}</td>
             <td>${row.dest || "—"}</td>
             <td>${documentLinks(row)}</td>
@@ -1320,6 +1323,7 @@
       document.getElementById("edit-farm-sold").textContent = row.farm_sold || "—";
       document.getElementById("edit-age").textContent = row.age_months != null ? row.age_months : "—";
       document.getElementById("edit-gender").textContent = row.gender || "—";
+      document.getElementById("edit-breed").textContent = row.breed || "—";
       document.getElementById("edit-date").textContent = fmtDate(row.event_date);
       document.getElementById("edit-reason").textContent = row.sales_reason || "—";
       const farms = [...document.querySelectorAll(".farm-slicer .slicer-btn")].map(btn => btn.dataset.value);
