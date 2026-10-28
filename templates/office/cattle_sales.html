@@ -173,21 +173,6 @@
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .meta-line.is-loading { font-style: italic; }
     #meta-line { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-    #import-status.is-loading::before {
-      content: "";
-      display: inline-block;
-      width: 0.85rem;
-      height: 0.85rem;
-      margin-right: 0.45rem;
-      border: 2px solid #cbd5e1;
-      border-top-color: #1e3a5f;
-      border-radius: 50%;
-      vertical-align: -0.15rem;
-      animation: cattle-sales-spin 0.7s linear infinite;
-    }
-    @keyframes cattle-sales-spin {
-      to { transform: rotate(360deg); }
-    }
     .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
     button.summary-card {
       display: block; width: 100%; text-align: left; font: inherit;
@@ -266,9 +251,6 @@
     .summary-note { margin: 0 0 0.65rem; font-size: 0.75rem; color: var(--muted); }
     .summary-empty { margin: 0; color: var(--muted); font-size: 0.875rem; }
     .amount-rejected { color: #dc2626; font-weight: 700; }
-    .action-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
-    .import-scope { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
-    .import-scope select { margin: 0; padding: 0.25rem 0.4rem; font-size: 0.8rem; }
     .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem; margin-bottom: 0.75rem; }
     .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
     .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
@@ -330,38 +312,10 @@
     #cattle-sales-table tbody tr.unmatched { background: #fff8ef; }
     #cattle-sales-table:not(.show-bonus) .bonus-col { display: none; }
     .empty-state { padding: 1.5rem; color: var(--muted); text-align: center; }
-    .message.warn {
-      background: #fef3e2; color: #92400e;
-      border: 1px solid #f5d9ad; margin-bottom: 0.75rem;
-    }
-    #import-message:not([hidden]) {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0.75rem;
-    }
-    #import-message[hidden] { display: none !important; }
-    #import-message .message-body { flex: 1; min-width: 0; }
-    #import-message .message-close {
-      flex-shrink: 0;
-      margin: 0;
-      padding: 0;
-      width: 1.6rem;
-      height: 1.6rem;
-      border: 0;
-      border-radius: 4px;
-      background: transparent;
-      color: #92400e;
-      font-size: 1.2rem;
-      line-height: 1;
-      cursor: pointer;
-    }
-    #import-message .message-close:hover { background: #f5d9ad; }
-    .import-log { margin-top: 0.5rem; max-height: 12rem; overflow: auto; font-size: 0.8rem; }
     .hint-phone { display: none; }
     @media (max-width: 768px) {
       .page-layout { gap: 0.75rem; }
-      .page-layout, .content-panel, .charts-grid, .chart-card, .table-wrap, .action-bar, .summary-cards {
+      .page-layout, .content-panel, .charts-grid, .chart-card, .table-wrap, .summary-cards {
         max-width: 100%;
         min-width: 0;
       }
@@ -376,10 +330,7 @@
       .chart-wrap { height: 210px; }
       .chart-btn, .chart-expand, button.filter-funnel { width: 2.75rem; height: 2.75rem; }
       button.filter-clear { min-height: 2.75rem; padding: 0 0.9rem; }
-      .action-bar { flex-direction: column; align-items: stretch; }
-      .action-bar > button { width: 100%; min-height: 2.75rem; justify-content: center; }
-      .import-scope { width: 100%; min-height: 2.75rem; justify-content: space-between; }
-      .import-scope select, .date-row select, .date-row input, .buyer-trigger { font-size: 16px; min-height: 2.75rem; }
+      .date-row select, .date-row input, .buyer-trigger { font-size: 16px; min-height: 2.75rem; }
       .hint-desktop { display: none; }
       .hint-phone { display: inline; }
       .chart-modal, .summary-popover { padding: 0; align-items: stretch; }
@@ -517,26 +468,6 @@
     </div>
 
     <section class="content-panel">
-      {% if can_import %}
-      <div class="action-bar">
-        <button type="button" id="import-btn" class="secondary">Import from email</button>
-        <label class="import-scope">
-          <span>Range</span>
-          <select id="import-scope" title="How far back to scan the mailboxes">
-            <option value="recent" selected>Recent (last {{ lookback_days }} days)</option>
-            <option value="custom">Choose days back…</option>
-          </select>
-        </label>
-        <input type="file" id="upload-input" accept=".pdf,application/pdf" multiple hidden>
-        <button type="button" id="upload-btn" class="secondary">Upload PDFs</button>
-        <span id="import-status" class="meta-line" style="margin:0;"></span>
-      </div>
-      <div id="import-message" class="message" hidden>
-        <div class="message-body"></div>
-        <button type="button" class="message-close" id="import-message-close" aria-label="Close notification">&times;</button>
-      </div>
-      {% endif %}
-
       <div class="meta-line" id="meta-line">Loading cattle sales…</div>
 
       <div class="summary-cards" id="summary-cards"></div>
@@ -673,7 +604,6 @@
   <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" crossorigin="anonymous"></script>
   <script>
-    const CAN_IMPORT = {{ 'true' if can_import else 'false' }};
     const FARM_COLORS = {{ farm_colors | tojson }};
     const SUPPLIER_COLORS = {
       Neilds: '#0f766e',
@@ -1885,120 +1815,6 @@
         console.error(err);
       }
     }
-
-    {% if can_import %}
-    function hideImportMessage() {
-      const el = document.getElementById('import-message');
-      if (!el) return;
-      el.hidden = true;
-      el.className = 'message';
-      const body = el.querySelector('.message-body');
-      if (body) body.replaceChildren();
-    }
-
-    function showImportNotice(text) {
-      const el = document.getElementById('import-message');
-      const body = el.querySelector('.message-body');
-      el.className = 'message warn';
-      el.hidden = false;
-      body.replaceChildren();
-      const line = document.createElement('div');
-      line.textContent = text || '';
-      body.appendChild(line);
-    }
-
-    function showImportMessage(result) {
-      if (!result) { hideImportMessage(); return; }
-      const warnings = [...(result.warnings || []), ...(result.skipped_files || [])];
-      const el = document.getElementById('import-message');
-      const body = el.querySelector('.message-body');
-      body.replaceChildren();
-      const summary = document.createElement('div');
-      summary.textContent = result.message || `Imported ${result.rows_total || 0} line(s)`;
-      body.appendChild(summary);
-      if (warnings.length) {
-        const log = document.createElement('div');
-        log.className = 'import-log';
-        warnings.forEach(warning => {
-          const line = document.createElement('div');
-          line.textContent = warning;
-          log.appendChild(line);
-        });
-        body.appendChild(log);
-      }
-      el.className = 'message warn';
-      el.hidden = false;
-    }
-
-    document.getElementById('import-message-close').addEventListener('click', hideImportMessage);
-
-    document.getElementById('import-btn').addEventListener('click', async () => {
-      const scope = document.getElementById('import-scope').value;
-      let days = null;
-      if (scope === 'custom') {
-        const input = window.prompt('How many days back should I scan the mailbox?', '90');
-        if (input === null) return;
-        days = parseInt(input, 10);
-        if (!Number.isFinite(days) || days <= 0) {
-          showImportNotice('Enter a positive whole number of days.');
-          return;
-        }
-      } else if (!window.confirm('Check the mailbox for new Neilds, Pickstock, Gamechanger, Market Drayton, and Warrendale cattle-sale PDFs and import them now?')) {
-        return;
-      }
-
-      hideImportMessage();
-      const btn = document.getElementById('import-btn');
-      const statusEl = document.getElementById('import-status');
-      btn.disabled = true;
-      statusEl.textContent = days
-        ? `Importing last ${days} days…`
-        : 'Importing from email…';
-      const params = new URLSearchParams();
-      if (days) params.set('days', String(days));
-      const url = '/office/api/cattle-sales/import' + (params.toString() ? `?${params.toString()}` : '');
-      try {
-        const res = await fetch(url, { method: 'POST' });
-        const data = await res.json();
-        showImportMessage(data);
-        if (res.ok) fetchData();
-      } catch (err) {
-        showImportNotice('Cattle sales import failed.');
-        console.error(err);
-      } finally {
-        btn.disabled = false;
-        statusEl.textContent = '';
-      }
-    });
-
-    document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('upload-input').click());
-    document.getElementById('upload-input').addEventListener('change', async (e) => {
-      const files = e.target.files;
-      if (!files?.length) return;
-      hideImportMessage();
-      const btn = document.getElementById('upload-btn');
-      const statusEl = document.getElementById('import-status');
-      const fd = new FormData();
-      [...files].forEach(f => fd.append('files', f));
-      btn.disabled = true;
-      statusEl.classList.add('is-loading');
-      statusEl.textContent = 'Uploading…';
-      try {
-        const res = await fetch('/office/api/cattle-sales/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        showImportMessage(data);
-        if (res.ok) fetchData();
-      } catch (err) {
-        showImportNotice('Cattle sales upload failed.');
-        console.error(err);
-      } finally {
-        btn.disabled = false;
-        statusEl.classList.remove('is-loading');
-        statusEl.textContent = '';
-        e.target.value = '';
-      }
-    });
-    {% endif %}
 
     document.querySelectorAll('#cattle-sales-table thead th').forEach(th => {
       th.addEventListener('click', () => {

@@ -401,8 +401,6 @@ def office_cattle_sales():
         page_heading="Cattle Sales",
         farm_options=list(HERD_FARM_OPTIONS),
         farm_colors=FARM_CHART_COLORS,
-        lookback_days=CATTLE_SALES_LOOKBACK_DAYS,
-        can_import=True,
         **_page_context(active_nav="office_cattle_sales"),
     )
 
@@ -509,6 +507,8 @@ def office_sales_payments():
         "office/sales_payments.html",
         page_heading="Sales Payments",
         farm_options=list(HERD_FARM_OPTIONS),
+        lookback_days=CATTLE_SALES_LOOKBACK_DAYS,
+        can_import=True,
         **_page_context(active_nav="office_sales_payments"),
     )
 
