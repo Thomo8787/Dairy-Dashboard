@@ -143,21 +143,17 @@ def _etag_from_token(token: str) -> str | None:
 
 def _row_etag(row: list[dict[str, Any]]) -> str | None:
     for word in sorted(row, key=lambda item: item["x"]):
-        if word["x"] < 280 or word["x"] > 750:
-            continue
         etag = _etag_from_token(word["text"])
         if etag:
             return etag
     return None
 
 
-def _row_amount(row: list[dict[str, Any]]) -> float | None:
-    tokens = [word for word in row if word["x"] >= 900]
-    if not tokens:
-        return None
-    joined = "".join(word["text"] for word in sorted(tokens, key=lambda item: item["x"]))
-    joined = joined.replace(",", "").replace(" ", "")
-    match = _AMOUNT_RE.search(joined)
+def _money_amount(text: str) -> float | None:
+    cleaned = text.replace(",", "").replace(" ", "")
+    match = None
+    for match in _AMOUNT_RE.finditer(cleaned):
+        pass
     if match is None:
         return None
     try:
@@ -167,6 +163,20 @@ def _row_amount(row: list[dict[str, Any]]) -> float | None:
     if value < 1 or value > 8000:
         return None
     return round(value, 2)
+
+
+def _row_amount(row: list[dict[str, Any]]) -> float | None:
+    """Rightmost money on the row. That is the AMOUNT column when PRICE is also money."""
+    best: float | None = None
+    best_x: float | None = None
+    for word in row:
+        value = _money_amount(word["text"])
+        if value is None:
+            continue
+        if best_x is None or word["x"] >= best_x:
+            best = value
+            best_x = word["x"]
+    return best
 
 
 def _gross_amount(rows: list[list[dict[str, Any]]]) -> float | None:
