@@ -277,6 +277,7 @@ class SalesPaymentRecord(Base):
     amount_paid_at = Column(DateTime)
     bonus_paid_at = Column(DateTime)
     confirmed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    archive_snapshot = Column(Text)
 
 
 class CattleSaleLine(Base):
@@ -967,6 +968,7 @@ def _ensure_sales_payment_columns(engine) -> None:
     needed = {
         "amount_paid_at": "ALTER TABLE sales_payment_records ADD COLUMN amount_paid_at TIMESTAMP",
         "bonus_paid_at": "ALTER TABLE sales_payment_records ADD COLUMN bonus_paid_at TIMESTAMP",
+        "archive_snapshot": "ALTER TABLE sales_payment_records ADD COLUMN archive_snapshot TEXT",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():

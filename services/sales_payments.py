@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from typing import Any
 
@@ -234,9 +235,13 @@ def _exact_cow_id_in_view(
     cow_id: str,
 ) -> bool:
     if status == "archived":
-        query = select(CowEvent.id).join(SalesPaymentRecord, _payment_match_conditions())
-    else:
-        query = select(CowEvent.id)
+        query = select(SalesPaymentRecord.id).where(
+            SalesPaymentRecord.archived_at.isnot(None),
+            SalesPaymentRecord.farm.in_(farms),
+            func.coalesce(SalesPaymentRecord.cow_id, "") == cow_id,
+        )
+        return db.scalar(query.limit(1)) is not None
+    query = select(CowEvent.id)
     query = _apply_sold_event_filters(
         query,
         farms=farms,
@@ -861,23 +866,29 @@ def _compute_date_bounds(
     farms: list[str],
     reasons: list[str] | None,
 ) -> dict[str, str] | None:
-    bounds_query = select(func.min(CowEvent.event_date), func.max(CowEvent.event_date)).select_from(
-        CowEvent
-    )
     if status == "archived":
-        bounds_query = bounds_query.join(
-            SalesPaymentRecord,
-            _payment_match_conditions(),
+        min_date, max_date = db.execute(
+            select(
+                func.min(SalesPaymentRecord.event_date),
+                func.max(SalesPaymentRecord.event_date),
+            ).where(
+                SalesPaymentRecord.archived_at.isnot(None),
+                SalesPaymentRecord.farm.in_(farms),
+            )
+        ).one()
+    else:
+        bounds_query = select(
+            func.min(CowEvent.event_date), func.max(CowEvent.event_date)
+        ).select_from(CowEvent)
+        bounds_query = _apply_sold_event_filters(
+            bounds_query,
+            farms=farms,
+            reasons=reasons,
+            event_from=None,
+            event_to=None,
         )
-    bounds_query = _apply_sold_event_filters(
-        bounds_query,
-        farms=farms,
-        reasons=reasons,
-        event_from=None,
-        event_to=None,
-    )
-    bounds_query = _apply_status_filter(bounds_query, status)
-    min_date, max_date = db.execute(bounds_query).one()
+        bounds_query = _apply_status_filter(bounds_query, status)
+        min_date, max_date = db.execute(bounds_query).one()
     if min_date is None or max_date is None:
         return None
     if hasattr(min_date, "date"):
@@ -899,6 +910,7 @@ def list_sales_payments(
     include_date_bounds: bool = True,
     has_amount: bool | None = None,
     cow_id: str | None = None,
+    _live: bool = False,
 ) -> dict[str, Any]:
     selected_farms = normalize_farms(farms)
     if not selected_farms:
@@ -916,6 +928,21 @@ def list_sales_payments(
         )
     )
     etag_fragment = "" if exact_cow_id or not search_text else _compact_etag(search_text)
+
+    if status == "archived" and not _live:
+        return _list_archived_snapshots(
+            db,
+            farms=selected_farms,
+            reasons=reasons,
+            dest=dest,
+            event_from=event_from,
+            event_to=event_to,
+            include_date_bounds=include_date_bounds,
+            has_amount=has_amount,
+            search_text=search_text,
+            exact_cow_id=exact_cow_id,
+            etag_fragment=etag_fragment,
+        )
 
     reason_expr = _payment_sales_reason_expression()
     etag_suffix = func.substr(func.coalesce(CowEvent.etag, ""), -5)
@@ -1170,6 +1197,197 @@ def normalize_sales_reasons(reasons: list[str] | None) -> list[str]:
     return selected or list(SALES_TABLE_REASON_ORDER)
 
 
+def _encode_archive_snapshot(row: dict[str, Any]) -> str:
+    return json.dumps(row)
+
+
+def _decode_archive_snapshot(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        row = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(row, dict):
+        return None
+    return row
+
+
+def _minimal_archive_snapshot(record: SalesPaymentRecord) -> dict[str, Any]:
+    """Saved row when the sold event can no longer be rebuilt."""
+    return _row_to_dict(
+        record.farm,
+        record.cow_id,
+        record.etag,
+        "",
+        record.event_date,
+        "",
+        paid_at=record.paid_at,
+        archived_at=record.archived_at,
+        amount_paid=bool(record.amount_paid_at),
+        bonus_paid=bool(record.bonus_paid_at),
+    )
+
+
+def _snapshot_from_live_row(row: dict[str, Any], record: SalesPaymentRecord) -> dict[str, Any]:
+    """Freeze the row that was confirmed, with the paid ticks from this confirmation."""
+    frozen = json.loads(json.dumps(row))
+    warrendale = bool(frozen.get("warrendale_split"))
+    amount_paid = bool(record.amount_paid_at)
+    bonus_paid = bool(record.bonus_paid_at)
+    if warrendale and not amount_paid and not bonus_paid:
+        amount_paid = frozen.get("amount_gbp") is not None or frozen.get("bonus_gbp") is None
+        bonus_paid = frozen.get("bonus_gbp") is not None
+        amount = frozen.get("amount_gbp")
+        bonus = frozen.get("bonus_gbp")
+        if (
+            amount is not None
+            and bonus is not None
+            and not frozen.get("amount_paid")
+            and not frozen.get("bonus_paid")
+        ):
+            frozen["amount_gbp"] = round(float(amount) - float(bonus), 2)
+    frozen["amount_paid"] = amount_paid
+    frozen["bonus_paid"] = bonus_paid
+    frozen["paid_at"] = record.paid_at.isoformat() if record.paid_at else None
+    frozen["archived_at"] = record.archived_at.isoformat() if record.archived_at else None
+    frozen["confirm_part"] = None
+    return frozen
+
+
+def _backfill_archive_snapshots(db: Session) -> None:
+    """Save the current archive once, so rows confirmed before snapshots stay as they are now."""
+    missing = db.scalars(
+        select(SalesPaymentRecord).where(
+            SalesPaymentRecord.archived_at.isnot(None),
+            or_(
+                SalesPaymentRecord.archive_snapshot.is_(None),
+                SalesPaymentRecord.archive_snapshot == "",
+            ),
+        )
+    ).all()
+    if not missing:
+        return
+    live = list_sales_payments(
+        db,
+        status="archived",
+        farms=list(HERD_FARM_OPTIONS),
+        include_date_bounds=False,
+        _live=True,
+    )
+    by_key: dict[tuple[str, str, str, dt.date], dict[str, Any]] = {}
+    for row in live["rows"]:
+        key = row.get("payment_key") or {}
+        event_raw = key.get("event_date")
+        if not event_raw:
+            continue
+        by_key[
+            (
+                key.get("farm") or "",
+                _normalize_key_part(key.get("cow_id")),
+                _normalize_key_part(key.get("etag")),
+                dt.date.fromisoformat(event_raw),
+            )
+        ] = row
+    for record in missing:
+        key = _payment_record_key(record.farm, record.cow_id, record.etag, record.event_date)
+        row = by_key.get(key) or _minimal_archive_snapshot(record)
+        record.archive_snapshot = _encode_archive_snapshot(row)
+
+
+def _archive_row_visible(
+    row: dict[str, Any],
+    *,
+    reasons: list[str] | None,
+    dest: str | None,
+    event_from: dt.date | None,
+    event_to: dt.date | None,
+    has_amount: bool | None,
+    search_text: str,
+    exact_cow_id: bool,
+    etag_fragment: str,
+) -> bool:
+    sales_reason = row.get("sales_reason") or ""
+    if reasons:
+        if sales_reason:
+            if sales_reason not in reasons:
+                return False
+        elif set(reasons) < set(SALES_TABLE_REASON_ORDER):
+            return False
+    if not _dests_match(row.get("dest"), dest):
+        return False
+    has_sale_amount = bool(row.get("has_sale_amount"))
+    if has_amount is True and not has_sale_amount:
+        return False
+    if has_amount is False and has_sale_amount:
+        return False
+    if exact_cow_id:
+        return (row.get("cow_id") or "") == search_text
+    if etag_fragment:
+        return etag_fragment in _compact_etag(row.get("etag"))
+    event_raw = row.get("event_date")
+    if not event_raw:
+        return False
+    event_date = dt.date.fromisoformat(event_raw)
+    if event_from is not None and event_date < event_from:
+        return False
+    if event_to is not None and event_date > event_to:
+        return False
+    return True
+
+
+def _list_archived_snapshots(
+    db: Session,
+    *,
+    farms: list[str],
+    reasons: list[str] | None,
+    dest: str | None,
+    event_from: dt.date | None,
+    event_to: dt.date | None,
+    include_date_bounds: bool,
+    has_amount: bool | None,
+    search_text: str,
+    exact_cow_id: bool,
+    etag_fragment: str,
+) -> dict[str, Any]:
+    _backfill_archive_snapshots(db)
+    records = db.scalars(
+        select(SalesPaymentRecord).where(
+            SalesPaymentRecord.archived_at.isnot(None),
+            SalesPaymentRecord.farm.in_(farms),
+        )
+    ).all()
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        row = _decode_archive_snapshot(record.archive_snapshot)
+        if row is None:
+            row = _minimal_archive_snapshot(record)
+            record.archive_snapshot = _encode_archive_snapshot(row)
+        if not _archive_row_visible(
+            row,
+            reasons=reasons,
+            dest=dest,
+            event_from=event_from,
+            event_to=event_to,
+            has_amount=has_amount,
+            search_text=search_text,
+            exact_cow_id=exact_cow_id,
+            etag_fragment=etag_fragment,
+        ):
+            continue
+        rows.append(row)
+    rows.sort(key=lambda row: (row.get("event_date") or "", row.get("dest") or "", row.get("etag") or ""))
+    date_bounds = None
+    if include_date_bounds:
+        date_bounds = _compute_date_bounds(
+            db,
+            status="archived",
+            farms=farms,
+            reasons=reasons,
+        )
+    return {"rows": rows, "total": len(rows), "status": "archived", "date_bounds": date_bounds}
+
+
 def _payment_record_key(
     farm: str,
     cow_id: str,
@@ -1252,10 +1470,13 @@ def confirm_payments(
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     existing = _load_payment_records_for_items(db, items)
     confirmed = 0
+    to_freeze: list[SalesPaymentRecord] = []
     for item in items:
         farm, cow_id, etag, event_date = _parse_payment_item(item)
         record = _record_for_confirm(db, existing, farm, cow_id, etag, event_date, user)
+        already_archived = record.archived_at is not None
         part = (item.get("part") or "").strip().lower()
+        archive_now = False
         if part == "amount":
             record.amount_paid_at = now
         elif part == "bonus":
@@ -1263,18 +1484,53 @@ def confirm_payments(
         elif part == "both":
             record.amount_paid_at = now
             record.bonus_paid_at = now
+            archive_now = True
         else:
-            record.paid_at = now
-            record.archived_at = now
-            record.unarchived_at = None
-            confirmed += 1
-            continue
-        if record.amount_paid_at and record.bonus_paid_at:
-            record.paid_at = now
-            record.archived_at = now
-            record.unarchived_at = None
+            archive_now = True
+        if part in {"amount", "bonus"} and record.amount_paid_at and record.bonus_paid_at:
+            archive_now = True
         confirmed += 1
+        if archive_now and not already_archived:
+            to_freeze.append(record)
+    if to_freeze:
+        _save_archive_snapshots(db, to_freeze, now)
     return {"confirmed": confirmed}
+
+
+def _save_archive_snapshots(
+    db: Session,
+    records: list[SalesPaymentRecord],
+    now: dt.datetime,
+) -> None:
+    """Store the row as it stands, then mark it archived."""
+    farms = sorted({record.farm for record in records if record.farm})
+    live = list_sales_payments(
+        db,
+        status="active",
+        farms=farms,
+        include_date_bounds=False,
+    )
+    by_key: dict[tuple[str, str, str, dt.date], dict[str, Any]] = {}
+    for row in live["rows"]:
+        key = row.get("payment_key") or {}
+        event_raw = key.get("event_date")
+        if not event_raw:
+            continue
+        by_key[
+            (
+                key.get("farm") or "",
+                _normalize_key_part(key.get("cow_id")),
+                _normalize_key_part(key.get("etag")),
+                dt.date.fromisoformat(event_raw),
+            )
+        ] = row
+    for record in records:
+        record.paid_at = now
+        record.archived_at = now
+        record.unarchived_at = None
+        key = _payment_record_key(record.farm, record.cow_id, record.etag, record.event_date)
+        row = by_key.get(key) or _minimal_archive_snapshot(record)
+        record.archive_snapshot = _encode_archive_snapshot(_snapshot_from_live_row(row, record))
 
 
 def unarchive_payments(
@@ -1295,6 +1551,7 @@ def unarchive_payments(
         record.paid_at = None
         record.amount_paid_at = None
         record.bonus_paid_at = None
+        record.archive_snapshot = None
         record.unarchived_at = now
         record.confirmed_by_user_id = user.id
         restored += 1
