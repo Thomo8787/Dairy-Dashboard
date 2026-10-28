@@ -15,7 +15,7 @@ from services.database import AppSetting
 HERD_DATE_FORMAT = "%d/%m/%y"
 HERD_DATE_FORMATS = ("%d/%m/%y", "%d/%m/%Y")
 BATCH_SIZE = 2000
-BEEF_CBREED_MIN = 102
+BEEF_CBREED_MIN = 105
 CATEGORY_DAIRY = "Dairy"
 CATEGORY_BEEF = "Beef"
 
@@ -143,7 +143,7 @@ def store_split_source_fingerprints(
 
 
 def category_from_birth(cbrd: int | float | None, gndr: str | None) -> str:
-    """Dairy when CBRD < 102 and GNDR is F; all other rows are beef."""
+    """Dairy when CBRD is below 105 and GNDR is F; all other rows are beef."""
     try:
         if cbrd is None or pd.isna(cbrd):
             return CATEGORY_BEEF

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from services.database import CowEvent
 from services.farms import HERD_FARM_OPTIONS
 from services.events_common import normalize_farms
+from services.herd_import_utils import BEEF_CBREED_MIN
 
 STP_EVENT = "STP"
 STP_MAX_AGE_DAYS = 7
@@ -21,7 +22,6 @@ STP_BREED_DAIRY = "dairy"
 STP_BREED_UNKNOWN = "unknown"
 STP_BREED_OPTIONS: tuple[str, ...] = (STP_BREED_BEEF, STP_BREED_DAIRY)
 STP_DEFAULT_BREED_TYPES: tuple[str, ...] = (STP_BREED_DAIRY,)
-STP_BEEF_CBREED_MIN = 102  # Dairy CBRD < 102; beef CBRD >= 102
 
 STP_CATEGORY_EXCELLENT = "excellent"
 STP_CATEGORY_GOOD = "good"
@@ -97,10 +97,10 @@ def normalize_breed_types(breed_types: list[str] | None) -> list[str]:
 
 
 def classify_stp_breed(cbrd: int | None) -> str:
-    """Dairy CBRD codes are below 102; beef codes are 102 and above."""
+    """Dairy CBRD codes are below 105; beef codes are 105 and above."""
     if cbrd is None:
         return STP_BREED_UNKNOWN
-    if cbrd < STP_BEEF_CBREED_MIN:
+    if cbrd < BEEF_CBREED_MIN:
         return STP_BREED_DAIRY
     return STP_BREED_BEEF
 

@@ -48,9 +48,9 @@ def _effective_category_expression() -> ColumnElement:
         func.upper(func.coalesce(HerdBirth.gndr, "")) == "F",
     )
     return case(
+        (computed_dairy, literal(CATEGORY_DAIRY)),
         (HerdBirth.category == CATEGORY_DAIRY, literal(CATEGORY_DAIRY)),
         (HerdBirth.category == CATEGORY_BEEF, literal(CATEGORY_BEEF)),
-        (computed_dairy, literal(CATEGORY_DAIRY)),
         else_=literal(CATEGORY_BEEF),
     )
 
