@@ -1578,9 +1578,17 @@ def _edited_document(label: str | None, existing: list[dict[str, Any]]) -> dict[
 
 def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, Any]:
     """Use the popup figures on the saved archive row."""
+    farm_sold = (edit.get("farm_sold") or "").strip().upper()
+    if farm_sold in HERD_FARM_OPTIONS:
+        row["farm_sold"] = farm_sold
+    elif "farm_sold" in edit:
+        row["farm_sold"] = ""
     farm_paid = (edit.get("farm_paid") or "").strip().upper()
     if farm_paid in HERD_FARM_OPTIONS:
         row["farm_paid"] = farm_paid
+    reason = (edit.get("sales_reason") or "").strip()
+    if reason:
+        row["sales_reason"] = reason[:32]
     sold_name = (row.get("farm_sold") or "").strip()
     paid_name = (row.get("farm_paid") or "").strip()
     row["farms_match"] = bool(sold_name) and sold_name.upper() == paid_name.upper()

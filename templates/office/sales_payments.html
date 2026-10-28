@@ -494,16 +494,20 @@
       <p class="edit-etag" id="edit-etag"></p>
       <dl class="edit-readonly">
         <dt>Cow</dt><dd id="edit-cow"></dd>
-        <dt>Farm Sold</dt><dd id="edit-farm-sold"></dd>
         <dt>Age (mo)</dt><dd id="edit-age"></dd>
         <dt>Gender</dt><dd id="edit-gender"></dd>
         <dt>Breed</dt><dd id="edit-breed"></dd>
         <dt>Date sold</dt><dd id="edit-date"></dd>
-        <dt>Reason</dt><dd id="edit-reason"></dd>
       </dl>
       <div class="edit-fields">
+        <label>Farm Sold
+          <select id="edit-farm-sold"></select>
+        </label>
         <label>Farm Paid
           <select id="edit-farm-paid"></select>
+        </label>
+        <label>Reason
+          <select id="edit-reason"></select>
         </label>
         <label>DEST
           <select id="edit-dest"></select>
@@ -1320,14 +1324,32 @@
       editingRow = row;
       document.getElementById("edit-etag").textContent = row.etag || "—";
       document.getElementById("edit-cow").textContent = row.cow_id || "—";
-      document.getElementById("edit-farm-sold").textContent = row.farm_sold || "—";
       document.getElementById("edit-age").textContent = row.age_months != null ? row.age_months : "—";
       document.getElementById("edit-gender").textContent = row.gender || "—";
       document.getElementById("edit-breed").textContent = row.breed || "—";
       document.getElementById("edit-date").textContent = fmtDate(row.event_date);
-      document.getElementById("edit-reason").textContent = row.sales_reason || "—";
       const farms = [...document.querySelectorAll(".farm-slicer .slicer-btn")].map(btn => btn.dataset.value);
-      fillSelect(document.getElementById("edit-farm-paid"), farms, row.farm_paid || row.farm_sold || "");
+      const soldFarms = [...farms];
+      if (row.farm_sold && !soldFarms.includes(row.farm_sold)) soldFarms.unshift(row.farm_sold);
+      const farmSold = document.getElementById("edit-farm-sold");
+      fillSelect(farmSold, soldFarms, row.farm_sold || "");
+      const blankFarm = document.createElement("option");
+      blankFarm.value = "";
+      blankFarm.textContent = "";
+      farmSold.insertBefore(blankFarm, farmSold.firstChild);
+      if (!row.farm_sold) farmSold.value = "";
+      fillSelect(document.getElementById("edit-farm-paid"), farms, row.farm_paid || "");
+      const reasons = ["CULL", "TB", "OFS", "Beef", "Dairy"];
+      if (row.sales_reason && !reasons.includes(row.sales_reason)) reasons.unshift(row.sales_reason);
+      const reasonSelect = document.getElementById("edit-reason");
+      fillSelect(reasonSelect, reasons, row.sales_reason || "");
+      if (!row.sales_reason) {
+        const blankReason = document.createElement("option");
+        blankReason.value = "";
+        blankReason.textContent = "";
+        reasonSelect.insertBefore(blankReason, reasonSelect.firstChild);
+        reasonSelect.value = "";
+      }
       const dests = [...destChoices];
       if (row.dest && !dests.includes(row.dest)) dests.unshift(row.dest);
       fillSelect(document.getElementById("edit-dest"), dests, row.dest || "", { value: "__new__", label: "Add new" });
@@ -1414,7 +1436,9 @@
             items: [{
               ...editingRow.payment_key,
               edit: {
+                farm_sold: document.getElementById("edit-farm-sold").value,
                 farm_paid: document.getElementById("edit-farm-paid").value,
+                sales_reason: document.getElementById("edit-reason").value,
                 dest,
                 amount_gbp: document.getElementById("edit-amount").value,
                 amount_document: document.getElementById("edit-amount-doc").value,
