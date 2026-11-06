@@ -4,6 +4,10 @@ Inventory defines who is currently milking (LACT > 0, RPRO != DRY, and by
 default DIM > 4). Historical days are reconstructed from FRESH / DRY / SOLD /
 DIED events, with inventory freshen dates used for the current lactation.
 
+Today's Bank (BNK) count is cows in pens 89–93 on the shared ALH/BNK
+inventory. Those pens are left out of today's ALH count. Pen is only on the
+latest snapshot, so earlier dates still follow each farm's BNAME events.
+
 Pass ``min_dim=None`` to include fresh cows from the freshen date (used by
 Milking Efficiency ID Efficiency). Collections/Home keep the default DIM > 4.
 """
@@ -21,6 +25,33 @@ from services.database import CowEvent, HerdInventory
 
 _TRACKED_EVENTS = ("FRESH", "DRY", "SOLD", "DIED")
 MIN_DIM = 4
+SHARED_HERD_FARMS = frozenset({"ALH", "BNK"})
+BANK_FARM = "BNK"
+BANK_MILKING_PENS = frozenset({"89", "90", "91", "92", "93"})
+
+
+def snapshot_source_farms(farms: Iterable[str]) -> set[str]:
+    """Farms whose inventory rows can contribute to today's snapshot counts."""
+    keys = {(farm or "").strip().upper() for farm in farms if farm}
+    if keys & SHARED_HERD_FARMS:
+        keys |= set(SHARED_HERD_FARMS)
+    return keys
+
+
+def inventory_row_in_farm_snapshot(farm: str, pen: object, row_farm: str) -> bool:
+    """Whether an inventory row counts toward ``farm`` on today's snapshot.
+
+    Bank is pens 89–93 on the shared ALH/BNK herd. ALH keeps its BNAME rows
+    except those pens. Every other farm is its own inventory.
+    """
+    farm_key = (farm or "").strip().upper()
+    source = (row_farm or "").strip().upper()
+    in_bank = str(pen or "").strip() in BANK_MILKING_PENS
+    if farm_key == BANK_FARM:
+        return source in SHARED_HERD_FARMS and in_bank
+    if farm_key == "ALH":
+        return source == "ALH" and not in_bank
+    return source == farm_key
 
 
 def _is_milking_inventory_row(
@@ -56,14 +87,19 @@ def current_cows_in_milk(
     """Cows in milk from the latest inventory snapshot for ``farm``."""
     farm_key = (farm or "").strip().upper()
     rows = db.execute(
-        select(HerdInventory.rpro, HerdInventory.lact, HerdInventory.dim).where(
-            HerdInventory.farm == farm_key
-        )
+        select(
+            HerdInventory.farm,
+            HerdInventory.pen,
+            HerdInventory.rpro,
+            HerdInventory.lact,
+            HerdInventory.dim,
+        ).where(HerdInventory.farm.in_(sorted(snapshot_source_farms([farm_key]))))
     ).all()
     return sum(
         1
-        for rpro, lact, dim in rows
-        if _is_milking_inventory_row(rpro, lact, dim, min_dim=min_dim)
+        for row_farm, pen, rpro, lact, dim in rows
+        if inventory_row_in_farm_snapshot(farm_key, pen, row_farm)
+        and _is_milking_inventory_row(rpro, lact, dim, min_dim=min_dim)
     )
 
 
@@ -190,15 +226,19 @@ def cows_in_milk_for_dates(
         by_farm_cow[farm][str(cow_id)].append((event_date, event))
 
     inventory = db.scalars(
-        select(HerdInventory).where(HerdInventory.farm.in_(farm_keys))
+        select(HerdInventory).where(
+            HerdInventory.farm.in_(sorted(snapshot_source_farms(farm_keys)))
+        )
     ).all()
     inv_by_farm: dict[str, dict[str, HerdInventory]] = defaultdict(dict)
     for row in inventory:
+        if row.farm not in farm_keys or not row.cow_id:
+            continue
         try:
             lact_n = float(row.lact) if row.lact is not None else 0.0
         except (TypeError, ValueError):
             lact_n = 0.0
-        if lact_n <= 0 or not row.cow_id:
+        if lact_n <= 0:
             continue
         inv_by_farm[row.farm][str(row.cow_id)] = row
 
@@ -207,8 +247,9 @@ def cows_in_milk_for_dates(
         inv_map = inv_by_farm.get(farm, {})
         inv_today = sum(
             1
-            for row in inv_map.values()
-            if _is_milking_inventory_row(row.rpro, row.lact, row.dim, min_dim=min_dim)
+            for row in inventory
+            if inventory_row_in_farm_snapshot(farm, row.pen, row.farm)
+            and _is_milking_inventory_row(row.rpro, row.lact, row.dim, min_dim=min_dim)
         )
 
         cow_ids = set(by_farm_cow.get(farm, {})) | set(inv_map)
