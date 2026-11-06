@@ -52,16 +52,18 @@ html, body {
 }
 
 .brand {
-  padding: 0.5rem 0.75rem 1rem;
+  padding: 0.25rem 0.35rem 0.85rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
 }
 
-.brand-mark {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.55rem;
-  line-height: 1.15;
-  font-weight: 700;
+.brand-logo {
+  display: block;
+  width: min(100%, 9.5rem);
+  height: auto;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 12px;
 }
 
 .brand-sub {
@@ -1300,12 +1302,11 @@ body.me-trend-open {
   padding: 1.75rem 1.6rem 1.8rem;
 }
 
-.login-brand {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.55rem;
-  font-weight: 700;
-  color: var(--accent);
+.login-logo {
+  display: block;
+  width: min(210px, 72%);
+  height: auto;
+  margin: 0 auto 0.15rem;
 }
 
 .login-title {
@@ -1414,4 +1415,69 @@ body.me-trend-open {
   margin: 0.2rem 0 0;
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.filter-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.filter-panel-chevron {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-1px);
+  flex: 0 0 auto;
+}
+
+.page-layout.is-filters-collapsed .filter-panel-chevron {
+  transform: rotate(-45deg);
+}
+
+.page-layout.is-filters-collapsed .filter-panel > :not(.filter-panel-head),
+.page-layout.is-filters-collapsed .filter-panel ~ .filter-panel {
+  display: none;
+}
+
+.page-layout.is-filters-collapsed .filter-panel-head,
+.page-layout.is-filters-collapsed .filter-panel h2.filter-panel-head {
+  margin: 0;
+}
+
+.page-layout.is-filters-collapsed .filter-panel {
+  padding: 0.65rem 0.85rem;
+}
+
+@media (min-width: 901px) {
+  .page-layout.is-filters-collapsed {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .page-layout.is-filters-collapsed > .sidebar-column,
+  .page-layout.is-filters-collapsed > .filter-panel {
+    justify-self: start;
+    width: max-content;
+    min-width: 0;
+  }
 }

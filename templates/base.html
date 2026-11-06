@@ -18,7 +18,11 @@
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <p class="brand-mark">Thomasson Farms</p>
+        <img
+          class="brand-logo"
+          src="{{ url_for('static', filename='img/thomasson-farms-logo.webp') }}"
+          alt="Thomasson Farms"
+        >
         <p class="brand-sub">Dashboard</p>
       </div>
 
@@ -262,6 +266,7 @@
     }
   </script>
   <script src="{{ url_for('static', filename='js/filter-persist.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/filter-collapse.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
