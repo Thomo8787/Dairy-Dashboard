@@ -197,6 +197,22 @@ def _farm_for_etag(
     return farm if farm in HERD_FARM_OPTIONS else None
 
 
+def _farm_from_existing_sale(db: Session, etag: str) -> str | None:
+    """Farm already used for this ear tag. A Warrendale £80 can arrive with no sold event."""
+    row = db.scalars(
+        select(CattleSaleLine)
+        .where(
+            CattleSaleLine.etag == etag,
+            CattleSaleLine.is_bonus.is_(False),
+        )
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    farm = (row.farm or "").strip().upper()
+    return farm if farm in HERD_FARM_OPTIONS else None
+
+
 def _is_warrendale_bonus_line(buyer: str | None, amount: float | None) -> bool:
     """True only for the Warrendale £80 bonus, so it can share a date with the calf price."""
     if (buyer or "").strip() != BUYER_WARRENDALE:
@@ -357,11 +373,13 @@ def _import_one_result(
         etag = normalize_etag(line.get("etag"))
         if not etag:
             continue
+        is_bonus = _is_warrendale_bonus_line(buyer, line["amount_gbp"])
         line_farm = farm or _farm_for_etag(db, etag, line_sale_date)
+        if not line_farm and is_bonus:
+            line_farm = _farm_from_existing_sale(db, etag)
         if not line_farm:
             summary["warnings"].append(f"{source_file}: could not determine farm for {etag}")
             continue
-        is_bonus = _is_warrendale_bonus_line(buyer, line["amount_gbp"])
         parsed_by_key[(etag, is_bonus)] = {
             "farm": line_farm,
             "etag": etag,

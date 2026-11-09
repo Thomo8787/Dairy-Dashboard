@@ -779,6 +779,31 @@ def _remittance_sales_reason(buyer: str | None, identity) -> str:
     return "CULL"
 
 
+def _warrendale_bonuses_for_lines(
+    db: Session,
+    farms: list[str],
+    sale_lines: list[CattleSaleLine],
+) -> dict[tuple[str, str], CattleSaleLine]:
+    """£80 premiums for these ear tags, including ones dated outside the list filter."""
+    etags = {normalize_etag(line.etag) for line in sale_lines if line.etag}
+    etags.discard("")
+    if not etags:
+        return {}
+    rows = db.scalars(
+        select(CattleSaleLine).where(
+            CattleSaleLine.farm.in_(farms),
+            CattleSaleLine.is_bonus.is_(True),
+            CattleSaleLine.etag.in_(etags),
+        )
+    ).all()
+    found: dict[tuple[str, str], CattleSaleLine] = {}
+    for row in rows:
+        etag = normalize_etag(row.etag)
+        if etag:
+            found[(row.farm, etag)] = row
+    return found
+
+
 def _unmatched_remittance_rows(
     db: Session,
     *,
@@ -848,11 +873,20 @@ def _unmatched_remittance_rows(
                 ),
             )
     archived_etags = _archived_payment_etags(db) if sale_lines else set()
+    bonus_by_key = _warrendale_bonuses_for_lines(db, farms, sale_lines)
+    calf_keys = {
+        (line.farm, normalize_etag(line.etag))
+        for line in sale_lines
+        if normalize_etag(line.etag) and not _is_warrendale_bonus_line(line)
+    }
     extra: list[dict[str, Any]] = []
     for line in sale_lines:
         etag = normalize_etag(line.etag)
         if not etag or etag in archived_etags or (line.farm, etag) in shown_farm_etags:
             continue
+        if _is_warrendale_bonus_line(line) and (line.farm, etag) in calf_keys:
+            continue
+        bonus_line = None if _is_warrendale_bonus_line(line) else bonus_by_key.get((line.farm, etag))
         buyer = (line.buyer or "").strip()
         if not _dests_match(buyer, dest):
             continue
@@ -877,13 +911,23 @@ def _unmatched_remittance_rows(
         sales_reason = _remittance_sales_reason(line.buyer, identity)
         if reasons and sales_reason not in reasons:
             continue
-        warrendale_split = sales_reason == "Beef" and _is_warrendale_line(line)
-        bonus_gbp = (
-            round(float(line.amount_gbp), 2)
-            if warrendale_split and _is_warrendale_bonus(line.amount_gbp)
-            else None
+        warrendale_split = sales_reason == "Beef" and (
+            _is_warrendale_line(line) or bonus_line is not None
         )
-        calf_amount = None if bonus_gbp is not None else (line.amount_gbp if has_sale_amount else None)
+        if bonus_line is not None:
+            bonus_gbp = round(float(bonus_line.amount_gbp), 2)
+            calf_amount = line.amount_gbp if has_sale_amount else None
+        else:
+            bonus_gbp = (
+                round(float(line.amount_gbp), 2)
+                if warrendale_split and _is_warrendale_bonus(line.amount_gbp)
+                else None
+            )
+            calf_amount = None if bonus_gbp is not None else (line.amount_gbp if has_sale_amount else None)
+        if warrendale_split:
+            display_amount = _display_amount(calf_amount, bonus_gbp, False, False)
+        else:
+            display_amount = calf_amount
         extra.append(
             _row_to_dict(
                 line.farm,
@@ -895,7 +939,7 @@ def _unmatched_remittance_rows(
                 identity.gndr if identity else None,
                 identity.bdat if identity else None,
                 getattr(identity, "cbrd", None) if identity else None,
-                amount_gbp=calf_amount,
+                amount_gbp=display_amount,
                 sale_rejected=rejected,
                 has_sale_amount=has_sale_amount,
                 bonus_gbp=bonus_gbp,
@@ -911,7 +955,12 @@ def _unmatched_remittance_rows(
                 farm_sold=other_farm or "",
                 farm_paid=line.farm,
                 documents=_documents_for_files(
-                    (line.source_file, line.source_message_id)
+                    (line.source_file, line.source_message_id),
+                    (
+                        (bonus_line.source_file, bonus_line.source_message_id)
+                        if bonus_line is not None
+                        else (None, None)
+                    ),
                 ),
                 cold_weight_kg=_cold_weight_kg(line),
                 price_per_kg=_price_per_kg(calf_amount, _cold_weight_kg(line), rejected),
