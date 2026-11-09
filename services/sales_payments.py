@@ -1643,52 +1643,99 @@ def _edited_document(label: str | None, existing: list[dict[str, Any]]) -> dict[
     return {"label": text, "file": text}
 
 
-def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, Any]:
-    """Use the popup figures on the saved archive row."""
-    farm_sold = (edit.get("farm_sold") or "").strip().upper()
-    if farm_sold in HERD_FARM_OPTIONS:
-        row["farm_sold"] = farm_sold
-    elif "farm_sold" in edit:
-        row["farm_sold"] = ""
-    farm_paid = (edit.get("farm_paid") or "").strip().upper()
-    if farm_paid in HERD_FARM_OPTIONS:
-        row["farm_paid"] = farm_paid
-    reason = (edit.get("sales_reason") or "").strip()
-    if reason:
-        row["sales_reason"] = reason[:32]
-    sold_name = (row.get("farm_sold") or "").strip()
-    paid_name = (row.get("farm_paid") or "").strip()
-    row["farms_match"] = bool(sold_name) and sold_name.upper() == paid_name.upper()
-    row["dest"] = (edit.get("dest") or "").strip()[:128]
-    amount = _parse_edit_money(edit.get("amount_gbp"))
-    bonus = _parse_edit_money(edit.get("bonus_gbp"))
-    row["amount_gbp"] = amount
-    row["bonus_gbp"] = bonus
-    row["has_sale_amount"] = amount is not None or bonus is not None or bool(row.get("sale_rejected"))
+def _existing_amount_and_bonus_docs(
+    row: dict[str, Any],
+) -> tuple[dict[str, str] | None, dict[str, str] | None]:
     existing = row.get("documents") if isinstance(row.get("documents"), list) else []
-    documents: list[dict[str, str]] = []
-    amount_doc = _edited_document(edit.get("amount_document"), existing)
-    bonus_doc = _edited_document(edit.get("bonus_document"), existing)
-    if amount_doc:
-        documents.append(amount_doc)
-    if bonus_doc and (amount_doc is None or bonus_doc["label"].upper() != amount_doc["label"].upper()):
-        documents.append(bonus_doc)
-    row["documents"] = documents
-    row["note"] = (edit.get("note") or "").strip()[:500]
-    weight = _parse_edit_money(edit.get("cold_weight_kg"))
-    if weight is not None and weight <= 0:
-        weight = None
-    row["cold_weight_kg"] = weight
-    row["price_per_kg"] = _price_per_kg(amount, weight, bool(row.get("sale_rejected")))
-    if bonus is not None:
-        row["warrendale_split"] = True
-        row["amount_paid"] = amount is not None
-        row["bonus_paid"] = True
-    else:
-        row["warrendale_split"] = False
-        row["amount_paid"] = False
-        row["bonus_paid"] = False
-    row["confirm_part"] = None
+    docs = [doc for doc in existing if isinstance(doc, dict)]
+    amount = row.get("amount_gbp")
+    try:
+        has_amount = amount is not None and float(amount) > 0
+    except (TypeError, ValueError):
+        has_amount = False
+    has_bonus = row.get("bonus_gbp") is not None
+    if len(docs) >= 2:
+        return docs[0], docs[1]
+    if len(docs) == 1 and has_bonus and not has_amount:
+        return None, docs[0]
+    if len(docs) == 1:
+        return docs[0], None
+    return None, None
+
+
+def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, Any]:
+    """Use the popup figures on the saved archive row.
+
+    A group edit sends only the shared fields. Amount, weight, and bonus stay
+    on the row when those keys are absent.
+    """
+    if "farm_sold" in edit:
+        farm_sold = (edit.get("farm_sold") or "").strip().upper()
+        row["farm_sold"] = farm_sold if farm_sold in HERD_FARM_OPTIONS else ""
+    if "farm_paid" in edit:
+        farm_paid = (edit.get("farm_paid") or "").strip().upper()
+        if farm_paid in HERD_FARM_OPTIONS:
+            row["farm_paid"] = farm_paid
+    if "sales_reason" in edit:
+        reason = (edit.get("sales_reason") or "").strip()
+        if reason:
+            row["sales_reason"] = reason[:32]
+    if "farm_sold" in edit or "farm_paid" in edit:
+        sold_name = (row.get("farm_sold") or "").strip()
+        paid_name = (row.get("farm_paid") or "").strip()
+        row["farms_match"] = bool(sold_name) and sold_name.upper() == paid_name.upper()
+    if "dest" in edit:
+        row["dest"] = (edit.get("dest") or "").strip()[:128]
+    if "amount_gbp" in edit or "bonus_gbp" in edit:
+        if "amount_gbp" in edit:
+            row["amount_gbp"] = _parse_edit_money(edit.get("amount_gbp"))
+        if "bonus_gbp" in edit:
+            row["bonus_gbp"] = _parse_edit_money(edit.get("bonus_gbp"))
+        amount = row.get("amount_gbp")
+        bonus = row.get("bonus_gbp")
+        row["has_sale_amount"] = amount is not None or bonus is not None or bool(row.get("sale_rejected"))
+        if "bonus_gbp" in edit:
+            if bonus is not None:
+                row["warrendale_split"] = True
+                row["amount_paid"] = amount is not None
+                row["bonus_paid"] = True
+            else:
+                row["warrendale_split"] = False
+                row["amount_paid"] = False
+                row["bonus_paid"] = False
+            row["confirm_part"] = None
+    if "amount_document" in edit or "bonus_document" in edit:
+        existing = row.get("documents") if isinstance(row.get("documents"), list) else []
+        current_amount, current_bonus = _existing_amount_and_bonus_docs(row)
+        amount_doc = (
+            _edited_document(edit.get("amount_document"), existing)
+            if "amount_document" in edit
+            else current_amount
+        )
+        bonus_doc = (
+            _edited_document(edit.get("bonus_document"), existing)
+            if "bonus_document" in edit
+            else current_bonus
+        )
+        documents: list[dict[str, str]] = []
+        if amount_doc:
+            documents.append(amount_doc)
+        if bonus_doc and (amount_doc is None or bonus_doc["label"].upper() != amount_doc["label"].upper()):
+            documents.append(bonus_doc)
+        row["documents"] = documents
+    if "note" in edit:
+        row["note"] = (edit.get("note") or "").strip()[:500]
+    if "cold_weight_kg" in edit:
+        weight = _parse_edit_money(edit.get("cold_weight_kg"))
+        if weight is not None and weight <= 0:
+            weight = None
+        row["cold_weight_kg"] = weight
+    if "amount_gbp" in edit or "cold_weight_kg" in edit:
+        row["price_per_kg"] = _price_per_kg(
+            row.get("amount_gbp"),
+            row.get("cold_weight_kg"),
+            bool(row.get("sale_rejected")),
+        )
     return row
 
 
