@@ -3,7 +3,7 @@
 Neilds: auctionmarts.com
 Pickstock: pickstocktelford.co.uk
 Gamechanger: gamechangerfarming.com
-Market Drayton: barbers-auctions.co.uk
+Market Drayton: barbers-auctions.co.uk and mdm-auctions.co.uk
 Mold: contact@jbradburneprice.com when the subject or message contains
 Mold Stock Sale.
 Warrendale: messaging-service@post.xero.com when the subject contains
@@ -47,6 +47,7 @@ _SENDER_DOMAINS: tuple[tuple[str, str], ...] = (
     ("pickstocktelford.co.uk", "pickstock"),
     ("gamechangerfarming.com", "gamechanger"),
     ("barbers-auctions.co.uk", "market_drayton"),
+    ("mdm-auctions.co.uk", "market_drayton"),
 )
 _WARRENDALE_SENDER = "messaging-service@post.xero.com"
 _MOLD_SENDER_DOMAIN = "contact@jbradburneprice.com"

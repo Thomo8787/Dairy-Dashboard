@@ -1,74 +1,135 @@
-"""Parse Market Drayton (Barbers) sellers-list remittances.
+"""Parse Market Drayton (Barbers / MDM) sellers lists and BACS statements.
 
-These PDFs are usually scanned. Windows OCR word boxes pair ear tags with amounts.
+Text PDFs are read from word positions. Scanned pages fall back to OCR.
+The animal price is the rightmost money on the ear-tag row. Commission, VAT,
+tolls, and the statement gross are not animal lines.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import io
 import re
 from typing import Any
 
+import pdfplumber
+
 from services.cattle_sale_pdf import extract_pdf_images, ocr_words_from_image
-from services.farms import HERD_FARM_OPTIONS
 from services.neilds_pdf import repair_etag
 
 BUYER_MARKET_DRAYTON = "Market Drayton"
 
-_TAG_RE = re.compile(r"UK[I1L]?\s*[0-9A-Z]{8,16}", re.IGNORECASE)
-_FILENAME_DATE_RE = re.compile(
+# Market Drayton account number -> herd. Bank Farm has no account yet.
+_ACCOUNT_FARMS: tuple[tuple[str, str], ...] = (
+    ("T1588", "SFR"),
+    ("T1386", "PRK"),
+    ("T934", "COF"),
+    ("T304", "ALH"),
+)
+_FARM_MARKERS: tuple[tuple[str, str], ...] = (
+    ("ASTON LOWER", "ALH"),
+    ("ASTON JUXTA", "ALH"),
+    ("ASTON LO", "ALH"),
+    ("BANK FARM", "BNK"),
+    ("PARK HALL", "SFR"),
+    ("PARR HALL", "SFR"),
+    ("THE PARKES", "PRK"),
+    ("CHERRY ORCHARD", "COF"),
+    ("THOMASSON LIVESTOCK", "ALH"),
+)
+_TAG_RE = re.compile(r"UK\s*[0-9A-Z]{10,16}", re.IGNORECASE)
+_SEP_DATE_RE = re.compile(
     r"(?<!\d)(\d{1,2})[-./](\d{1,2})[-./](\d{2,4})(?!\d)"
 )
-_AMOUNT_TOKEN_RE = re.compile(r"^[\d,]+\.?\d{0,2}$")
+_COMPACT_DATE_RE = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)")
+_MONEY_RE = re.compile(r"^-?\d{1,5}\.\d{2}$")
+# OCR sometimes reads the decimal point as a colon, then a stray mark: 240:007.
+_OCR_MONEY_RE = re.compile(r"(\d{1,5})[.:](\d{2})")
+_WEIGHT_RE = re.compile(r"^\d{2,3}\.\d$")
+_SKIP_ROW_RE = re.compile(
+    r"gross|commission|tolls|\bvat\b|\bnet\b|\bpph\b|credited|sort code|retention",
+    re.IGNORECASE,
+)
 
 
 def looks_like_market_drayton_pdf(text: str, source_file: str | None = None) -> bool:
     haystack = f"{source_file or ''}\n{text}".lower()
-    if "market drayton" in haystack or "barbers-auction" in haystack:
+    if any(
+        phrase in haystack
+        for phrase in (
+            "market drayton",
+            "barbers",
+            "mdm-auction",
+            "orange market",
+        )
+    ):
         return True
     name = (source_file or "").lower()
     if "sellers list" in name:
         return True
-    return False
+    compact = re.sub(r"[^a-z0-9]", "", haystack)
+    return any(account.lower() in compact for account, _farm in _ACCOUNT_FARMS)
 
 
-def _date_from_filename(source_file: str | None) -> dt.date | None:
-    if not source_file:
-        return None
-    match = _FILENAME_DATE_RE.search(source_file)
-    if not match:
-        return None
-    day, month, year = match.group(1), match.group(2), match.group(3)
-    if len(year) == 2:
-        year = f"20{year}"
+def _date_from_parts(day: int, month: int, year: int) -> dt.date | None:
+    if year < 100:
+        year += 2000
     try:
-        return dt.date(int(year), int(month), int(day))
+        return dt.date(year, month, day)
     except ValueError:
         return None
 
 
-def _farm_from_words(words: list[dict[str, Any]], source_file: str | None) -> str | None:
-    text = " ".join(word["text"] for word in words).upper()
-    haystack = f"{source_file or ''}\n{text}"
-    markers = (
-        ("ASTON LO", "ALH"),
-        ("ASTON JUXTA", "ALH"),
-        ("BANK FARM", "BNK"),
-        ("PARK HALL", "SFR"),
-        ("THE PARKES", "PRK"),
-        ("CHERRY ORCHARD", "COF"),
-        ("THOMASSON LIVESTOCK", "ALH"),
-    )
-    for marker, farm in markers:
-        if marker in haystack:
-            return farm
-    for farm in HERD_FARM_OPTIONS:
-        if re.search(rf"\b{farm}\b", haystack):
+def _date_from_match(match: re.Match[str]) -> dt.date | None:
+    return _date_from_parts(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _date_from_text(text: str | None) -> dt.date | None:
+    if not text:
+        return None
+    separated = _SEP_DATE_RE.search(text)
+    if separated:
+        return _date_from_match(separated)
+    compact = _COMPACT_DATE_RE.search(text)
+    if compact:
+        return _date_from_match(compact)
+    return None
+
+
+def _account_farm(text: str | None) -> str | None:
+    compact = re.sub(r"[^A-Za-z0-9]", "", text or "").upper()
+    for account, farm in _ACCOUNT_FARMS:
+        if account in compact:
             return farm
     return None
 
 
-def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 16.0) -> list[list[dict[str, Any]]]:
+def _farm_from_address(text: str | None) -> str | None:
+    haystack = (text or "").upper()
+    for marker, farm in _FARM_MARKERS:
+        if marker in haystack:
+            return farm
+    return None
+
+
+def _etag_from_text(text: str) -> str | None:
+    match = _TAG_RE.search(text.replace(" ", ""))
+    if match is None:
+        match = _TAG_RE.search(text)
+    if match is None:
+        return None
+    etag = repair_etag(match.group(0))
+    if not etag or not etag.startswith("UK"):
+        return None
+    digits = re.sub(r"\D", "", etag[2:])
+    if len(digits) > 12:
+        digits = digits[:12]
+    if len(digits) < 10:
+        return None
+    return f"UK{digits}"
+
+
+def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 8.0) -> list[list[dict[str, Any]]]:
     ordered = sorted(words, key=lambda word: (word["y"], word["x"]))
     rows: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
@@ -87,111 +148,122 @@ def _cluster_rows(words: list[dict[str, Any]], y_tol: float = 16.0) -> list[list
     return rows
 
 
-def _row_tag(row: list[dict[str, Any]]) -> str | None:
-    joined = " ".join(word["text"] for word in sorted(row, key=lambda item: item["x"]))
-    match = _TAG_RE.search(joined.replace(" ", ""))
-    if match is None:
-        match = _TAG_RE.search(joined)
-    if match is None:
-        return None
-    etag = repair_etag(match.group(0))
-    if not etag or not etag.startswith("UK"):
-        return None
-    digits = etag[2:]
-    if len(digits) >= 12:
-        digits = digits[:12]
-    if len(digits) < 10 or not digits.isdigit():
-        return None
-    return f"UK{digits}"
+def _row_text(row: list[dict[str, Any]]) -> str:
+    return " ".join(word["text"] for word in sorted(row, key=lambda item: item["x"]))
 
 
-def _parse_amount_token(text: str) -> float | None:
-    raw = text.replace(",", "").replace(" ", "")
-    if raw.isdigit() and 2 <= len(raw) <= 4:
-        raw = f"{raw}.00"
-    elif re.fullmatch(r"\d{2,5}00", raw) and "." not in raw and int(raw) >= 10000:
-        raw = f"{raw[:-2]}.{raw[-2:]}"
-    try:
+def _row_tag(row: list[dict[str, Any]]) -> tuple[str | None, float | None]:
+    for word in sorted(row, key=lambda item: item["x"]):
+        etag = _etag_from_text(word["text"])
+        if etag:
+            return etag, float(word["x"])
+    return _etag_from_text(_row_text(row)), None
+
+
+def _money_value(text: str) -> float | None:
+    raw = text.replace(",", "").replace("£", "").replace(" ", "")
+    if raw.startswith("-"):
+        return None
+    if _MONEY_RE.match(raw):
         value = float(raw)
-    except ValueError:
-        return None
-    if value < 20 or value > 2500:
+    else:
+        match = _OCR_MONEY_RE.search(raw)
+        if match is None:
+            return None
+        value = float(f"{match.group(1)}.{match.group(2)}")
+    if value < 20 or value > 8000:
         return None
     return round(value, 2)
 
 
-def _row_amount(row: list[dict[str, Any]]) -> float | None:
-    # Rightmost money column — avoid concatenating nearby footer totals.
-    values: list[tuple[float, float]] = []
+def _row_amount(row: list[dict[str, Any]], tag_x: float | None) -> tuple[float | None, float | None]:
+    """Rightmost animal price, and the x of that token."""
+    found: list[tuple[float, float]] = []
     for word in row:
-        if word["x"] < 1300:
+        if tag_x is not None and word["x"] <= tag_x:
             continue
-        if not _AMOUNT_TOKEN_RE.match(word["text"].replace(",", "")):
+        value = _money_value(word["text"])
+        if value is None:
             continue
-        value = _parse_amount_token(word["text"])
-        if value is not None:
-            values.append((word["x"], value))
-    if not values:
+        found.append((float(word["x"]), value))
+    if not found:
+        return None, None
+    found.sort(key=lambda item: item[0])
+    return found[-1][1], found[-1][0]
+
+
+def _row_weight(
+    row: list[dict[str, Any]],
+    tag_x: float | None,
+    amount_x: float | None,
+) -> float | None:
+    if tag_x is None or amount_x is None:
         return None
-    values.sort(key=lambda item: item[0])
-    return values[-1][1]
-
-
-def _row_weight(row: list[dict[str, Any]]) -> float | None:
-    candidates: list[float] = []
-    for word in row:
-        if word["x"] < 900 or word["x"] >= 1300:
+    for word in sorted(row, key=lambda item: item["x"]):
+        if word["x"] <= tag_x or word["x"] >= amount_x:
             continue
-        raw = word["text"].replace(",", "")
-        try:
-            value = float(raw)
-        except ValueError:
+        raw = word["text"].replace(",", "").replace(" ", "")
+        if not _WEIGHT_RE.match(raw):
             continue
+        value = float(raw)
         if 80 <= value <= 900:
-            candidates.append(value)
-    if not candidates:
-        return None
-    return round(candidates[0], 2)
+            return round(value, 1)
+    return None
 
 
-def parse_market_drayton_pdf(
-    content: bytes,
-    *,
-    mailbox_farm: str | None = None,
-    source_file: str | None = None,
-) -> dict[str, Any]:
-    warnings: list[str] = []
-    images = extract_pdf_images(content)
-    if not images:
-        return {
-            "farm": mailbox_farm,
-            "sale_date": _date_from_filename(source_file),
-            "lines": [],
-            "warnings": ["PDF contained no page images to OCR"],
-            "buyer": BUYER_MARKET_DRAYTON,
-        }
+def _text_pages(content: bytes) -> list[list[dict[str, Any]]]:
+    pages: list[list[dict[str, Any]]] = []
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            words: list[dict[str, Any]] = []
+            for word in page.extract_words() or []:
+                text = (word.get("text") or "").strip()
+                if not text:
+                    continue
+                words.append(
+                    {
+                        "text": text,
+                        "x": float(word["x0"]),
+                        "y": float(word["top"]),
+                    }
+                )
+            if words:
+                pages.append(words)
+    return pages
 
-    sale_date = _date_from_filename(source_file)
-    farm = mailbox_farm
+
+def _pages_have_tag(pages: list[list[dict[str, Any]]]) -> bool:
+    for page in pages:
+        if _etag_from_text(" ".join(word["text"] for word in page)):
+            return True
+    return False
+
+
+def _ocr_pages(content: bytes) -> list[list[dict[str, Any]]]:
+    pages: list[list[dict[str, Any]]] = []
+    for image in extract_pdf_images(content):
+        words = ocr_words_from_image(image, scale=2)
+        if words:
+            pages.append(words)
+    return pages
+
+
+def _lines_from_pages(
+    pages: list[list[dict[str, Any]]],
+    sale_date: dt.date | None,
+) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
     seen: set[str] = set()
-    ocr_pages = 0
-    for image in images:
-        page_words = ocr_words_from_image(image, scale=2)
-        if not page_words:
-            continue
-        ocr_pages += 1
-        if farm is None:
-            farm = _farm_from_words(page_words, source_file)
-        for row in _cluster_rows(page_words):
-            etag = _row_tag(row)
-            amount = _row_amount(row)
-            if not etag or amount is None:
+    for page in pages:
+        for row in _cluster_rows(page):
+            if _SKIP_ROW_RE.search(_row_text(row)):
                 continue
-            if etag in seen:
+            etag, tag_x = _row_tag(row)
+            amount, amount_x = _row_amount(row, tag_x)
+            if not etag or amount is None or etag in seen:
                 continue
             seen.add(etag)
-            weight = _row_weight(row)
+            weight = _row_weight(row, tag_x, amount_x)
             lines.append(
                 {
                     "etag": etag,
@@ -202,15 +274,39 @@ def parse_market_drayton_pdf(
                     "is_rejected": False,
                 }
             )
+    return lines
 
-    if ocr_pages == 0:
-        warnings.append("PDF contained no extractable text (scanned remittance needs OCR)")
-    if farm is None:
-        farm = _farm_from_words([], source_file)
+
+def parse_market_drayton_pdf(
+    content: bytes,
+    *,
+    mailbox_farm: str | None = None,
+    source_file: str | None = None,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    pages = _text_pages(content)
+    if not _pages_have_tag(pages):
+        pages = _ocr_pages(content)
+        if not pages:
+            warnings.append("PDF contained no page text to read")
+
+    page_text = "\n".join(
+        word["text"] for page in pages for word in page
+    )
+    sale_date = _date_from_text(source_file) or _date_from_text(page_text)
+    farm = (
+        _account_farm(source_file)
+        or _account_farm(page_text)
+        or _farm_from_address(page_text)
+        or mailbox_farm
+    )
+    lines = _lines_from_pages(pages, sale_date)
     if not lines:
         warnings.append("No sale lines extracted from PDF")
     if sale_date is None:
-        warnings.append("Could not parse sale date from filename")
+        warnings.append("Could not parse sale date")
+    if farm is None:
+        warnings.append("Could not determine farm from the account number or address")
 
     return {
         "farm": farm,
