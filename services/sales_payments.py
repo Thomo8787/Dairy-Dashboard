@@ -1029,6 +1029,24 @@ def _compute_date_bounds(
     return {"min": min_date.isoformat(), "max": max_date.isoformat()}
 
 
+def _sales_payment_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Date sold, then the calf document, then farm sold, then ear tag.
+
+    The first document is the calf purchase order. A Warrendale £80 on the
+    same row stays with that purchase order so one document is a single block.
+    """
+    documents = row.get("documents") if isinstance(row.get("documents"), list) else []
+    label = ""
+    if documents and isinstance(documents[0], dict):
+        label = (documents[0].get("label") or "").strip()
+    return (
+        str(row.get("event_date") or ""),
+        label.casefold(),
+        (row.get("farm_sold") or "").strip().casefold(),
+        (row.get("etag") or "").strip().casefold(),
+    )
+
+
 def list_sales_payments(
     db: Session,
     *,
@@ -1284,7 +1302,7 @@ def list_sales_payments(
             etag_contains=etag_fragment or None,
         )
         rows.extend(extra_rows)
-    rows.sort(key=lambda row: (row["event_date"], row["dest"], row["etag"]))
+    rows.sort(key=_sales_payment_sort_key)
 
     return {"rows": rows, "total": len(rows), "status": status, "date_bounds": date_bounds}
 
@@ -1515,7 +1533,7 @@ def _list_archived_snapshots(
         ):
             continue
         rows.append(row)
-    rows.sort(key=lambda row: (row.get("event_date") or "", row.get("dest") or "", row.get("etag") or ""))
+    rows.sort(key=_sales_payment_sort_key)
     date_bounds = None
     if include_date_bounds:
         date_bounds = _compute_date_bounds(
