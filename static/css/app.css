@@ -52,8 +52,10 @@ html, body {
 }
 
 .brand {
-  padding: 0.25rem 0.35rem 0.85rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin: -1.5rem -1rem 0;
+  padding: 1.25rem 1rem 0.85rem;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
   text-align: center;
 }
 
@@ -62,16 +64,16 @@ html, body {
   width: min(100%, 9.5rem);
   height: auto;
   margin: 0 auto;
-  background: #fff;
-  border-radius: 12px;
+  background: transparent;
+  border-radius: 0;
 }
 
 .brand-sub {
   margin: 0.35rem 0 0;
-  color: var(--sidebar-muted);
+  color: var(--sidebar);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  font-size: 0.75rem;
+  font-size: 1.2rem;
   font-weight: 600;
 }
 
