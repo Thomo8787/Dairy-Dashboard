@@ -4,12 +4,13 @@ Inventory defines who is currently milking (LACT > 0, RPRO != DRY, and by
 default DIM > 4). Historical days are reconstructed from FRESH / DRY / SOLD /
 DIED events, with inventory freshen dates used for the current lactation.
 
-Today's Bank (BNK) count is cows in pens 89–93 on the shared ALH/BNK
-inventory. Those pens are left out of today's ALH count. Pen is only on the
-latest snapshot, so earlier dates still follow each farm's BNAME events.
+On the shared ALH/BNK herd, today's Bank count is pens 89–93 and ALH is every
+other milking cow, ignoring BNAME. Those two totals are stored for the UK date
+so a later day still shows them. Dates with no stored total still follow events.
 
 Pass ``min_dim=None`` to include fresh cows from the freshen date (used by
-Milking Efficiency ID Efficiency). Collections/Home keep the default DIM > 4.
+Milking Efficiency ID Efficiency). That path does not read or write the stored
+totals. Collections/Home keep the default DIM > 4.
 """
 
 from __future__ import annotations
@@ -17,11 +18,14 @@ from __future__ import annotations
 import datetime as dt
 from collections import defaultdict
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.database import CowEvent, HerdInventory
+from services.database import CowEvent, CowsInMilkDay, HerdInventory
+
+_UK = ZoneInfo("Europe/London")
 
 _TRACKED_EVENTS = ("FRESH", "DRY", "SOLD", "DIED")
 MIN_DIM = 4
@@ -38,11 +42,15 @@ def snapshot_source_farms(farms: Iterable[str]) -> set[str]:
     return keys
 
 
+def _uk_today() -> dt.date:
+    return dt.datetime.now(_UK).date()
+
+
 def inventory_row_in_farm_snapshot(farm: str, pen: object, row_farm: str) -> bool:
     """Whether an inventory row counts toward ``farm`` on today's snapshot.
 
-    Bank is pens 89–93 on the shared ALH/BNK herd. ALH keeps its BNAME rows
-    except those pens. Every other farm is its own inventory.
+    Bank is pens 89–93 on the shared ALH/BNK herd. ALH is every other cow on
+    that file, ignoring BNAME. Every other farm is its own inventory.
     """
     farm_key = (farm or "").strip().upper()
     source = (row_farm or "").strip().upper()
@@ -50,7 +58,7 @@ def inventory_row_in_farm_snapshot(farm: str, pen: object, row_farm: str) -> boo
     if farm_key == BANK_FARM:
         return source in SHARED_HERD_FARMS and in_bank
     if farm_key == "ALH":
-        return source == "ALH" and not in_bank
+        return source in SHARED_HERD_FARMS and not in_bank
     return source == farm_key
 
 
@@ -174,6 +182,58 @@ def _cow_intervals(
     return _apply_min_dim(kept, min_dim=min_dim)
 
 
+def _stored_pen_counts(
+    db: Session,
+    farms: Iterable[str],
+    dates: Iterable[dt.date],
+) -> dict[tuple[str, dt.date], int]:
+    farm_keys = sorted({farm for farm in farms if farm in SHARED_HERD_FARMS})
+    day_list = sorted({day for day in dates if isinstance(day, dt.date)})
+    if not farm_keys or not day_list:
+        return {}
+    rows = db.execute(
+        select(
+            CowsInMilkDay.farm,
+            CowsInMilkDay.count_date,
+            CowsInMilkDay.cow_count,
+        ).where(
+            CowsInMilkDay.farm.in_(farm_keys),
+            CowsInMilkDay.count_date.in_(day_list),
+        )
+    ).all()
+    return {(farm, day): int(count) for farm, day, count in rows}
+
+
+def save_shared_herd_cows_in_milk_day(
+    db: Session,
+    counts: dict[str, int] | None = None,
+) -> dict[str, int]:
+    """Upsert today's ALH and Bank DIM>4 counts. A past date is left unchanged."""
+    day = _uk_today()
+    saved: dict[str, int] = {}
+    for farm in ("ALH", BANK_FARM):
+        if counts is not None and farm in counts:
+            saved[farm] = int(counts[farm])
+        else:
+            saved[farm] = current_cows_in_milk(db, farm, min_dim=MIN_DIM)
+    existing = {
+        row.farm: row
+        for row in db.scalars(
+            select(CowsInMilkDay).where(
+                CowsInMilkDay.count_date == day,
+                CowsInMilkDay.farm.in_(tuple(saved)),
+            )
+        ).all()
+    }
+    for farm, count in saved.items():
+        row = existing.get(farm)
+        if row is None:
+            db.add(CowsInMilkDay(farm=farm, count_date=day, cow_count=count))
+        elif row.cow_count != count:
+            row.cow_count = count
+    return saved
+
+
 def cows_in_milk_for_dates(
     db: Session,
     farms: Iterable[str],
@@ -183,7 +243,8 @@ def cows_in_milk_for_dates(
 ) -> dict[tuple[str, dt.date], int]:
     """Return ``{(farm, date): cows_in_milk}`` for the requested pairs.
 
-    ``min_dim=None`` includes fresh cows from the freshen date (no DIM delay).
+    ``min_dim=None`` includes fresh cows from the freshen date (no DIM delay)
+    and does not read or write stored ALH/Bank totals.
     """
     farm_keys = sorted({(f or "").strip().upper() for f in farms if f})
     date_list = sorted({d for d in dates if isinstance(d, dt.date)})
@@ -192,7 +253,9 @@ def cows_in_milk_for_dates(
 
     date_min = date_list[0]
     date_max = date_list[-1]
-    today = dt.date.today()
+    today = _uk_today()
+    use_stored = min_dim == MIN_DIM
+    stored = _stored_pen_counts(db, farm_keys, date_list) if use_stored else {}
 
     events = db.execute(
         select(
@@ -243,6 +306,7 @@ def cows_in_milk_for_dates(
         inv_by_farm[row.farm][str(row.cow_id)] = row
 
     result: dict[tuple[str, dt.date], int] = {}
+    snapshot_today: dict[str, int] = {}
     for farm in farm_keys:
         inv_map = inv_by_farm.get(farm, {})
         inv_today = sum(
@@ -251,6 +315,7 @@ def cows_in_milk_for_dates(
             if inventory_row_in_farm_snapshot(farm, row.pen, row.farm)
             and _is_milking_inventory_row(row.rpro, row.lact, row.dim, min_dim=min_dim)
         )
+        snapshot_today[farm] = inv_today
 
         cow_ids = set(by_farm_cow.get(farm, {})) | set(inv_map)
         deltas: dict[dt.date, int] = defaultdict(int)
@@ -293,7 +358,15 @@ def cows_in_milk_for_dates(
                 di += 1
             if day >= today:
                 result[(farm, day)] = inv_today
+            elif (farm, day) in stored:
+                result[(farm, day)] = stored[(farm, day)]
             else:
                 result[(farm, day)] = max(0, running)
+
+    if use_stored and today in date_list and (set(farm_keys) & SHARED_HERD_FARMS):
+        save_shared_herd_cows_in_milk_day(
+            db,
+            {farm: snapshot_today[farm] for farm in SHARED_HERD_FARMS if farm in snapshot_today},
+        )
 
     return result

@@ -223,6 +223,14 @@ def import_herd_inventory(db: Session, *, force: bool = True) -> dict[str, Any]:
         ):
             _reset_shared_herd_openings(db, list(SHARED_HERD_SPLIT_FARMS))
             logger.info("Reset ALH/BNK stock accrual openings after first BNAME split")
+        if farm == SHARED_HERD_SOURCE_FARM:
+            from services.cows_in_milk import save_shared_herd_cows_in_milk_day
+
+            saved = save_shared_herd_cows_in_milk_day(db)
+            logger.info(
+                "Stored cows in milk %s",
+                ", ".join(f"{code}={count}" for code, count in sorted(saved.items())),
+            )
         db.commit()
         logger.info(
             "Herd inventory imported %s",

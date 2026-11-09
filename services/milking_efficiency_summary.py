@@ -614,8 +614,8 @@ def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
     """Current DairyComp inventory cows-in-milk counts keyed by pen.
 
     Includes fresh cows (no DIM > 4) so ID Efficiency matches Entry IDs.
-    Bank is pens 89–93 on the shared ALH/BNK inventory. Those pens are left
-    out of the ALH breakdown.
+    Bank is pens 89–93 on the shared ALH/BNK inventory. ALH is every other cow
+    on that file, ignoring BNAME.
     """
     farm = (farm_code or "").strip().upper()
     rows = (
