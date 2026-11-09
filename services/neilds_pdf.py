@@ -51,12 +51,16 @@ _FARM_MARKERS: tuple[tuple[str, str], ...] = (
 )
 
 
+_STATEMENT_NAME_RE = re.compile(r"^[a-z]{1,3}\d+-statement\b")
+
+
 def looks_like_neilds_pdf(text: str, source_file: str | None = None) -> bool:
     haystack = f"{source_file or ''}\n{text}".lower()
     if "nield" in haystack or "enield" in haystack:
         return True
     name = (source_file or "").lower()
-    if name.startswith(("t13", "f4", "t28", "t59")):
+    # T16-Statement for WEDNESDAY 05082026.pdf. Any account, not only T13/T59.
+    if _STATEMENT_NAME_RE.match(name):
         return True
     return "seller remittance" in haystack and "thomasson" in haystack
 
