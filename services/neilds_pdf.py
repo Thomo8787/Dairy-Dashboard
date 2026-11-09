@@ -197,7 +197,7 @@ def _decimal_numbers(text: str) -> list[tuple[str, float]]:
 
 
 def _animal_line(etag: str, numbers: list[tuple[str, float]]) -> dict[str, Any] | None:
-    """Paid row uses its own GR VALUE. No price, with a carcass weight, is Rejected."""
+    """Paid row uses its own GR VALUE. No price is Rejected, with or without a weight."""
     money = [
         (token, value)
         for token, value in numbers
@@ -209,9 +209,7 @@ def _animal_line(etag: str, numbers: list[tuple[str, float]]) -> dict[str, Any] 
             if re.fullmatch(r"\d+\.\d", token) and 50 <= value <= 900:
                 weight = value
                 break
-        if weight is None:
-            return None
-        weight = round(float(weight), 2)
+        weight = round(float(weight or 0.0), 2)
         return {
             "etag": etag,
             "cold_weight_kg": weight,

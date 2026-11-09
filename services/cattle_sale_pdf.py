@@ -235,11 +235,16 @@ def is_rejected_sale(
     reject_kg: float | None,
     amount_gbp: float | None,
 ) -> bool:
-    """Animal rejected at abattoir: zero payment and cold weight equals reject kgs."""
+    """Zero payment. A carcass rejection matches cold weight to reject kgs.
+
+    No price and no carcass weight is also a rejection.
+    """
     if cold_weight_kg is None or reject_kg is None or amount_gbp is None:
         return False
     if abs(amount_gbp) > 0.005:
         return False
+    if cold_weight_kg <= 0.005 and reject_kg <= 0.005:
+        return True
     if cold_weight_kg < _MIN_CARCASS_KG or cold_weight_kg > _MAX_CARCASS_KG:
         return False
     return _weights_match(cold_weight_kg, reject_kg)
