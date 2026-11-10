@@ -108,7 +108,21 @@ DIED_AS_SALES_REMARKS: tuple[str, ...] = ("TB", "OFS")
 # CNIELD is the SFR spelling of Cneild.
 OFS_DEST_PREFIXES: tuple[str, ...] = ("OFS", "CNEILD", "CNIELD", "CSARG")
 BREEDINGS_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
-BREEDINGS_CHART_SEMEN_ORDER: tuple[str, ...] = ("beef", "dairy", "unknown")
+# Lactation 0 is youngstock. The lower chart splits beef and dairy by that.
+BREEDINGS_CHART_SERIES: tuple[str, ...] = (
+    "beef_cows",
+    "beef_youngstock",
+    "dairy_cows",
+    "dairy_youngstock",
+    "unknown",
+)
+# The table keeps beef as one column and splits dairy into youngstock and cows.
+BREEDINGS_TABLE_COLUMNS: tuple[str, ...] = (
+    "beef",
+    "dairy_youngstock",
+    "dairy_cows",
+    "unknown",
+)
 
 
 def _dest_upper():
@@ -1089,6 +1103,35 @@ def _build_disease_episode_bundle(
     return pivot, scatter, incidence
 
 
+def _breeding_stock_group(lact: int | None) -> str:
+    """Lactation 0 is youngstock. Later lactations are cows.
+
+    A breeding with no lactation is counted with cows so the split still adds
+    up to the month total.
+    """
+    try:
+        value = int(lact) if lact is not None else None
+    except (TypeError, ValueError):
+        value = None
+    if value == 0:
+        return "youngstock"
+    return "cows"
+
+
+def _breeding_series_key(semen_type: str, stock_group: str) -> str:
+    if semen_type in ("beef", "dairy"):
+        return f"{semen_type}_{stock_group}"
+    return "unknown"
+
+
+def _breeding_table_key(semen_type: str, stock_group: str) -> str:
+    if semen_type == "dairy":
+        return f"dairy_{stock_group}"
+    if semen_type == "beef":
+        return "beef"
+    return "unknown"
+
+
 def _fetch_breeding_records(
     db: Session,
     *,
@@ -1097,13 +1140,14 @@ def _fetch_breeding_records(
     effective_to: dt.date,
     selected_parity_groups: list[str] | None,
     fiscal_year: int | None,
-) -> list[tuple[str, str, str, dt.date]]:
+) -> list[tuple[str, str, str, dt.date, int | None]]:
     query = (
         select(
             CowEvent.month_label,
             CowEvent.farm,
             CowEvent.remark,
             CowEvent.event_date,
+            CowEvent.lact,
         )
         .where(CowEvent.event == "BRED")
         .where(CowEvent.event_date.isnot(None))
@@ -1114,13 +1158,17 @@ def _fetch_breeding_records(
     query = _apply_parity_groups(query, selected_parity_groups)
     query = _apply_fiscal_year(query, fiscal_year)
     rows = db.execute(query).all()
-    result: list[tuple[str, str, str, dt.date]] = []
-    for month_label, farm, remark, event_date in rows:
+    result: list[tuple[str, str, str, dt.date, int | None]] = []
+    for month_label, farm, remark, event_date, lact in rows:
         if not month_label or farm not in selected_farms or event_date is None:
             continue
         if hasattr(event_date, "date"):
             event_date = event_date.date()
-        result.append((str(month_label), str(farm), str(remark or ""), event_date))
+        try:
+            lact_value = int(lact) if lact is not None else None
+        except (TypeError, ValueError):
+            lact_value = None
+        result.append((str(month_label), str(farm), str(remark or ""), event_date, lact_value))
     return result
 
 
@@ -1468,16 +1516,15 @@ def _build_breedings_semen_summary(
     farm_totals: dict[str, dict[str, int]],
     selected_farms: list[str],
     month_count: int,
+    keys: tuple[str, ...],
 ) -> dict[str, Any]:
     by_farm: dict[str, dict[str, int]] = {}
-    total = {name: 0 for name in BREEDINGS_SEMEN_ORDER}
+    total = {name: 0 for name in keys}
     for farm in selected_farms:
-        counts = farm_totals.get(farm, {name: 0 for name in BREEDINGS_SEMEN_ORDER})
-        by_farm[farm] = {
-            semen_type: int(counts.get(semen_type, 0)) for semen_type in BREEDINGS_SEMEN_ORDER
-        }
-        for semen_type in BREEDINGS_SEMEN_ORDER:
-            total[semen_type] += by_farm[farm][semen_type]
+        counts = farm_totals.get(farm, {name: 0 for name in keys})
+        by_farm[farm] = {key: int(counts.get(key, 0)) for key in keys}
+        for key in keys:
+            total[key] += by_farm[farm][key]
     return {"by_farm": by_farm, "total": total, "month_count": month_count}
 
 
@@ -1512,15 +1559,16 @@ def _build_breedings_bundle(
     semen_table_pivot: dict[str, dict[str, dict[str, int]]] = {}
     semen_chart_pivot: dict[str, dict[str, int]] = {}
     semen_farm_totals = {
-        farm: {name: 0 for name in BREEDINGS_SEMEN_ORDER} for farm in selected_farms
+        farm: {name: 0 for name in BREEDINGS_CHART_SERIES} for farm in selected_farms
     }
     # Unfiltered counts for slicer visibility (independent of selected semen types).
     available_farm_totals = {
         farm: {name: 0 for name in BREEDINGS_SEMEN_ORDER} for farm in selected_farms
     }
 
-    for month_label, farm, remark, event_date in records:
+    for month_label, farm, remark, event_date, lact in records:
         semen_type = classify_semen_type(remark, overrides)
+        stock_group = _breeding_stock_group(lact)
         if farm in available_farm_totals and semen_type in available_farm_totals[farm]:
             available_farm_totals[farm][semen_type] += 1
         if semen_type not in allowed_semen:
@@ -1530,18 +1578,23 @@ def _build_breedings_bundle(
         if farm in farm_pivot[month_label]:
             farm_pivot[month_label][farm] += 1
 
+        table_key = _breeding_table_key(semen_type, stock_group)
+        series_key = _breeding_series_key(semen_type, stock_group)
+
         semen_table_pivot.setdefault(month_label, {})
         semen_table_pivot[month_label].setdefault(
-            farm, {name: 0 for name in BREEDINGS_SEMEN_ORDER}
+            farm, {name: 0 for name in BREEDINGS_TABLE_COLUMNS}
         )
-        if semen_type in semen_table_pivot[month_label][farm]:
-            semen_table_pivot[month_label][farm][semen_type] += 1
-        if farm in semen_farm_totals and semen_type in semen_farm_totals[farm]:
-            semen_farm_totals[farm][semen_type] += 1
+        if table_key in semen_table_pivot[month_label][farm]:
+            semen_table_pivot[month_label][farm][table_key] += 1
+        if farm in semen_farm_totals and series_key in semen_farm_totals[farm]:
+            semen_farm_totals[farm][series_key] += 1
 
-        if semen_type in BREEDINGS_CHART_SEMEN_ORDER:
-            semen_chart_pivot.setdefault(month_label, {name: 0 for name in BREEDINGS_CHART_SEMEN_ORDER})
-            semen_chart_pivot[month_label][semen_type] += 1
+        if series_key in BREEDINGS_CHART_SERIES:
+            semen_chart_pivot.setdefault(
+                month_label, {name: 0 for name in BREEDINGS_CHART_SERIES}
+            )
+            semen_chart_pivot[month_label][series_key] += 1
 
     table_rows: list[dict[str, Any]] = []
     for month_start in _iter_month_starts(effective_from, effective_to):
@@ -1553,33 +1606,35 @@ def _build_breedings_bundle(
         }
         for farm in selected_farms:
             row[farm] = {
-                semen_type: month_counts.get(farm, {}).get(semen_type, 0)
-                for semen_type in BREEDINGS_SEMEN_ORDER
+                column: month_counts.get(farm, {}).get(column, 0)
+                for column in BREEDINGS_TABLE_COLUMNS
             }
         table_rows.append(row)
 
     chart_rows: list[dict[str, Any]] = []
     for month_start in _iter_month_starts(effective_from, effective_to):
         event_month = month_start.strftime("%b-%y")
-        counts = semen_chart_pivot.get(event_month, {name: 0 for name in BREEDINGS_CHART_SEMEN_ORDER})
-        beef = counts.get("beef", 0)
-        dairy = counts.get("dairy", 0)
-        unknown = counts.get("unknown", 0)
-        chart_rows.append(
-            {
-                "event_month": event_month,
-                "sort_key": _sort_key_from_date(month_start),
-                "beef": beef,
-                "dairy": dairy,
-                "unknown": unknown,
-                "total": beef + dairy + unknown,
-            }
+        counts = semen_chart_pivot.get(
+            event_month, {name: 0 for name in BREEDINGS_CHART_SERIES}
         )
+        row = {
+            "event_month": event_month,
+            "sort_key": _sort_key_from_date(month_start),
+        }
+        total = 0
+        for series in BREEDINGS_CHART_SERIES:
+            value = int(counts.get(series, 0))
+            row[series] = value
+            total += value
+        row["total"] = total
+        chart_rows.append(row)
 
     month_count = _month_count_inclusive(effective_from, effective_to)
-    semen_summary = _build_breedings_semen_summary(semen_farm_totals, selected_farms, month_count)
+    semen_summary = _build_breedings_semen_summary(
+        semen_farm_totals, selected_farms, month_count, BREEDINGS_CHART_SERIES
+    )
     available_summary = _build_breedings_semen_summary(
-        available_farm_totals, selected_farms, month_count
+        available_farm_totals, selected_farms, month_count, BREEDINGS_SEMEN_ORDER
     )
     semen_summary["available"] = available_summary["total"]
     return farm_pivot, table_rows, chart_rows, semen_summary
@@ -1631,9 +1686,10 @@ def build_events_report(
         empty_result["breedings_semen_rows"] = []
         empty_result["breedings_semen_chart_rows"] = []
         empty_result["breedings_semen_summary"] = _build_breedings_semen_summary(
-            {farm: {name: 0 for name in BREEDINGS_SEMEN_ORDER} for farm in selected_farms},
+            {farm: {name: 0 for name in BREEDINGS_CHART_SERIES} for farm in selected_farms},
             selected_farms,
             0,
+            BREEDINGS_CHART_SERIES,
         )
         empty_result["breedings_semen_summary"]["available"] = {
             name: 0 for name in BREEDINGS_SEMEN_ORDER
@@ -1807,15 +1863,16 @@ def build_events_report(
         result["breedings_semen_rows"] = breedings_semen_rows or []
         result["breedings_semen_chart_rows"] = breedings_semen_chart_rows or []
         result["breedings_semen_summary"] = breedings_semen_summary or _build_breedings_semen_summary(
-            {farm: {name: 0 for name in BREEDINGS_SEMEN_ORDER} for farm in selected_farms},
+            {farm: {name: 0 for name in BREEDINGS_CHART_SERIES} for farm in selected_farms},
             selected_farms,
             month_count,
+            BREEDINGS_CHART_SERIES,
         )
         if "available" not in result["breedings_semen_summary"]:
             result["breedings_semen_summary"]["available"] = {
                 name: 0 for name in BREEDINGS_SEMEN_ORDER
             }
-        result["breedings_semen_types"] = list(BREEDINGS_SEMEN_ORDER)
+        result["breedings_semen_types"] = list(BREEDINGS_TABLE_COLUMNS)
     if include_hooftrimming_breakdown:
         result["lame_rows"] = lame_rows or []
         result["lame_protocol_rows"] = lame_protocol_rows or []

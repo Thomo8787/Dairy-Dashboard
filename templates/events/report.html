@@ -843,7 +843,27 @@
     const CAN_EDIT_SIRES = {{ can_edit_sires | default(false) | tojson }};
     const FARM_COLORS = {{ farm_colors | tojson }};
     const HERD_FARMS = {{ farm_options | tojson }};
-    const SEMEN_COLORS = { beef: "#8B4513", dairy: "#2ca02c", unknown: "#e91e8c" };
+    const SEMEN_COLORS = {
+      beef_cows: "#8B4513",
+      beef_youngstock: "#c4a484",
+      dairy_cows: "#1f7a32",
+      dairy_youngstock: "#8fd18f",
+      unknown: "#e91e8c",
+    };
+    const SEMEN_LABEL_COLORS = {
+      beef_cows: "#fff",
+      beef_youngstock: "#1f2933",
+      dairy_cows: "#fff",
+      dairy_youngstock: "#1f2933",
+      unknown: "#fff",
+    };
+    const BREEDINGS_CHART_SERIES = [
+      { key: "beef_cows", label: "Beef cows", semen: "beef" },
+      { key: "beef_youngstock", label: "Beef youngstock", semen: "beef" },
+      { key: "dairy_cows", label: "Dairy cows", semen: "dairy" },
+      { key: "dairy_youngstock", label: "Dairy youngstock", semen: "dairy" },
+      { key: "unknown", label: "Unknown", semen: "unknown" },
+    ];
     const BREEDINGS_SEMEN_CHART_TITLE = "Breedings by Month — Beef vs Dairy";
     const LAME_EVENTS_CHART_TITLE = "Lame Events by Month — Stacked by Farm";
     const LAME_PROTOCOLS_CHART_TITLE = "Lame Event Protocols";
@@ -1164,12 +1184,18 @@
       };
       const formatLine = (label, value) =>
         `${label}: ${value.toLocaleString("en-GB")} (avg ${avg(value).toLocaleString("en-GB")})`;
-      const lines = [
-        formatLine("Dairy", counts.dairy ?? 0),
-        formatLine("Beef", counts.beef ?? 0),
-      ];
+      const selected = new Set(selectedSemenTypes());
+      const lines = [];
+      if (selected.has("dairy")) {
+        lines.push(formatLine("Dairy youngstock", counts.dairy_youngstock ?? 0));
+        lines.push(formatLine("Dairy cows", counts.dairy_cows ?? 0));
+      }
+      if (selected.has("beef")) {
+        lines.push(formatLine("Beef youngstock", counts.beef_youngstock ?? 0));
+        lines.push(formatLine("Beef cows", counts.beef_cows ?? 0));
+      }
       const unknown = counts.unknown ?? 0;
-      if (unknown > 0) {
+      if (selected.has("unknown") && unknown > 0) {
         lines.push(`Unknown: ${unknown.toLocaleString("en-GB")}`);
       }
       return lines.join("<br>");
@@ -1640,8 +1666,19 @@
     }
 
     const SALES_TABLE_REASONS = ["CULL", "TB", "OFS", "Beef", "Dairy"];
-    const BREEDINGS_SEMEN_LABELS = { beef: "Beef", dairy: "Dairy", unknown: "Unknown" };
-    const BREEDINGS_TABLE_SEMEN_ORDER = ["beef", "dairy", "unknown"];
+    const BREEDINGS_SEMEN_LABELS = {
+      beef: "Beef",
+      dairy_youngstock: "Dairy youngstock",
+      dairy_cows: "Dairy cows",
+      unknown: "Unknown",
+    };
+    const BREEDINGS_TABLE_COLUMNS = [
+      { key: "beef", semen: "beef" },
+      { key: "dairy_youngstock", semen: "dairy" },
+      { key: "dairy_cows", semen: "dairy" },
+      { key: "unknown", semen: "unknown" },
+    ];
+    const BREEDINGS_TABLE_SEMEN_ORDER = BREEDINGS_TABLE_COLUMNS.map(column => column.key);
 
     function capitalizeSemenLabel(value) {
       return BREEDINGS_SEMEN_LABELS[value] || value;
@@ -1913,13 +1950,16 @@
         `;
       } else if (SHOW_BREEDINGS_SEMEN_TABLE && data.breedings_semen_rows) {
         const tableRows = data.breedings_semen_rows;
-        let semenTypes = data.breedings_semen_types || BREEDINGS_TABLE_SEMEN_ORDER;
+        const selectedSemen = new Set(selectedSemenTypes());
+        let semenTypes = (data.breedings_semen_types || BREEDINGS_TABLE_SEMEN_ORDER)
+          .filter(semenType => {
+            const column = BREEDINGS_TABLE_COLUMNS.find(item => item.key === semenType);
+            return column ? selectedSemen.has(column.semen) : selectedSemen.has(semenType);
+          });
         const unknownAvailable = data.breedings_semen_summary?.available?.unknown
           ?? data.breedings_semen_summary?.total?.unknown
           ?? 0;
-        if (unknownAvailable === 0) {
-          semenTypes = semenTypes.filter(semenType => semenType !== "unknown");
-        } else if (!selectedSemenTypes().includes("unknown")) {
+        if (unknownAvailable === 0 || !selectedSemen.has("unknown")) {
           semenTypes = semenTypes.filter(semenType => semenType !== "unknown");
         }
         const showCombinedTotal = farms.length > 1;
@@ -1988,6 +2028,45 @@
       body.innerHTML = html;
     }
 
+    const breedingsColumnLabelsPlugin = {
+      id: "breedingsColumnLabels",
+      afterDatasetsDraw(chart) {
+        const showSegments = Boolean(chart.options.plugins?.breedingsColumnLabels?.segments);
+        const { ctx } = chart;
+        ctx.save();
+        ctx.font = "600 11px sans-serif";
+        ctx.textAlign = "center";
+        chart.data.labels.forEach((_, index) => {
+          let total = 0;
+          let top = null;
+          let x = null;
+          chart.data.datasets.forEach((dataset, datasetIndex) => {
+            const meta = chart.getDatasetMeta(datasetIndex);
+            if (meta.hidden) return;
+            const value = Number(dataset.data[index]) || 0;
+            if (!value) return;
+            const bar = meta.data[index];
+            if (!bar) return;
+            total += value;
+            x = bar.x;
+            if (top === null || bar.y < top) top = bar.y;
+            if (!showSegments) return;
+            const height = Math.abs((bar.base ?? bar.y) - bar.y);
+            if (height < 14) return;
+            ctx.fillStyle = dataset.labelColor || "#fff";
+            ctx.textBaseline = "middle";
+            const midY = bar.y + ((bar.base ?? bar.y) - bar.y) / 2;
+            ctx.fillText(value.toLocaleString("en-GB"), bar.x, midY);
+          });
+          if (!total || top === null || x === null) return;
+          ctx.fillStyle = "#243140";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(total.toLocaleString("en-GB"), x, top - 4);
+        });
+        ctx.restore();
+      },
+    };
+
     function renderChart(data) {
       const canvas = document.getElementById("events-chart");
       const rows = data.rows || [];
@@ -2005,19 +2084,23 @@
         backgroundColor: FARM_COLORS[farm] || "#888",
         stack: "events",
       }));
+      const showBreedingsTotals = SHOW_BREEDINGS_SEMEN_CHART;
 
       eventsChart = new Chart(canvas, {
         type: "bar",
         data: { labels, datasets },
+        plugins: showBreedingsTotals ? [breedingsColumnLabelsPlugin] : [],
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: showBreedingsTotals ? { padding: { top: 18 } } : {},
           plugins: {
             title: {
               display: true,
               text: CHART_TITLE,
             },
             legend: { title: { display: true, text: "Farm" } },
+            breedingsColumnLabels: { segments: false },
           },
           scales: {
             x: {
@@ -2027,6 +2110,7 @@
             y: {
               stacked: true,
               beginAtZero: true,
+              grace: showBreedingsTotals ? "8%" : 0,
               title: { display: true, text: "Number of Events" },
             },
           },
@@ -2053,28 +2137,33 @@
 
       const labels = rows.map(r => r.event_month);
       const selected = new Set(selectedSemenTypes());
-      const semenTypes = BREEDINGS_TABLE_SEMEN_ORDER.filter((semenType) =>
-        selected.size ? selected.has(semenType) : true
-      );
-      const datasets = semenTypes.map(semenType => ({
-        label: capitalizeSemenLabel(semenType),
-        data: rows.map(r => r[semenType] ?? 0),
-        backgroundColor: SEMEN_COLORS[semenType] || "#888",
+      const series = BREEDINGS_CHART_SERIES.filter(item => {
+        if (selected.size && !selected.has(item.semen)) return false;
+        return rows.some(row => (row[item.key] ?? 0) > 0);
+      });
+      const datasets = series.map(item => ({
+        label: item.label,
+        data: rows.map(r => r[item.key] ?? 0),
+        backgroundColor: SEMEN_COLORS[item.key] || "#888",
+        labelColor: SEMEN_LABEL_COLORS[item.key] || "#fff",
         stack: "semen",
       }));
 
       breedingsSemenChart = new Chart(canvas, {
         type: "bar",
         data: { labels, datasets },
+        plugins: [breedingsColumnLabelsPlugin],
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          layout: { padding: { top: 18 } },
           plugins: {
             title: {
               display: true,
               text: BREEDINGS_SEMEN_CHART_TITLE,
             },
             legend: { title: { display: true, text: "Semen type" } },
+            breedingsColumnLabels: { segments: true },
           },
           scales: {
             x: {
@@ -2084,6 +2173,7 @@
             y: {
               stacked: true,
               beginAtZero: true,
+              grace: "8%",
               title: { display: true, text: "Number of Breedings" },
             },
           },
