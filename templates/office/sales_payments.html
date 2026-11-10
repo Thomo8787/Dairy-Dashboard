@@ -327,6 +327,19 @@
       border: 1px solid #cbd5e1;
       border-radius: 6px;
     }
+    .edit-fields input:disabled { background: #f1f5f9; }
+    .edit-fields label.edit-rejected {
+      flex-direction: row;
+      align-items: center;
+      gap: 0.4rem;
+      font-weight: 600;
+    }
+    .edit-rejected input {
+      width: 1rem;
+      height: 1rem;
+      margin: 0;
+      padding: 0;
+    }
     .edit-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
     #sales-payments-table thead th {
       background: #1e3a5f;
@@ -527,6 +540,10 @@
         </label>
         <label id="edit-amount-label">Amount
           <input id="edit-amount" inputmode="decimal" autocomplete="off">
+        </label>
+        <label class="edit-rejected" id="edit-rejected-label">
+          <input id="edit-rejected" type="checkbox">
+          Rejected
         </label>
         <label>Document
           <input id="edit-amount-doc" type="text" maxlength="128" autocomplete="off">
@@ -1346,7 +1363,7 @@
     function setEditScope(group, count) {
       document.getElementById("edit-animal").hidden = group;
       document.getElementById("edit-group-note").hidden = !group;
-      ["edit-amount-label", "edit-weight-label", "edit-bonus-label", "edit-bonus-doc-label"].forEach(id => {
+      ["edit-amount-label", "edit-rejected-label", "edit-weight-label", "edit-bonus-label", "edit-bonus-doc-label"].forEach(id => {
         document.getElementById(id).hidden = group;
       });
       document.getElementById("edit-amount-doc").placeholder = group ? "Leave unchanged" : "";
@@ -1407,6 +1424,8 @@
       document.getElementById("edit-dest-new").value = "";
       document.getElementById("edit-dest-new-label").hidden = true;
       document.getElementById("edit-amount").value = popupAmount(row);
+      document.getElementById("edit-rejected").checked = Boolean(row.sale_rejected);
+      syncRejectedAmount();
       const docs = splitEditDocuments(row);
       document.getElementById("edit-amount-doc").value = docs.amount;
       document.getElementById("edit-weight").value = row.cold_weight_kg != null ? String(row.cold_weight_kg) : "";
@@ -1414,6 +1433,10 @@
       document.getElementById("edit-bonus-doc").value = docs.bonus;
       document.getElementById("edit-note").value = "";
       document.getElementById("edit-payment-dialog").showModal();
+    }
+
+    function syncRejectedAmount() {
+      document.getElementById("edit-amount").disabled = document.getElementById("edit-rejected").checked;
     }
 
     function openGroupEditDialog() {
@@ -1538,6 +1561,7 @@
               farm_paid: document.getElementById("edit-farm-paid").value,
               sales_reason: document.getElementById("edit-reason").value,
               dest,
+              sale_rejected: document.getElementById("edit-rejected").checked,
               amount_gbp: document.getElementById("edit-amount").value,
               amount_document: document.getElementById("edit-amount-doc").value,
               cold_weight_kg: document.getElementById("edit-weight").value,
@@ -1657,6 +1681,7 @@
     document.getElementById("edit-dest").addEventListener("change", () => {
       document.getElementById("edit-dest-new-label").hidden = document.getElementById("edit-dest").value !== "__new__";
     });
+    document.getElementById("edit-rejected").addEventListener("change", syncRejectedAmount);
     document.getElementById("edit-selected-btn")?.addEventListener("click", openGroupEditDialog);
     document.getElementById("edit-cancel").addEventListener("click", () => {
       editingRow = null;

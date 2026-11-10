@@ -1619,6 +1619,12 @@ def _record_for_confirm(
     return record
 
 
+def _edit_flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return value is True
+
+
 def _parse_edit_money(value: Any) -> float | None:
     text = str(value or "").strip().replace("£", "").replace(",", "")
     if not text:
@@ -1686,9 +1692,14 @@ def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, 
         row["farms_match"] = bool(sold_name) and sold_name.upper() == paid_name.upper()
     if "dest" in edit:
         row["dest"] = (edit.get("dest") or "").strip()[:128]
-    if "amount_gbp" in edit or "bonus_gbp" in edit:
-        if "amount_gbp" in edit:
+    if "sale_rejected" in edit or "amount_gbp" in edit or "bonus_gbp" in edit:
+        if _edit_flag(edit.get("sale_rejected")):
+            row["sale_rejected"] = True
+            row["amount_gbp"] = 0.0
+        elif "amount_gbp" in edit:
             row["amount_gbp"] = _parse_edit_money(edit.get("amount_gbp"))
+            if "sale_rejected" in edit:
+                row["sale_rejected"] = False
         if "bonus_gbp" in edit:
             row["bonus_gbp"] = _parse_edit_money(edit.get("bonus_gbp"))
         amount = row.get("amount_gbp")
