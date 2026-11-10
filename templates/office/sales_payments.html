@@ -269,6 +269,18 @@
       text-align: left;
       white-space: nowrap;
     }
+    #sales-payments-table th.tick-cell,
+    #sales-payments-table td.tick-cell { padding: 0; }
+    #sales-payments-table .tick-hit {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2.6rem;
+      min-height: 2.4rem;
+      padding: 0.5rem 0.65rem;
+      cursor: pointer;
+    }
+    #sales-payments-table .tick-hit input { margin: 0; }
     .farm-paid-cell { display: inline-flex; align-items: center; gap: 0.2rem; }
     .farm-paid-mark {
       display: inline-flex; align-items: center; justify-content: center;
@@ -902,6 +914,13 @@
       rowByKey = new Map(rows.map(row => [rowKey(row), row]));
     }
 
+    function rowTickFromEvent(event) {
+      const node = event.target instanceof Element ? event.target : null;
+      if (!node) return null;
+      const input = node.matches("input") ? node : node.closest(".tick-hit")?.querySelector("input");
+      return isRowTick(input) ? input : null;
+    }
+
     function isRowTick(input) {
       if (!(input instanceof HTMLInputElement)) return false;
       if (input.matches(".row-select")) return true;
@@ -929,8 +948,8 @@
       tableEventsBound = true;
       const body = document.getElementById("table-body");
       body.addEventListener("mousedown", event => {
-        const input = event.target;
-        if (!event.shiftKey || event.button !== 0 || !isRowTick(input)) return;
+        const input = rowTickFromEvent(event);
+        if (!event.shiftKey || event.button !== 0 || !input) return;
         const key = decodeURIComponent(input.dataset.key);
         const index = rows.findIndex(row => rowKey(row) === key);
         const anchor = lastSelectIndex;
@@ -955,13 +974,13 @@
           if (row) openEditDialog(row);
           return;
         }
-        const input = event.target;
-        if (event.shiftKey && isRowTick(input)) {
+        const input = rowTickFromEvent(event);
+        if (event.shiftKey && input) {
           event.preventDefault();
           setTimeout(() => { shiftRangeClick = false; }, 0);
           return;
         }
-        if (!isRowTick(input)) return;
+        if (!input) return;
         const index = rows.findIndex(row => rowKey(row) === decodeURIComponent(input.dataset.key));
         if (index >= 0) lastSelectIndex = index;
       });
@@ -998,7 +1017,7 @@
       const table = document.getElementById("sales-payments-table");
       table.classList.toggle("show-bonus", showBonusColumn());
       const selectCol = CAN_EDIT
-        ? `<th><input type="checkbox" id="select-all" aria-label="Select all visible rows"></th>` : "";
+        ? `<th class="tick-cell"><label class="tick-hit"><input type="checkbox" id="select-all" aria-label="Select all visible rows"></label></th>` : "";
       const paidCol = currentStatus === "active" && CAN_EDIT ? "<th>Paid?</th>" : "";
       const editCol = currentStatus === "active" && CAN_EDIT ? "<th></th>" : "";
       head.innerHTML = `
@@ -1107,9 +1126,9 @@
         const key = rowKey(row);
         const selected = selectedKeys.has(key);
         const selectCell = CAN_EDIT
-          ? `<td><input type="checkbox" class="row-select" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Select row"></td>` : "";
+          ? `<td class="tick-cell"><label class="tick-hit"><input type="checkbox" class="row-select" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Select row"></label></td>` : "";
         const paidCell = showPaidCol && !row.warrendale_split
-          ? `<td><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></td>`
+          ? `<td class="tick-cell"><label class="tick-hit"><input type="checkbox" class="row-paid" data-key="${encodeURIComponent(key)}" ${selected ? "checked" : ""} aria-label="Mark paid"></label></td>`
           : (showPaidCol ? "<td></td>" : "");
         const editCell = showPaidCol
           ? `<td><button type="button" class="secondary small row-edit" data-key="${encodeURIComponent(key)}">Edit</button></td>`
