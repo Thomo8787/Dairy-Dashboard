@@ -1035,11 +1035,22 @@ def _compute_date_bounds(
     return {"min": min_date.isoformat(), "max": max_date.isoformat()}
 
 
+def _sales_payment_identity(row: dict[str, Any]) -> str:
+    """Cow ID when the row has one, otherwise the ear tag."""
+    cow_id = (row.get("cow_id") or "").strip()
+    if cow_id.isdigit():
+        return cow_id.zfill(12)
+    if cow_id:
+        return cow_id.casefold()
+    return (row.get("etag") or "").strip().casefold()
+
+
 def _sales_payment_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
-    """Date sold, then the calf document, then farm sold, then ear tag.
+    """Date sold, then the calf document, then farm sold, then cow ID.
 
     The first document is the calf purchase order. A Warrendale £80 on the
     same row stays with that purchase order so one document is a single block.
+    A row with no cow ID sorts by ear tag.
     """
     documents = row.get("documents") if isinstance(row.get("documents"), list) else []
     label = ""
@@ -1049,7 +1060,7 @@ def _sales_payment_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
         str(row.get("event_date") or ""),
         label.casefold(),
         (row.get("farm_sold") or "").strip().casefold(),
-        (row.get("etag") or "").strip().casefold(),
+        _sales_payment_identity(row),
     )
 
 
