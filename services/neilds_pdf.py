@@ -13,6 +13,7 @@ from typing import Any
 
 from services.cattle_sale_pdf import (
     extract_pdf_images,
+    extract_pdf_text,
     extract_pdf_text_or_ocr,
     normalize_etag,
     ocr_words_from_image,
@@ -321,6 +322,30 @@ def parse_neilds_pdf(
     source_file: str | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
+    # An emailed scan can carry the statement as text plus a picture of the
+    # email footer. Use the text when it already has the animals. A normal
+    # scan has no text and still falls through to the page picture below.
+    text = extract_pdf_text(content)
+    if text.strip():
+        lines, line_warnings = _lines_from_statement_text(text)
+        if lines:
+            if not looks_like_neilds_pdf(text, source_file):
+                warnings.append("PDF does not look like a Neilds remittance")
+            warnings.extend(line_warnings)
+            sale_date = _collection_date(text, source_file)
+            farm = mailbox_farm or _farm_from_text(text, source_file)
+            for line in lines:
+                line["kill_date"] = sale_date
+            if sale_date is None:
+                warnings.append("Could not parse collection date from PDF")
+            return {
+                "farm": farm,
+                "sale_date": sale_date,
+                "lines": lines,
+                "warnings": warnings,
+                "buyer": BUYER_NEILDS,
+            }
+
     sale_date = _date_from_filename(source_file)
     farm = mailbox_farm
     ocr_lines: list[dict[str, Any]] = []
