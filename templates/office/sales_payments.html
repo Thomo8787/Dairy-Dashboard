@@ -1192,7 +1192,10 @@
       return data.date_bounds ?? null;
     }
 
-    async function fetchRows(dateOverride = null, { manageLoading = true } = {}) {
+    let reloadToken = null;
+
+    async function fetchRows(dateOverride = null, { manageLoading = true, keepExisting = false, ownedReload = null } = {}) {
+      if (ownedReload == null) reloadToken = null;
       const farms = selectedFarms();
       const reasons = selectedReasons();
       const empty = document.getElementById("empty-state");
@@ -1228,17 +1231,35 @@
           { signal: loadController.signal }
         );
         if (!res.ok) {
-          showLoadFailure(empty, wrap, meta);
+          if (!keepExisting) showLoadFailure(empty, wrap, meta);
           return false;
         }
         applyRowsResponse(await res.json());
         return true;
       } catch (error) {
         if (error.name === "AbortError") return false;
-        showLoadFailure(empty, wrap, meta);
+        if (!keepExisting) showLoadFailure(empty, wrap, meta);
         return false;
       } finally {
         if (manageLoading) setLoading(false);
+      }
+    }
+
+    async function reloadAfterImport() {
+      const token = {};
+      reloadToken = token;
+      const hadRows = rows.length > 0;
+      const delays = [0, 2000, 5000];
+      for (let attempt = 0; attempt < delays.length; attempt++) {
+        if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+        if (reloadToken !== token) return;
+        const last = attempt === delays.length - 1;
+        const ok = await fetchRows(null, {
+          keepExisting: hadRows || !last,
+          ownedReload: token,
+        });
+        if (reloadToken !== token) return;
+        if (ok) return;
       }
     }
 
@@ -1793,7 +1814,10 @@
         const res = await fetch(url, { method: "POST" });
         const data = await res.json();
         showImportMessage(data);
-        if (res.ok) fetchRows();
+        if (res.ok) {
+          statusEl.textContent = "Refreshing…";
+          await reloadAfterImport();
+        }
       } catch (err) {
         showImportNotice("Remittance import failed.");
         console.error(err);
@@ -1820,7 +1844,10 @@
         const res = await fetch("/office/api/cattle-sales/upload", { method: "POST", body: fd });
         const data = await res.json();
         showImportMessage(data);
-        if (res.ok) fetchRows();
+        if (res.ok) {
+          statusEl.textContent = "Refreshing…";
+          await reloadAfterImport();
+        }
       } catch (err) {
         showImportNotice("Remittance upload failed.");
         console.error(err);
