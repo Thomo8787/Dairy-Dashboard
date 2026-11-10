@@ -250,6 +250,18 @@
           (manual always wins). Blank loads are filled only when that farm’s load count
           matches the NML sample count for the same day — lowest sample number to the
           highest volume. A green tick means linked; a red cross means not yet linked.
+          Import Müller writes the tanker litres from a Müller CSV onto the weighbridge
+          column of tickets already on this page. It does not add new rows, and it leaves
+          the farm litres unchanged. Name each file with the farm code and an underscore,
+          for example ALH_MULLER_collection_details_for_2026-10.csv. Accepted codes are
+          ALH, BNK, COF, SFR, and PRK. A row matches a ticket by sample number and
+          collection date (or the day either side). If the sample number is blank, it
+          matches the date and the ticket litres instead. Rows with no ticket, or more
+          than one possible ticket, are left unchanged. Download the files from the
+          Müller portal by going to COLLECTIONS, then click the magnifying glass beside
+          the month you want. From Actions, select Download and save it as a CSV. Save
+          it with the farm code at the start, for example ALH_. The portal accounts are
+          641565 = ALH, 618538 = BNK, 930221 = COF, 527634 = SFR, and 231000002 = PRK.
         </p>
       </aside>
     </div>
