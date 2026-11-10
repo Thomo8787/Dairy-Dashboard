@@ -280,6 +280,15 @@ class SalesPaymentRecord(Base):
     archive_snapshot = Column(Text)
 
 
+class SalesPaymentDestination(Base):
+    """Destination typed on a sale payment, kept for the edit dropdown."""
+
+    __tablename__ = "sales_payment_destinations"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+
+
 class CattleSaleLine(Base):
     """Per-animal line from a cattle remittance PDF (Pickstock FPF, etc.)."""
 

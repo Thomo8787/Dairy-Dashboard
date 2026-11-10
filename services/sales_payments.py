@@ -23,7 +23,13 @@ from services.cattle_sales import (
 )
 
 WARRENDALE_BONUS_LOOKAHEAD_DAYS = 28
-from services.database import CattleSaleLine, CowEvent, SalesPaymentRecord, User
+from services.database import (
+    CattleSaleLine,
+    CowEvent,
+    SalesPaymentDestination,
+    SalesPaymentRecord,
+    User,
+)
 from services.events_common import (
     OFS_DEST_PREFIXES,
     SALES_BEEF_REMARKS,
@@ -1307,6 +1313,60 @@ def list_sales_payments(
     return {"rows": rows, "total": len(rows), "status": status, "date_bounds": date_bounds}
 
 
+_destinations_harvested = False
+
+
+def _clean_dest_name(value: Any) -> str:
+    return str(value or "").strip()[:128]
+
+
+def _remember_destinations(db: Session, names: list[Any]) -> None:
+    """Keep a destination typed on a payment so the next edit can pick it."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        text = _clean_dest_name(name)
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    if not cleaned:
+        return
+    existing = {
+        (row or "").casefold()
+        for row in db.scalars(select(SalesPaymentDestination.name)).all()
+    }
+    for name in cleaned:
+        if name.casefold() in existing:
+            continue
+        db.add(SalesPaymentDestination(name=name))
+        existing.add(name.casefold())
+
+
+def _harvest_snapshot_destinations(db: Session) -> None:
+    """Remember destinations already stored on confirmed payments."""
+    global _destinations_harvested
+    if _destinations_harvested:
+        return
+    _destinations_harvested = True
+    raws = db.scalars(
+        select(SalesPaymentRecord.archive_snapshot).where(
+            SalesPaymentRecord.archive_snapshot.isnot(None),
+            SalesPaymentRecord.archive_snapshot != "",
+        )
+    ).all()
+    names: list[str] = []
+    for raw in raws:
+        try:
+            row = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(row, dict):
+            names.append(row.get("dest") or "")
+    _remember_destinations(db, names)
+
+
 def list_dest_filter_options(
     db: Session,
     *,
@@ -1318,18 +1378,21 @@ def list_dest_filter_options(
     if not selected_farms:
         return {"dest_options": [], "date_bounds": None}
 
-    dest_options = [
-        buyer
-        for buyer in db.scalars(
-            select(func.distinct(CattleSaleLine.buyer)).where(
-                CattleSaleLine.farm.in_(selected_farms),
-                CattleSaleLine.buyer.isnot(None),
-                func.trim(CattleSaleLine.buyer) != "",
-            )
-        ).all()
-        if buyer and buyer.strip()
-    ]
-    dest_options.sort(key=str.upper)
+    _harvest_snapshot_destinations(db)
+    saved_destinations = db.scalars(select(SalesPaymentDestination.name)).all()
+    buyers = db.scalars(
+        select(func.distinct(CattleSaleLine.buyer)).where(
+            CattleSaleLine.farm.in_(selected_farms),
+            CattleSaleLine.buyer.isnot(None),
+            func.trim(CattleSaleLine.buyer) != "",
+        )
+    ).all()
+    dest_options_by_key: dict[str, str] = {}
+    for name in [*buyers, *saved_destinations]:
+        text = _clean_dest_name(name)
+        if text:
+            dest_options_by_key.setdefault(text.casefold(), text)
+    dest_options = sorted(dest_options_by_key.values(), key=str.upper)
     date_bounds = _compute_date_bounds(
         db,
         status=status,
@@ -1784,6 +1847,14 @@ def confirm_payments(
             edit = item.get("edit")
             if isinstance(edit, dict):
                 edits[_payment_record_key(farm, cow_id, etag, event_date)] = edit
+    _remember_destinations(
+        db,
+        [
+            edit.get("dest")
+            for edit in edits.values()
+            if isinstance(edit, dict) and "dest" in edit
+        ],
+    )
     if to_freeze:
         _save_archive_snapshots(db, to_freeze, now, edits)
     return {"confirmed": confirmed}

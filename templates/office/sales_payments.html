@@ -1604,7 +1604,10 @@
         editingRow = null;
         editingRows = null;
         selectedKeys.clear();
-        await fetchRows(null, { manageLoading: false });
+        await Promise.all([
+          fetchRows(null, { manageLoading: false }),
+          loadFilterOptions(),
+        ]);
       } finally {
         confirmBtn.disabled = false;
       }
