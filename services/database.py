@@ -378,20 +378,6 @@ class HerdInventory(Base):
     import_timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
-class CowsInMilkDay(Base):
-    """Frozen ALH and Bank cows-in-milk total for one UK date."""
-
-    __tablename__ = "cows_in_milk_days"
-    __table_args__ = (
-        UniqueConstraint("farm", "count_date", name="uq_cows_in_milk_day_farm_date"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    farm = Column(String(8), nullable=False, index=True)
-    count_date = Column(Date, nullable=False, index=True)
-    cow_count = Column(Integer, nullable=False)
-
-
 STOCK_GROUP_COWS = "cows"
 STOCK_GROUP_YOUNGSTOCK = "youngstock"
 STOCK_GROUP_BEEF = "beef"

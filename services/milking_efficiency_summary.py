@@ -20,12 +20,7 @@ from services.database import (
     init_db,
 )
 from services.farms import FARMS, FARMS_BY_CODE
-from services.cows_in_milk import (
-    _is_milking_inventory_row,
-    cows_in_milk_for_dates,
-    inventory_row_in_farm_snapshot,
-    snapshot_source_farms,
-)
+from services.cows_in_milk import _is_milking_inventory_row, cows_in_milk_for_dates
 from services.parlour_link import (
     OVERNIGHT_NEXT_DAY_ID_BEFORE_S,
     match_milk_flow_to_entry_ids,
@@ -614,25 +609,14 @@ def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
     """Current DairyComp inventory cows-in-milk counts keyed by pen.
 
     Includes fresh cows (no DIM > 4) so ID Efficiency matches Entry IDs.
-    Bank is pens 89–93 on the shared ALH/BNK inventory. ALH is every other cow
-    on that file, ignoring BNAME.
     """
-    farm = (farm_code or "").strip().upper()
     rows = (
-        session.query(
-            HerdInventory.farm,
-            HerdInventory.pen,
-            HerdInventory.rpro,
-            HerdInventory.lact,
-            HerdInventory.dim,
-        )
-        .filter(HerdInventory.farm.in_(sorted(snapshot_source_farms([farm]))))
+        session.query(HerdInventory.pen, HerdInventory.rpro, HerdInventory.lact, HerdInventory.dim)
+        .filter(HerdInventory.farm == farm_code)
         .all()
     )
     counts: dict[str, int] = defaultdict(int)
-    for row_farm, pen, rpro, lact, dim in rows:
-        if not inventory_row_in_farm_snapshot(farm, pen, row_farm):
-            continue
+    for pen, rpro, lact, dim in rows:
         if not _is_milking_inventory_row(rpro, lact, dim, min_dim=None):
             continue
         key = (pen or "").strip() or "Unknown"
