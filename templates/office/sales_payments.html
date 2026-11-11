@@ -1400,12 +1400,50 @@
       return values.every(value => value === first) ? first : null;
     }
 
-    function setEditScope(group, count) {
+    function rowHasAmountPrice(row) {
+      if (row.sale_rejected) return true;
+      const amount = row.amount_gbp == null ? null : Number(row.amount_gbp);
+      if (amount == null || Number.isNaN(amount) || amount <= 0) return false;
+      const bonus = row.bonus_gbp == null ? null : Number(row.bonus_gbp);
+      if (
+        row.warrendale_split
+        && bonus != null
+        && !Number.isNaN(bonus)
+        && !row.amount_paid
+        && !row.bonus_paid
+      ) {
+        return Math.round((amount - bonus) * 100) / 100 > 0;
+      }
+      return true;
+    }
+
+    function rowHasBonusPrice(row) {
+      const bonus = row.bonus_gbp == null ? null : Number(row.bonus_gbp);
+      return bonus != null && !Number.isNaN(bonus) && bonus > 0;
+    }
+
+    function groupPriceNote(showAmount, showBonus) {
+      if (showAmount && showBonus) {
+        return "The same amount and bonus are saved on each animal. Weight stays as it is.";
+      }
+      if (showAmount) {
+        return "The same amount is saved on each animal. Bonus and weight stay as they are.";
+      }
+      if (showBonus) {
+        return "The same bonus is saved on each animal. Amount and weight stay as they are.";
+      }
+      return "Amount, weight and bonus stay on each animal.";
+    }
+
+    function setEditScope(group, count, { showAmount = false, showBonus = false } = {}) {
       document.getElementById("edit-animal").hidden = group;
       document.getElementById("edit-group-note").hidden = !group;
-      ["edit-amount-label", "edit-rejected-label", "edit-weight-label", "edit-bonus-label", "edit-bonus-doc-label"].forEach(id => {
-        document.getElementById(id).hidden = group;
-      });
+      document.getElementById("edit-group-note").textContent = groupPriceNote(showAmount, showBonus);
+      document.getElementById("edit-amount-label").hidden = group && !showAmount;
+      document.getElementById("edit-rejected-label").hidden = group;
+      document.getElementById("edit-weight-label").hidden = group;
+      document.getElementById("edit-bonus-label").hidden = group && !showBonus;
+      document.getElementById("edit-bonus-doc-label").hidden = group;
       document.getElementById("edit-amount-doc").placeholder = group ? "Leave unchanged" : "";
       document.getElementById("edit-note").placeholder = group ? "Leave unchanged" : "";
       document.getElementById("edit-confirm").textContent = group
@@ -1484,7 +1522,13 @@
       if (chosen.length < 2) return;
       editingRow = null;
       editingRows = chosen;
-      setEditScope(true, chosen.length);
+      const showAmount = chosen.every(row => !rowHasAmountPrice(row));
+      const showBonus = chosen.every(row => !rowHasBonusPrice(row));
+      setEditScope(true, chosen.length, { showAmount, showBonus });
+      document.getElementById("edit-rejected").checked = false;
+      document.getElementById("edit-amount").disabled = false;
+      document.getElementById("edit-amount").value = "";
+      document.getElementById("edit-bonus").value = "";
       document.getElementById("edit-etag").textContent = `${chosen.length.toLocaleString("en-GB")} animals`;
       const farms = herdFarms();
       const sold = sharedField(chosen, row => row.farm_sold || "");
@@ -1525,6 +1569,14 @@
       }
       const doc = document.getElementById("edit-amount-doc").value.trim();
       if (doc) edit.amount_document = doc;
+      if (!document.getElementById("edit-amount-label").hidden) {
+        const amount = document.getElementById("edit-amount").value.trim();
+        if (amount) edit.amount_gbp = amount;
+      }
+      if (!document.getElementById("edit-bonus-label").hidden) {
+        const bonus = document.getElementById("edit-bonus").value.trim();
+        if (bonus) edit.bonus_gbp = bonus;
+      }
       const note = document.getElementById("edit-note").value.trim();
       if (note) edit.note = note;
       return edit;

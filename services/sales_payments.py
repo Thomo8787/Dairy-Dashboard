@@ -1746,8 +1746,9 @@ def _existing_amount_and_bonus_docs(
 def _apply_payment_edit(row: dict[str, Any], edit: dict[str, Any]) -> dict[str, Any]:
     """Use the popup figures on the saved archive row.
 
-    A group edit sends only the shared fields. Amount, weight, and bonus stay
-    on the row when those keys are absent.
+    A group edit sends the shared fields. Amount and bonus are included only
+    when every selected animal is missing that price. Weight stays on the row
+    when that key is absent.
     """
     if "farm_sold" in edit:
         farm_sold = (edit.get("farm_sold") or "").strip().upper()
