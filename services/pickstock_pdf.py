@@ -152,19 +152,20 @@ def _parse_animal_row(line: str) -> dict[str, Any] | None:
 
     amount = numbers[-1]
     # Paid weight is the third figure from the end: Weight, p/Kg, Value.
-    # A condemned weight sits just before that and must not be used.
+    # Cond wt sits in front of that, so it is not used as the paid weight.
     if len(numbers) >= 4:
         cold_weight = numbers[-3]
-        reject_kg = 0.0
     else:
         cold_weight = numbers[-2]
-        reject_kg = 0.0
 
     if cold_weight is None or amount is None:
         return None
     if cold_weight < 20 or cold_weight > 900:
         return None
 
+    # A £0 carcass is condemned: Cond wt matches the cold weight.
+    # A paid line keeps condemned weight at 0, even when Cond wt is filled.
+    reject_kg = cold_weight if abs(amount) <= 0.005 else 0.0
     rejected = is_rejected_sale(cold_weight, reject_kg, amount) or (
         abs(amount) <= 0.005 and "condemn" in line.lower()
     )
