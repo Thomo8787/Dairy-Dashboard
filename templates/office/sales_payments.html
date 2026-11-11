@@ -1510,7 +1510,23 @@
       document.getElementById("edit-bonus").value = row.bonus_gbp != null ? String(row.bonus_gbp) : "";
       document.getElementById("edit-bonus-doc").value = docs.bonus;
       document.getElementById("edit-note").value = "";
+      syncSingleBonusFields();
       document.getElementById("edit-payment-dialog").showModal();
+    }
+
+    function destIsWarrendale() {
+      const destSelect = document.getElementById("edit-dest");
+      const dest = destSelect.value === "__new__"
+        ? document.getElementById("edit-dest-new").value.trim()
+        : destSelect.value.trim();
+      return dest.toLowerCase() === "warrendale";
+    }
+
+    function syncSingleBonusFields() {
+      if (editingRows && editingRows.length > 1) return;
+      const show = destIsWarrendale();
+      document.getElementById("edit-bonus-label").hidden = !show;
+      document.getElementById("edit-bonus-doc-label").hidden = !show;
     }
 
     function syncRejectedAmount() {
@@ -1657,8 +1673,10 @@
               amount_gbp: document.getElementById("edit-amount").value,
               amount_document: document.getElementById("edit-amount-doc").value,
               cold_weight_kg: document.getElementById("edit-weight").value,
-              bonus_gbp: document.getElementById("edit-bonus").value,
-              bonus_document: document.getElementById("edit-bonus-doc").value,
+              ...(document.getElementById("edit-bonus-label").hidden ? {} : {
+                bonus_gbp: document.getElementById("edit-bonus").value,
+                bonus_document: document.getElementById("edit-bonus-doc").value,
+              }),
               note: document.getElementById("edit-note").value,
             },
           }];
@@ -1775,7 +1793,9 @@
     document.getElementById("confirm-btn")?.addEventListener("click", confirmSelected);
     document.getElementById("edit-dest").addEventListener("change", () => {
       document.getElementById("edit-dest-new-label").hidden = document.getElementById("edit-dest").value !== "__new__";
+      syncSingleBonusFields();
     });
+    document.getElementById("edit-dest-new").addEventListener("input", syncSingleBonusFields);
     document.getElementById("edit-rejected").addEventListener("change", syncRejectedAmount);
     document.getElementById("edit-selected-btn")?.addEventListener("click", openGroupEditDialog);
     document.getElementById("edit-cancel").addEventListener("click", () => {
