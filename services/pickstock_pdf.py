@@ -1,7 +1,9 @@
 """Parse Pickstock Telford FPF remittance PDFs.
 
 Each remittance lists sold animals with ear tag, cold weight (kg), kill date,
-and amount (£). Farm comes from the dashed vendor line under the VAT number.
+and amount (£). Farm comes from the Pickstock vendor code. CTOM027 is
+shared by Aston Lower Hall and The Parkes, so that code uses the name
+after the dash.
 """
 
 from __future__ import annotations
@@ -29,6 +31,14 @@ _FARM_MARKERS: tuple[tuple[str, str], ...] = (
     ("PARK HALL", "SFR"),
     ("CHERRY ORCHARD", "COF"),
 )
+_VENDOR_CODE_RE = re.compile(r"Vendor\s+code:\s*([A-Z0-9]+)", re.IGNORECASE)
+# CTOM027 is used for both Aston Lower Hall and The Parkes.
+_VENDOR_CODE_FARMS = {
+    "CTHO424": "BNK",
+    "CTHO457": "SFR",
+    "CTHO202": "COF",
+}
+_SHARED_VENDOR_CODE = "CTOM027"
 _VENDOR_LINE_RE = re.compile(
     r"M\s*J\s*&\s*M\s*C\s*THOMASSON\s*-\s*(.+)",
     re.IGNORECASE,
@@ -77,8 +87,15 @@ def _farm_from_site(site: str) -> str | None:
     return None
 
 
+def _vendor_code(text: str) -> str | None:
+    match = _VENDOR_CODE_RE.search(text or "")
+    if match is None:
+        return None
+    return match.group(1).upper()
+
+
 def _farm_from_vendor_line(text: str) -> str | None:
-    """The herd is the site after the dash, not the postal address."""
+    """Site after the dash. Used when vendor code CTOM027 covers two farms."""
     for raw_line in (text or "").splitlines():
         match = _VENDOR_LINE_RE.search(raw_line)
         if match is None:
@@ -106,6 +123,16 @@ def _pickstock_farm(
     source_file: str | None,
     mailbox_farm: str | None,
 ) -> str | None:
+    code = _vendor_code(text)
+    if code == _SHARED_VENDOR_CODE:
+        return (
+            _farm_from_vendor_line(text)
+            or mailbox_farm
+            or _farm_from_text(text, source_file)
+        )
+    mapped = _VENDOR_CODE_FARMS.get(code or "")
+    if mapped:
+        return mapped
     return _farm_from_vendor_line(text) or mailbox_farm or _farm_from_text(text, source_file)
 
 
