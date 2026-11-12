@@ -260,6 +260,8 @@
           the month you want. From Actions, select Download and save it as a CSV. Save
           it with the farm code at the start, for example ALH_. The portal accounts are
           641565 = ALH, 618538 = BNK, 930221 = COF, 527634 = SFR, and 231000002 = PRK.
+          Each morning the server signs in and downloads the current month for ALH, BNK,
+          COF, and SFR when the Müller login is set. The Parkes is not part of that download.
         </p>
       </aside>
     </div>
@@ -374,6 +376,7 @@
         <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
         <button type="button" class="btn" id="import-muller-btn">Import Müller</button>
         <input type="file" id="import-muller-input" accept=".csv,text/csv" multiple hidden>
+        <button type="button" class="btn" id="fetch-muller-btn">Fetch Müller</button>
         <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
       </div>
 
@@ -1160,6 +1163,39 @@
         message += " Skipped " + rejected.join(", ") + ".";
       }
       showMessage(message);
+      loadResults();
+    } catch (err) {
+      showMessage(err.message || String(err), true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById("fetch-muller-btn").addEventListener("click", async function () {
+    const btn = this;
+    btn.disabled = true;
+    showMessage("Downloading this month's Müller collections…");
+    try {
+      const res = await fetch("/milk-quality/api/collections/muller/fetch", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Müller download failed");
+      let finished = false;
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const st = await fetch("/milk-quality/api/collections/muller/fetch/status");
+        const payload = await st.json().catch(() => ({}));
+        if (payload.running) continue;
+        if (payload.error) throw new Error(payload.error);
+        const summary = payload.summary || {};
+        showMessage(
+          "Müller " + (summary.month || "") + ": " +
+          (summary.rows_updated || 0) + " weighbridge value(s) written, " +
+          (summary.rows_unmatched || 0) + " with no matching ticket."
+        );
+        finished = true;
+        break;
+      }
+      if (!finished) showMessage("Müller download is still running. Refresh in a minute.", true);
       loadResults();
     } catch (err) {
       showMessage(err.message || String(err), true);
