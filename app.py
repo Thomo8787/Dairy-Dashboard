@@ -99,6 +99,26 @@ from services.genomic_progress import (
     genetics_template_extras,
     list_traits,
 )
+from services.embryos import (
+    OUTCOME_CHOICES,
+    PD_CHOICES,
+    SEX_CHOICES,
+    add_fresh_recipient,
+    add_frozen_recipient,
+    create_flush,
+    create_stock,
+    delete_batch,
+    delete_implant,
+    donor_results,
+    get_flush,
+    list_flushes,
+    list_implants,
+    list_stock,
+    save_flush_counts,
+    save_frozen_counts,
+    update_flush_plan,
+    update_implant,
+)
 from services.farms import FARMS, FARM_CHART_COLORS, HERD_FARM_OPTIONS, active_farms
 from services.graph_client import (
     auth_mode,
@@ -1490,6 +1510,186 @@ def genetics_api_bull_index_reset():
     with get_session() as session:
         reset_index_settings(session)
         return jsonify(list_bulls(session))
+
+
+def _embryo_action(action, success: str):
+    """Run an embryo form action. Return a flash message, or None when it failed."""
+    try:
+        with get_session() as session:
+            notice = action(session)
+        if isinstance(notice, str) and notice.strip():
+            return notice.strip()
+        return success
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return None
+
+
+@app.route("/genetics/flushes", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_flushes():
+    if request.method == "POST":
+        message = _embryo_action(lambda session: create_flush(session, request.form), "Flush added.")
+        if message:
+            flash(message, "success")
+        return redirect(url_for("genetics_flushes"))
+    with get_session() as session:
+        planned, recorded = list_flushes(session)
+    return render_template(
+        "genetics/flushes.html",
+        **_page_context(active_nav="genetics_flushes", page_heading="Flushes"),
+        planned=planned,
+        recorded=recorded,
+        today=datetime.now().date().isoformat(),
+    )
+
+
+@app.route("/genetics/flushes/<int:batch_id>", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_flush_day(batch_id: int):
+    action = (request.form.get("action") or "").strip()
+    if request.method == "POST":
+        reopen = False
+        if action == "plan":
+            message = _embryo_action(
+                lambda session: update_flush_plan(session, batch_id, request.form),
+                "Flush updated.",
+            )
+        elif action == "counts":
+            message = _embryo_action(
+                lambda session: save_flush_counts(session, batch_id, request.form),
+                "Embryo counts saved.",
+            )
+        elif action == "recipient":
+            message = _embryo_action(
+                lambda session: add_fresh_recipient(session, batch_id, request.form),
+                "Recipient added.",
+            )
+            reopen = message is not None
+        elif action == "freeze":
+            message = _embryo_action(
+                lambda session: save_frozen_counts(session, batch_id, request.form),
+                "Frozen embryos saved.",
+            )
+        elif action == "remove_recipient":
+            message = _embryo_action(
+                lambda session: delete_implant(session, int(request.form.get("implant_id") or 0)),
+                "Recipient removed.",
+            )
+        elif action == "delete":
+            message = _embryo_action(lambda session: delete_batch(session, batch_id), "Flush removed.")
+            if message:
+                flash(message, "success")
+                return redirect(url_for("genetics_flushes"))
+        else:
+            message = None
+            flash("That action is not available.", "error")
+        if message:
+            flash(message, "success")
+        target = url_for("genetics_flush_day", batch_id=batch_id)
+        if reopen:
+            target = f"{target}?add=1"
+        return redirect(target)
+    try:
+        with get_session() as session:
+            flush = get_flush(session, batch_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("genetics_flushes"))
+    return render_template(
+        "genetics/flush_day.html",
+        **_page_context(active_nav="genetics_flushes", page_heading="Flush day"),
+        flush=flush,
+        add_recipient=request.args.get("add") == "1",
+    )
+
+
+@app.route("/genetics/frozen-stock", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_frozen_stock():
+    action = (request.form.get("action") or "").strip()
+    reopen_id = None
+    if request.method == "POST":
+        if action == "add":
+            message = _embryo_action(lambda session: create_stock(session, request.form), "Frozen embryos added.")
+        elif action == "implant":
+            batch_id = int(request.form.get("batch_id") or 0)
+            message = _embryo_action(
+                lambda session: add_frozen_recipient(session, batch_id, request.form),
+                "Recipient added.",
+            )
+            if message:
+                reopen_id = batch_id
+        elif action == "remove_recipient":
+            message = _embryo_action(
+                lambda session: delete_implant(session, int(request.form.get("implant_id") or 0)),
+                "Recipient removed.",
+            )
+        elif action == "delete":
+            message = _embryo_action(
+                lambda session: delete_batch(session, int(request.form.get("batch_id") or 0)),
+                "Stock removed.",
+            )
+        else:
+            message = None
+            flash("That action is not available.", "error")
+        if message:
+            flash(message, "success")
+        target = url_for("genetics_frozen_stock")
+        if reopen_id:
+            target = f"{target}?implant={reopen_id}"
+        return redirect(target)
+    with get_session() as session:
+        stock = list_stock(session)
+    return render_template(
+        "genetics/frozen_stock.html",
+        **_page_context(active_nav="genetics_frozen_stock", page_heading="Frozen Stock"),
+        stock=stock,
+        today=datetime.now().date().isoformat(),
+        implant_batch=request.args.get("implant", type=int),
+    )
+
+
+@app.route("/genetics/recipients", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_recipients():
+    status = (request.values.get("status") or "all").strip().lower()
+    query = (request.values.get("q") or "").strip()
+    if request.method == "POST":
+        implant_id = int(request.form.get("implant_id") or 0)
+        message = _embryo_action(
+            lambda session: update_implant(session, implant_id, request.form),
+            "Recipient updated.",
+        )
+        if message:
+            flash(message, "success")
+        return redirect(url_for("genetics_recipients", status=status, q=query))
+    if status not in {"all", "awaiting", "in_calf", "calved", "loss"}:
+        status = "all"
+    with get_session() as session:
+        implants = list_implants(session, status=status, query=query)
+    return render_template(
+        "genetics/recipients.html",
+        **_page_context(active_nav="genetics_recipients", page_heading="Recipients"),
+        implants=implants,
+        status=status,
+        query=query,
+        pd_choices=PD_CHOICES,
+        outcome_choices=OUTCOME_CHOICES,
+        sex_choices=SEX_CHOICES,
+    )
+
+
+@app.route("/genetics/donor-results")
+@permission_required("perm_genetics")
+def genetics_donor_results():
+    with get_session() as session:
+        rows = donor_results(session)
+    return render_template(
+        "genetics/donor_results.html",
+        **_page_context(active_nav="genetics_donor_results", page_heading="Donor Results"),
+        rows=rows,
+    )
 
 
 def _selected_stock_farms() -> list[str]:

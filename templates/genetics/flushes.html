@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Flushes · {{ app_name }}{% endblock %}
+{% block page_title %}Flushes{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <h2>Heifers to flush</h2>
+      <p class="embryo-note">This is the list for the people serving heifers before a flush. The sire shown here is the bull to use.</p>
+      {% if planned %}
+        <div class="embryo-grid" style="margin-top: 0.9rem;">
+          {% for flush in planned %}
+            <article class="embryo-card">
+              <p class="embryo-kicker">{{ flush.event_date_label }}</p>
+              <p class="embryo-dam">{{ flush.dam }}</p>
+              <p class="embryo-meta">Serve to <strong>{{ flush.sire_label }}</strong></p>
+              <a class="btn" href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open flush day</a>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty">No flushes planned.</p>
+      {% endif %}
+    </section>
+
+    <section class="embryo-panel">
+      <h2>Add a flush</h2>
+      <form class="embryo-form two" method="post" style="margin-top: 0.8rem;">
+        <label class="embryo-field">
+          <span>Dam</span>
+          <input name="dam" required autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Flush date</span>
+          <input name="flush_date" type="date" required value="{{ today }}">
+        </label>
+        <label class="embryo-field">
+          <span>Sire</span>
+          <input name="sire_1" required autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Second sire, if used</span>
+          <input name="sire_2" autocomplete="off">
+        </label>
+        <div class="embryo-actions wide embryo-field">
+          <button class="btn" type="submit">Add flush</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="embryo-panel">
+      <h2>Flushes already recorded</h2>
+      {% if recorded %}
+        <div class="embryo-table-wrap">
+          <table class="embryo-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Dam</th>
+                <th>Sire</th>
+                <th>Grade 1</th>
+                <th>Grade 2</th>
+                <th>Unfertilised</th>
+                <th>Recipients</th>
+                <th>Frozen</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for flush in recorded %}
+                <tr>
+                  <td>{{ flush.event_date_label }}</td>
+                  <td>{{ flush.dam }}</td>
+                  <td>{{ flush.sire_label }}</td>
+                  <td>{{ flush.grade_1 }}</td>
+                  <td>{{ flush.grade_2 }}</td>
+                  <td>{{ flush.unfertilised }}</td>
+                  <td>{{ flush.fresh_count }}</td>
+                  <td>{{ flush.frozen_grade_1 }} grade 1, {{ flush.frozen_grade_2 }} grade 2</td>
+                  <td><a href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty">No flush has been recorded yet.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

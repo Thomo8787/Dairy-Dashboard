@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Recipients · {{ app_name }}{% endblock %}
+{% block page_title %}Recipients{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <form class="embryo-filters" method="get">
+        {% for key, label in [("all", "All"), ("awaiting", "Awaiting PD"), ("in_calf", "In calf"), ("calved", "Calved"), ("loss", "Empty or lost")] %}
+          <a class="{% if status == key %}is-on{% endif %}" href="{{ url_for('genetics_recipients', status=key, q=query) }}">{{ label }}</a>
+        {% endfor %}
+        <div class="embryo-search">
+          <input type="hidden" name="status" value="{{ status }}">
+          <input name="q" value="{{ query }}" placeholder="Recipient, dam, sire, or calf">
+          <button class="btn" type="submit">Search</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="embryo-panel">
+      {% if implants %}
+        <div class="embryo-table-wrap">
+          <table class="embryo-table">
+            <thead>
+              <tr>
+                <th>Recipient</th>
+                <th>Dam</th>
+                <th>Sire</th>
+                <th>Type</th>
+                <th>Implanted</th>
+                <th>Due</th>
+                <th>PD</th>
+                <th>Outcome</th>
+                <th>Calf</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in implants %}
+                <tr>
+                  <td>{{ row.recipient_id }}</td>
+                  <td>{{ row.dam }}</td>
+                  <td>{{ row.sire_label }}</td>
+                  <td>{{ row.fresh_label }}{% if row.grade %} · grade {{ row.grade }}{% endif %}</td>
+                  <td>{{ row.implant_date_label }}</td>
+                  <td>{{ row.due_date_label }}</td>
+                  <td>{{ row.pd_label }}</td>
+                  <td>{{ row.outcome_label }}</td>
+                  <td>
+                    {% if row.calf_id %}{{ row.calf_id }}{% endif %}
+                    {% if row.calf_sex %} {{ row.calf_sex }}{% endif %}
+                    {% if row.calf_dob_label %}<br>{{ row.calf_dob_label }}{% endif %}
+                  </td>
+                  <td>
+                    <details class="edit-details">
+                      <summary>Update</summary>
+                      <form class="edit-grid" method="post">
+                        <input type="hidden" name="implant_id" value="{{ row.id }}">
+                        <input type="hidden" name="status" value="{{ status }}">
+                        <input type="hidden" name="q" value="{{ query }}">
+                        <label class="embryo-field">
+                          <span>PD</span>
+                          <select name="pd_result">
+                            {% for key, label in pd_choices %}
+                              <option value="{{ key }}" {% if row.pd_result == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                          </select>
+                        </label>
+                        <label class="embryo-field">
+                          <span>Outcome</span>
+                          <select name="outcome">
+                            {% for key, label in outcome_choices %}
+                              <option value="{{ key }}" {% if row.outcome == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                          </select>
+                        </label>
+                        <label class="embryo-field">
+                          <span>Calf ID</span>
+                          <input name="calf_id" value="{{ row.calf_id }}">
+                        </label>
+                        <label class="embryo-field">
+                          <span>Calf sex</span>
+                          <select name="calf_sex">
+                            {% for key, label in sex_choices %}
+                              <option value="{{ key }}" {% if row.calf_sex == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                          </select>
+                        </label>
+                        <label class="embryo-field">
+                          <span>Date of birth</span>
+                          <input name="calf_dob" type="date" value="{{ row.calf_dob }}">
+                        </label>
+                        <label class="embryo-field">
+                          <span>Sire, once known</span>
+                          <input name="resolved_sire" value="{{ row.resolved_sire }}" placeholder="{{ row.sire_label }}">
+                        </label>
+                        <button class="btn" type="submit">Save</button>
+                      </form>
+                    </details>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty">No recipients match this list.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

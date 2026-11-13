@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Donor Results · {{ app_name }}{% endblock %}
+{% block page_title %}Donor Results{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <h2>Results by dam</h2>
+      <p class="embryo-note">Held is a positive PD. Held % is held divided by the recipients that have a PD result. Other losses are stillbirth, born early, recipient died, and died or sold.</p>
+      {% if rows %}
+        <div class="embryo-table-wrap">
+          <table class="embryo-table">
+            <thead>
+              <tr>
+                <th>Dam</th>
+                <th>Implants</th>
+                <th>PD checked</th>
+                <th>Held</th>
+                <th>Held %</th>
+                <th>Live heifers</th>
+                <th>Bulls</th>
+                <th>Aborted</th>
+                <th>Other losses</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr>
+                  <td>{{ row.dam }}</td>
+                  <td>{{ row.implants }}</td>
+                  <td>{{ row.pd_checked }}</td>
+                  <td>{{ row.held }}</td>
+                  <td>{{ row.held_pct }}</td>
+                  <td>{{ row.live_heifers }}</td>
+                  <td>{{ row.bulls }}</td>
+                  <td>{{ row.aborted }}</td>
+                  <td>{{ row.other_losses }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty">No implants yet.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

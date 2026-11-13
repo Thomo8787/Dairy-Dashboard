@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Frozen Stock · {{ app_name }}{% endblock %}
+{% block page_title %}Frozen Stock{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <h2>Add embryos already in the tank, or purchased</h2>
+      <form class="embryo-form two" method="post" style="margin-top: 0.8rem;">
+        <input type="hidden" name="action" value="add">
+        <label class="embryo-field">
+          <span>Where from</span>
+          <select name="kind" required>
+            <option value="existing">Already in the tank</option>
+            <option value="purchased">Purchased</option>
+          </select>
+        </label>
+        <label class="embryo-field">
+          <span>Dam</span>
+          <input name="dam" required autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Sire</span>
+          <input name="sire_1" required autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Second sire, if it could be either</span>
+          <input name="sire_2" autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Grade 1</span>
+          <input name="grade_1" inputmode="numeric" required value="0">
+        </label>
+        <label class="embryo-field">
+          <span>Grade 2</span>
+          <input name="grade_2" inputmode="numeric" required value="0">
+        </label>
+        <label class="embryo-field">
+          <span>Date acquired</span>
+          <input name="event_date" type="date" value="{{ today }}">
+        </label>
+        <label class="embryo-field">
+          <span>Note</span>
+          <input name="note" autocomplete="off" placeholder="Supplier, or where they are stored">
+        </label>
+        <div class="embryo-actions embryo-field wide">
+          <button class="btn" type="submit">Add to stock</button>
+        </div>
+      </form>
+    </section>
+
+    {% if stock %}
+      <div class="embryo-grid">
+        {% for batch in stock %}
+          <article class="embryo-card">
+            <p class="embryo-kicker">{{ batch.kind_label }}{% if batch.event_date_label %} · {{ batch.event_date_label }}{% endif %}</p>
+            <p class="embryo-dam">{{ batch.dam }}</p>
+            <p class="embryo-meta">{{ batch.sire_label }}</p>
+            {% if batch.note %}<p class="embryo-note">{{ batch.note }}</p>{% endif %}
+            <div class="stock-line">
+              <span>Grade 1 left</span>
+              <span class="stock-count {% if batch.frozen_left_1 == 0 %}is-empty{% endif %}">{{ batch.frozen_left_1 }}</span>
+            </div>
+            <div class="stock-line">
+              <span>Grade 2 left</span>
+              <span class="stock-count {% if batch.frozen_left_2 == 0 %}is-empty{% endif %}">{{ batch.frozen_left_2 }}</span>
+            </div>
+            <div class="embryo-actions" style="margin-top: 0.9rem;">
+              {% if batch.frozen_left > 0 %}
+                <button
+                  class="btn"
+                  type="button"
+                  data-implant="{{ batch.id }}"
+                  data-label="{{ batch.dam }} · {{ batch.sire_label }}"
+                >Implant</button>
+              {% endif %}
+              {% if batch.kind == "flush" %}
+                <a class="btn ghost" href="{{ url_for('genetics_flush_day', batch_id=batch.id) }}">Flush</a>
+              {% elif not batch.implants %}
+                <form class="inline-form" method="post">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="batch_id" value="{{ batch.id }}">
+                  <button class="btn ghost" type="submit">Remove</button>
+                </form>
+              {% endif %}
+            </div>
+            {% if batch.implants %}
+              <div class="recipient-list">
+                {% for row in batch.implants if not row.is_fresh %}
+                  <div class="recipient-row">
+                    <div>
+                      <strong>{{ row.recipient_id }}</strong>
+                      <span>Grade {{ row.grade }} · {{ row.implant_date_label }} · due {{ row.due_date_label }}</span>
+                    </div>
+                    <form class="inline-form" method="post">
+                      <input type="hidden" name="action" value="remove_recipient">
+                      <input type="hidden" name="implant_id" value="{{ row.id }}">
+                      <button class="btn ghost" type="submit">Remove</button>
+                    </form>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty">No frozen embryos in stock.</p>
+    {% endif %}
+  </div>
+
+  <dialog class="embryo-dialog" id="implantDialog">
+    <h2 id="implantTitle">Implant frozen embryo</h2>
+    <form class="embryo-form" method="post">
+      <input type="hidden" name="action" value="implant">
+      <input type="hidden" name="batch_id" id="implantBatch">
+      <label class="embryo-field">
+        <span>Implant date</span>
+        <input name="implant_date" type="date" required value="{{ today }}">
+      </label>
+      <label class="embryo-field">
+        <span>Recipient ID</span>
+        <input class="touch-input" name="recipient_id" inputmode="numeric" autocomplete="off" required>
+      </label>
+      <div class="embryo-actions">
+        <button class="btn" type="submit">Add</button>
+        <button class="btn ghost" type="button" data-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    const dialog = document.getElementById("implantDialog");
+    const title = document.getElementById("implantTitle");
+    const batchInput = document.getElementById("implantBatch");
+    const wanted = {{ implant_batch or "null" }};
+    function openImplant(id, label) {
+      batchInput.value = id;
+      title.textContent = label || "Implant frozen embryo";
+      if (dialog.showModal) dialog.showModal();
+    }
+    document.querySelectorAll("[data-implant]").forEach((button) => {
+      button.addEventListener("click", () => openImplant(button.dataset.implant, button.dataset.label));
+    });
+    dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
+    if (wanted) {
+      const button = document.querySelector('[data-implant="' + wanted + '"]');
+      if (button) openImplant(wanted, button.dataset.label);
+    }
+  </script>
+{% endblock %}

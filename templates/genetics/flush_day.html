@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}{{ flush.dam }} · Flush · {{ app_name }}{% endblock %}
+{% block page_title %}{{ flush.dam }}{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <p class="embryo-kicker">{{ flush.event_date_label }}</p>
+      <h2>Serve to {{ flush.sire_label }}</h2>
+      <p class="embryo-note">Fresh implants use this flush date. Due date is 269 days later.</p>
+      <details class="edit-details">
+        <summary>Edit dam, sire, or date</summary>
+        <form class="embryo-form two" method="post" style="margin-top: 0.8rem;">
+          <input type="hidden" name="action" value="plan">
+          <label class="embryo-field">
+            <span>Dam</span>
+            <input name="dam" required value="{{ flush.dam }}">
+          </label>
+          <label class="embryo-field">
+            <span>Flush date</span>
+            <input name="flush_date" type="date" required value="{{ flush.event_date }}">
+          </label>
+          <label class="embryo-field">
+            <span>Sire</span>
+            <input name="sire_1" required value="{{ flush.sire_1 }}">
+          </label>
+          <label class="embryo-field">
+            <span>Second sire, if used</span>
+            <input name="sire_2" value="{{ flush.sire_2 }}">
+          </label>
+          <div class="embryo-actions embryo-field wide">
+            <button class="btn secondary" type="submit">Save flush</button>
+          </div>
+        </form>
+      </details>
+    </section>
+
+    <section class="embryo-panel">
+      <h2>Embryos from the flush</h2>
+      <form class="embryo-form counts" method="post" style="margin-top: 0.8rem;">
+        <input type="hidden" name="action" value="counts">
+        <label class="embryo-field">
+          <span>Grade 1</span>
+          <input class="touch-input" name="grade_1" inputmode="numeric" required value="{{ flush.grade_1 if flush.grade_1 is not none else '' }}">
+        </label>
+        <label class="embryo-field">
+          <span>Grade 2</span>
+          <input class="touch-input" name="grade_2" inputmode="numeric" required value="{{ flush.grade_2 if flush.grade_2 is not none else '' }}">
+        </label>
+        <label class="embryo-field">
+          <span>Unfertilised / degenerate</span>
+          <input class="touch-input" name="unfertilised" inputmode="numeric" required value="{{ flush.unfertilised if flush.unfertilised is not none else '' }}">
+        </label>
+        <div class="embryo-actions embryo-field wide">
+          <button class="btn" type="submit">Save counts</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="embryo-panel">
+      <div class="embryo-head">
+        <div>
+          <h2>Recipients</h2>
+          <p>{{ flush.fresh_count }} implanted fresh{% if flush.viable is not none %} of {{ flush.viable }} grade 1 and grade 2{% endif %}</p>
+        </div>
+        {% if flush.grades_recorded %}
+          <button class="btn" type="button" id="openRecip">Add recipient</button>
+        {% endif %}
+      </div>
+      {% if not flush.grades_recorded %}
+        <p class="embryo-note">Save the embryo counts, then add recipient IDs.</p>
+      {% endif %}
+      {% if flush.implants %}
+        <div class="recipient-list">
+          {% for row in flush.implants if row.is_fresh %}
+            <div class="recipient-row">
+              <div>
+                <strong>{{ row.recipient_id }}</strong>
+                <span>Grade {{ row.grade }} · due {{ row.due_date_label }}</span>
+              </div>
+              <form class="inline-form" method="post">
+                <input type="hidden" name="action" value="remove_recipient">
+                <input type="hidden" name="implant_id" value="{{ row.id }}">
+                <button class="btn ghost" type="submit">Remove</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      {% elif flush.grades_recorded %}
+        <p class="empty">No recipients yet.</p>
+      {% endif %}
+    </section>
+
+    {% if flush.ask_freeze %}
+      <section class="embryo-panel">
+        <h2>Freeze the remainder</h2>
+        <p class="embryo-note">
+          Suggested from the embryos not implanted today:
+          {{ flush.freeze_suggest_1 }} grade 1 and {{ flush.freeze_suggest_2 }} grade 2.
+          Grade 1 is used for the fresh implants first. Change either number if one was discarded.
+        </p>
+        <form class="embryo-form two" method="post" style="margin-top: 0.8rem;">
+          <input type="hidden" name="action" value="freeze">
+          <label class="embryo-field">
+            <span>Grade 1 to freeze</span>
+            <input class="touch-input" name="frozen_grade_1" inputmode="numeric" required value="{{ flush.frozen_grade_1 if flush.freeze_confirmed else flush.freeze_suggest_1 }}">
+          </label>
+          <label class="embryo-field">
+            <span>Grade 2 to freeze</span>
+            <input class="touch-input" name="frozen_grade_2" inputmode="numeric" required value="{{ flush.frozen_grade_2 if flush.freeze_confirmed else flush.freeze_suggest_2 }}">
+          </label>
+          <div class="embryo-actions embryo-field wide">
+            <button class="btn" type="submit">Save frozen embryos</button>
+          </div>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if not flush.implants %}
+      <form method="post">
+        <input type="hidden" name="action" value="delete">
+        <button class="btn ghost" type="submit">Remove this flush</button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if flush.grades_recorded %}
+    <dialog class="embryo-dialog" id="recipDialog" {% if add_recipient %}open{% endif %}>
+      <h2>Add recipient</h2>
+      <p class="embryo-note">{{ flush.dam }} · {{ flush.sire_label }}</p>
+      <form class="embryo-form" method="post">
+        <input type="hidden" name="action" value="recipient">
+        <label class="embryo-field">
+          <span>Recipient ID</span>
+          <input class="touch-input" name="recipient_id" inputmode="numeric" autocomplete="off" required autofocus>
+        </label>
+        <div class="embryo-actions">
+          <button class="btn" type="submit">Add</button>
+          <button class="btn ghost" type="button" data-close>Close</button>
+        </div>
+      </form>
+    </dialog>
+    <script>
+      const dialog = document.getElementById("recipDialog");
+      const opener = document.getElementById("openRecip");
+      if (opener && dialog.showModal) {
+        opener.addEventListener("click", () => dialog.showModal());
+      }
+      const closer = dialog.querySelector("[data-close]");
+      if (closer) closer.addEventListener("click", () => dialog.close());
+      if (dialog.hasAttribute("open") && dialog.showModal) {
+        dialog.close();
+        dialog.showModal();
+      }
+    </script>
+  {% endif %}
+{% endblock %}

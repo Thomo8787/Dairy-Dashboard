@@ -190,6 +190,30 @@ NAV_ITEMS = [
                 "endpoint": "genetics_bull_search",
                 "permission": "perm_genetics",
             },
+            {
+                "id": "genetics_flushes",
+                "label": "Flushes",
+                "endpoint": "genetics_flushes",
+                "permission": "perm_genetics",
+            },
+            {
+                "id": "genetics_frozen_stock",
+                "label": "Frozen Stock",
+                "endpoint": "genetics_frozen_stock",
+                "permission": "perm_genetics",
+            },
+            {
+                "id": "genetics_recipients",
+                "label": "Recipients",
+                "endpoint": "genetics_recipients",
+                "permission": "perm_genetics",
+            },
+            {
+                "id": "genetics_donor_results",
+                "label": "Donor Results",
+                "endpoint": "genetics_donor_results",
+                "permission": "perm_genetics",
+            },
         ],
     },
 ]

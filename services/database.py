@@ -726,6 +726,55 @@ class NmlMilkResult(Base):
     )
 
 
+class EmbryoBatch(Base):
+    """A planned flush, or frozen embryos already in the tank or purchased."""
+
+    __tablename__ = "embryo_batches"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(16), nullable=False, index=True)  # flush, existing, purchased
+    dam = Column(String(128), nullable=False, index=True)
+    sire_1 = Column(String(128), nullable=False)
+    sire_2 = Column(String(128))
+    event_date = Column(Date, index=True)
+    grade_1 = Column(Integer)
+    grade_2 = Column(Integer)
+    unfertilised = Column(Integer)
+    frozen_grade_1 = Column(Integer, nullable=False, default=0)
+    frozen_grade_2 = Column(Integer, nullable=False, default=0)
+    freeze_confirmed = Column(Boolean, nullable=False, default=False)
+    note = Column(String(255))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    implants = relationship(
+        "EmbryoImplant",
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        order_by="EmbryoImplant.id",
+    )
+
+
+class EmbryoImplant(Base):
+    """One embryo implanted into one recipient."""
+
+    __tablename__ = "embryo_implants"
+
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(Integer, ForeignKey("embryo_batches.id"), nullable=False, index=True)
+    recipient_id = Column(String(64), nullable=False, index=True)
+    implant_date = Column(Date, nullable=False, index=True)
+    is_fresh = Column(Boolean, nullable=False, default=True)
+    grade = Column(Integer)
+    due_date = Column(Date, index=True)
+    pd_result = Column(String(16))
+    outcome = Column(String(32))
+    calf_id = Column(String(64))
+    calf_sex = Column(String(8))
+    calf_dob = Column(Date)
+    resolved_sire = Column(String(128))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    batch = relationship("EmbryoBatch", back_populates="implants")
+
+
 class BreedingSireClassification(Base):
     """Manual beef/dairy classification for breeding sires without .b/.s suffix."""
 
