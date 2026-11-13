@@ -12,6 +12,7 @@
   --sidebar-muted: #a9beB0;
   --accent: #2f6b45;
   --accent-soft: #e5f2ea;
+  --filter-on: #5fa87a;
   --success: #1f7a4c;
   --error: #b42318;
   --info: #1d4f91;
@@ -919,19 +920,25 @@ th {
   min-width: 3.2rem;
   padding: 0.45rem 0.7rem;
   border-radius: 8px;
-  border: 1px solid #1f3b5a;
-  color: #1f3b5a;
+  border: 2px solid var(--line);
+  color: var(--muted);
   text-decoration: none;
   font-weight: 600;
   font-size: 0.9rem;
   font-family: inherit;
-  background: #fff;
+  background: #f3f4f6;
   cursor: pointer;
 }
 
 .me-chip.is-active {
-  background: #1f3b5a;
+  background: var(--filter-on);
+  border-color: var(--filter-on);
   color: #fff;
+}
+
+.me-chip[data-farm].is-active {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .me-help {
@@ -1417,6 +1424,33 @@ body.me-trend-open {
   margin: 0.2rem 0 0;
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.filter-panel .slicer-group:not(.farm-slicer) .slicer-btn.selected,
+.filter-panel .shift-slicer .slicer-btn.selected,
+.filter-panel .slicer-btn.selected,
+.chart-toolbar .smoothing-slicer .slicer-btn.selected,
+.chart-toolbar .outlier-slicer .slicer-btn.selected,
+.filter-panel button.filter-funnel.is-active {
+  background: var(--filter-on);
+  border-color: var(--filter-on);
+  color: #fff;
+}
+
+.filter-panel .slicer-group:not(.farm-slicer) .slicer-btn.selected .slicer-icon {
+  background: #fff;
+  color: var(--filter-on);
+}
+
+.filter-panel .farm-slicer .slicer-btn.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.filter-panel .farm-slicer .slicer-btn.selected .slicer-icon {
+  background: #fff;
+  color: var(--accent);
 }
 
 .filter-panel-toggle {
