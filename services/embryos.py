@@ -502,7 +502,7 @@ def _batch_dict(batch: EmbryoBatch) -> dict[str, Any]:
         "frozen_left_2": left_2,
         "frozen_left": left_1 + left_2,
         "note": batch.note or "",
-        "planned": batch.kind == "flush" and not grades_recorded,
+        "planned": batch.kind == "flush" and not grades_recorded and not batch.implants,
         "implants": [_implant_dict(row, batch) for row in batch.implants],
     }
 
