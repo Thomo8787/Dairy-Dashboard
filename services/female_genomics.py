@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections import defaultdict
 from typing import Any
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from services.database import EmbryoImplant, GenomicResult, HerdBirth, HerdInventory
 from services.embryos import format_date, sire_label
-from services.genomic_import import eartag_match_key
+from services.genomic_import import eartag_match_key, load_female_columns
 
 TRAIT_FIELDS = (
     "pli",
@@ -50,8 +51,9 @@ def list_females(session: Session, *, embryo_only: bool = False) -> dict[str, An
     """Return genomic heifers, optionally limited to embryo calves."""
     genomics = list(session.scalars(select(GenomicResult)).all())
     by_hbn = {row.hbn: row for row in genomics if row.hbn}
+    visual_to_hbn = _visual_index(genomics)
     identities, cow_keys = _identities(session)
-    embryo_by_hbn = _embryo_matches(session, by_hbn, cow_keys)
+    embryo_by_hbn = _embryo_matches(session, by_hbn, cow_keys, visual_to_hbn)
 
     rows: list[dict[str, Any]] = []
     updated: dt.datetime | None = None
@@ -67,8 +69,18 @@ def list_females(session: Session, *, embryo_only: bool = False) -> dict[str, An
     return {
         "rows": rows,
         "count": len(rows),
+        "columns": load_female_columns(session),
         "updated_at": updated.isoformat() if updated else None,
     }
+
+
+def _visual_index(genomics: list[GenomicResult]) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for genomic in genomics:
+        herd_id = _norm_id(genomic.visual_id)
+        if herd_id and genomic.hbn and herd_id not in found:
+            found[herd_id] = genomic.hbn
+    return found
 
 
 def _identities(session: Session) -> tuple[dict[str, _Identity], dict[str, list[str]]]:
@@ -122,6 +134,7 @@ def _embryo_matches(
     session: Session,
     by_hbn: dict[str, GenomicResult],
     cow_keys: dict[str, list[str]],
+    visual_to_hbn: dict[str, str],
 ) -> dict[str, EmbryoImplant]:
     matched: dict[str, EmbryoImplant] = {}
     implants = session.scalars(
@@ -130,7 +143,7 @@ def _embryo_matches(
     for implant in implants:
         if not _is_embryo_heifer(implant):
             continue
-        hbn = _implant_hbn(implant, by_hbn, cow_keys)
+        hbn = _implant_hbn(implant, by_hbn, cow_keys, visual_to_hbn)
         if not hbn:
             continue
         current = matched.get(hbn)
@@ -143,8 +156,13 @@ def _implant_hbn(
     implant: EmbryoImplant,
     by_hbn: dict[str, GenomicResult],
     cow_keys: dict[str, list[str]],
+    visual_to_hbn: dict[str, str],
 ) -> str | None:
-    for key in cow_keys.get(_norm_id(implant.calf_id), []):
+    herd_id = _norm_id(implant.calf_id)
+    visual = visual_to_hbn.get(herd_id)
+    if visual and visual in by_hbn:
+        return visual
+    for key in cow_keys.get(herd_id, []):
         if key in by_hbn:
             return key
     return None
@@ -167,8 +185,9 @@ def _row(
     embryo: EmbryoImplant | None,
 ) -> dict[str, Any]:
     cow_id = identity.cow_id if identity else ""
+    visual_id = _norm_id(genomic.visual_id) or cow_id
     eartag = (genomic.eartag or (identity.etag if identity else "") or "").strip()
-    animal = cow_id or (genomic.animal_name or "").strip() or eartag
+    animal = visual_id or (genomic.animal_name or "").strip() or eartag
     dob = _as_date(genomic.dob) or (identity.bdat if identity else None)
     if dob is None and embryo is not None:
         dob = _as_date(embryo.calf_dob)
@@ -176,6 +195,7 @@ def _row(
     row: dict[str, Any] = {
         "animal": animal,
         "cow_id": cow_id,
+        "visual_id": visual_id,
         "eartag": eartag,
         "hbn": genomic.hbn or "",
         "dob": dob.isoformat() if dob else "",
@@ -189,8 +209,20 @@ def _row(
     }
     for field in TRAIT_FIELDS:
         value = getattr(genomic, field)
-        row[field] = float(value) if isinstance(value, (int, float)) else None
+        row[field] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    traits = _trait_values(genomic.traits)
+    row.update(traits)
     return row
+
+
+def _trait_values(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _norm_id(value: Any) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import gc
 import io
+import json
 import logging
 import re
 from pathlib import Path
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 GENETICS_FOLDER = "Genetics"
 ANIMALS_AHDB_STEM = "animals_ahdb"
 GENOMIC_SOURCE_SETTING_KEY = "genomic_results.source_fingerprint"
+GENOMIC_COLUMNS_SETTING_KEY = "genomic_results.columns"
+GENOMIC_SOURCE_NAME_KEY = "genomic_results.source_name"
 EARTAG_MATCH_DIGITS = 12
 
 # GenomicResult field -> candidate source column names (matched after _col_key).
@@ -340,3 +343,290 @@ def import_genomic_results(db: Session, *, force: bool = False) -> dict[str, Any
         "source_file": source_file,
         "last_modified": last_modified,
     }
+
+
+_IDENTITY_FIELDS = {
+    "genomicindicator": "data_type",
+    "eartag": "eartag",
+    "freezebrand": "visual_id",
+    "visualid": "visual_id",
+    "dateofbirth": "dob",
+    "sirename": "sire_name",
+    "sire": "sire_name",
+    "sirehbn": "sire_reg",
+    "sireregnumber": "sire_reg",
+}
+_LEGACY_FIELDS = {
+    "pli": "pli",
+    "aci": "cci",
+    "milkkg": "milk_kg",
+    "ptamilk": "milk_kg",
+    "fatkg": "fat_kg",
+    "ptafat": "fat_kg",
+    "fatpc": "fat_pct",
+    "ptafatpc": "fat_pct",
+    "protk": "protein_kg",
+    "protkg": "protein_kg",
+    "ptaprotein": "protein_kg",
+    "protpc": "protein_pct",
+    "ptaproteinpc": "protein_pct",
+    "lifespan": "life_span",
+    "fertilityindex": "fertility_index",
+    "scc": "scc",
+    "somaticcellcount": "scc",
+    "mastitis": "mastitis",
+    "typemerit": "type_merit",
+    "mammary": "mammary",
+    "legsfeet": "legs_and_feet",
+    "legsandfeet": "legs_and_feet",
+    "stat": "stature",
+    "stature": "stature",
+    "cw": "chest_width",
+    "chestwidth": "chest_width",
+    "bodydepth": "body_depth",
+    "msp": "milking_speed",
+    "easeofmilk": "milking_speed",
+}
+_EXCEL_EPOCH = dt.datetime(1899, 12, 30)
+
+
+def import_female_results_workbook(db: Session, file_bytes: bytes, filename: str) -> dict[str, Any]:
+    """Replace female genomic results with an uploaded workbook."""
+    suffix = Path(filename).suffix.lower()
+    buffer = io.BytesIO(file_bytes)
+    if suffix in {".xlsx", ".xls", ".xlsm"}:
+        frame = pd.read_excel(buffer, header=None)
+    else:
+        frame = pd.read_csv(buffer, header=None)
+    frame = frame.dropna(how="all")
+    if frame.empty:
+        raise ValueError("That file has no rows.")
+    header_at, label_at = _header_rows(frame)
+    keys, labels = _column_defs(frame.iloc[header_at], frame.iloc[label_at] if label_at is not None else None)
+    data = frame.iloc[(label_at if label_at is not None else header_at) + 1 :].reset_index(drop=True)
+    import_time = dt.datetime.now(dt.timezone.utc)
+    mappings, columns = _female_mappings(data, keys, labels, import_time)
+    if not mappings:
+        raise ValueError("No rows with an eartag were found in that file.")
+    db.execute(delete(GenomicResult))
+    for start in range(0, len(mappings), 500):
+        db.bulk_insert_mappings(GenomicResult, mappings[start : start + 500])
+    _store_setting(db, GENOMIC_COLUMNS_SETTING_KEY, json.dumps(columns))
+    _store_setting(db, GENOMIC_SOURCE_NAME_KEY, filename)
+    logger.info("Imported %s female genomic rows from %s", len(mappings), filename)
+    return {
+        "rows_imported": len(mappings),
+        "columns": len(columns),
+        "filename": filename,
+    }
+
+
+def load_female_columns(db: Session) -> list[dict[str, Any]]:
+    raw = _load_setting(db, GENOMIC_COLUMNS_SETTING_KEY)
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict) and item.get("key")]
+
+
+def _header_rows(frame: pd.DataFrame) -> tuple[int, int | None]:
+    positions: list[int] = []
+    for pos in range(len(frame)):
+        values = [_cell_text(value).casefold() for value in frame.iloc[pos].tolist()]
+        if "eartag" in values:
+            positions.append(pos)
+    if not positions:
+        raise ValueError("The file needs an Eartag column.")
+    if len(positions) > 1 and positions[1] == positions[0] + 1:
+        return positions[0], positions[1]
+    return positions[0], None
+
+
+def _column_defs(key_row: pd.Series, label_row: pd.Series | None) -> tuple[list[str], list[str]]:
+    keys: list[str] = []
+    labels: list[str] = []
+    used: set[str] = set()
+    for pos, key_value in enumerate(key_row.tolist()):
+        label_value = ""
+        if label_row is not None and pos < len(label_row):
+            label_value = _cell_text(label_row.iloc[pos])
+        machine = _cell_text(key_value)
+        label = label_value or machine
+        if not label and not machine:
+            keys.append("")
+            labels.append("")
+            continue
+        base = _col_key(machine or label) or f"column{pos + 1}"
+        key = base
+        suffix = 2
+        while key in used:
+            key = f"{base}{suffix}"
+            suffix += 1
+        used.add(key)
+        keys.append(key)
+        labels.append(label or machine)
+    return keys, labels
+
+
+def _female_mappings(
+    data: pd.DataFrame,
+    keys: list[str],
+    labels: list[str],
+    import_time: dt.datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    fields = [_identity_field(key, label) for key, label in zip(keys, labels)]
+    if "eartag" not in fields:
+        raise ValueError("The file needs an Eartag column.")
+    samples: dict[str, list[Any]] = {}
+    for key, field in zip(keys, fields):
+        if key and field is None:
+            samples[key] = []
+    mappings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    legacy_fields = _legacy_for(keys, labels)
+    for _, row in data.iterrows():
+        values = row.tolist()
+        record: dict[str, Any] = {
+            "data_type": None,
+            "eartag": None,
+            "visual_id": None,
+            "animal_name": None,
+            "dob": None,
+            "sire_name": None,
+            "sire_reg": None,
+            "updated_at": import_time,
+        }
+        traits: dict[str, Any] = {}
+        for pos, key in enumerate(keys):
+            if not key or pos >= len(values):
+                continue
+            field = fields[pos]
+            parsed = _parse_cell(values[pos], field)
+            if field == "dob":
+                record["dob"] = parsed if isinstance(parsed, dt.date) else None
+            elif field in {"data_type", "eartag", "visual_id", "sire_name", "sire_reg"}:
+                text = parsed if isinstance(parsed, str) else None
+                record[field] = text
+                if field in {"data_type", "sire_reg"} and text:
+                    traits[key] = text
+            elif parsed is not None:
+                traits[key] = parsed
+                if key in samples and len(samples[key]) < 25:
+                    samples[key].append(parsed)
+        hbn = eartag_match_key(record["eartag"])
+        if not hbn or hbn in seen:
+            continue
+        seen.add(hbn)
+        record["hbn"] = hbn
+        record["animal_name"] = record["visual_id"]
+        record["traits"] = json.dumps(traits, ensure_ascii=False)
+        for key, legacy in legacy_fields.items():
+            value = traits.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                record[legacy] = float(value)
+        mappings.append(record)
+    columns = []
+    for key, label, field in zip(keys, labels, fields):
+        if not key or field in {"eartag", "visual_id", "dob", "sire_name"}:
+            continue
+        columns.append(
+            {
+                "key": key,
+                "label": label,
+                "numeric": _column_is_numeric(samples.get(key, [])),
+            }
+        )
+    return mappings, columns
+
+
+def _identity_field(key: str, label: str) -> str | None:
+    for text in (key, _col_key(label)):
+        if text in _IDENTITY_FIELDS:
+            return _IDENTITY_FIELDS[text]
+    return None
+
+
+def _legacy_for(keys: list[str], labels: list[str]) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for key, label in zip(keys, labels):
+        legacy = _LEGACY_FIELDS.get(key) or _LEGACY_FIELDS.get(_col_key(label))
+        if legacy:
+            found[key] = legacy
+    return found
+
+
+def _column_is_numeric(values: list[Any]) -> bool:
+    saw = False
+    for value in values:
+        if value is None or value == "":
+            continue
+        saw = True
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+    return saw
+
+
+def _parse_cell(value: Any, field: str | None) -> Any:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if field == "dob":
+        return _parse_dob(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and field not in {None}:
+        return str(value).strip()
+    if field is None and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none"}:
+        return None
+    if field is None:
+        number = text.replace(",", "")
+        try:
+            return float(number)
+        except ValueError:
+            return text
+    return text
+
+
+def _parse_dob(value: Any) -> dt.date | None:
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and not pd.isna(value):
+        serial = float(value)
+        if 20000 <= serial <= 80000:
+            return (_EXCEL_EPOCH + dt.timedelta(days=serial)).date()
+    text = str(value).strip()
+    if not text:
+        return None
+    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+def _cell_text(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value).replace("\ufeff", "").strip()
+
+
+def _store_setting(db: Session, key: str, value: str) -> None:
+    row = db.scalar(select(AppSetting).where(AppSetting.key == key))
+    if row is None:
+        db.add(AppSetting(key=key, value=value))
+    else:
+        row.value = value
+    db.flush()
+
+
+def _load_setting(db: Session, key: str) -> str:
+    row = db.scalar(select(AppSetting).where(AppSetting.key == key))
+    return (row.value if row and row.value else "").strip()

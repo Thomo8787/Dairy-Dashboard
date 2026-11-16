@@ -517,17 +517,20 @@ class SenseHubCalfAssignment(Base):
 
 
 class GenomicResult(Base):
-    """AHDB genomic evaluation traits from Genetics/animals_ahdb, keyed by last 12 eartag digits."""
+    """Female genomic evaluation, keyed by the last 12 eartag digits."""
 
     __tablename__ = "genomic_results"
 
     id = Column(Integer, primary_key=True)
     hbn = Column(String(32), unique=True, nullable=False, index=True)
     eartag = Column(String(64))
+    visual_id = Column(String(64))
     animal_name = Column(String(128))
+    data_type = Column(String(16))
     dob = Column(Date)
     sire_name = Column(String(128))
     sire_reg = Column(String(64))
+    traits = Column(Text)
     milk_kg = Column(Float)
     fat_kg = Column(Float)
     protein_kg = Column(Float)
@@ -1071,7 +1074,10 @@ def _ensure_genomic_result_columns(engine) -> None:
     existing = {col["name"] for col in inspector.get_columns("genomic_results")}
     needed = {
         "animal_name": "ALTER TABLE genomic_results ADD COLUMN animal_name VARCHAR(128)",
+        "visual_id": "ALTER TABLE genomic_results ADD COLUMN visual_id VARCHAR(64)",
+        "data_type": "ALTER TABLE genomic_results ADD COLUMN data_type VARCHAR(16)",
         "dob": "ALTER TABLE genomic_results ADD COLUMN dob DATE",
+        "traits": "ALTER TABLE genomic_results ADD COLUMN traits TEXT",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():

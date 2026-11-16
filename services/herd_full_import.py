@@ -11,7 +11,6 @@ from services.herd_birth_import import import_herd_births
 from services.herd_events_import import import_cow_events
 from services.herd_inventory_import import import_herd_inventory
 from services.herd_onedrive import discover_dcexport_files, herd_import_config_error
-from services.genomic_import import import_genomic_results
 from services.stock_accruals import rebuild_stock_accrual_snapshots
 from services.stock_purchase_derivation import rebuild_stock_purchases
 
@@ -34,11 +33,7 @@ def import_herd_exports(db: Session, *, force: bool = False) -> dict[str, Any]:
     events = import_cow_events(db, force=force)
     births = import_herd_births(db, force=force)
     inventory = import_herd_inventory(db, force=force)
-    try:
-        genomic = import_genomic_results(db, force=force)
-    except Exception as exc:
-        logger.exception("Genomic import failed")
-        genomic = {"skipped": True, "error": str(exc), "rows_imported": 0}
+    genomic = {"skipped": True, "reason": "manual_upload", "rows_imported": 0}
 
     try:
         purchases = rebuild_stock_purchases(db)
@@ -102,6 +97,8 @@ def format_herd_import_summary(result: dict[str, Any]) -> str:
     genomic = result.get("genomic") or {}
     if genomic.get("error"):
         genomic_label = f"failed ({genomic['error']})"
+    elif genomic.get("reason") == "manual_upload":
+        genomic_label = "left as uploaded"
     elif genomic.get("skipped"):
         genomic_label = "unchanged"
     else:

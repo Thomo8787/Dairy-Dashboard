@@ -92,6 +92,7 @@ from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
 from services.ahdb_bulls import AhdbBullsError, ensure_imported, list_bulls, refresh_bulls
+from services.genomic_import import import_female_results_workbook
 from services.female_genomics import list_females
 from services.custom_indexes import reset_index_settings, save_index_settings
 from services.genomic_progress import (
@@ -1512,13 +1513,16 @@ def genetics_females():
             active_nav="genetics_females",
             page_heading="Females",
             about_text=(
-                "Female genomic results from the animals_ahdb file. "
-                "Date of birth is the herd birth date when the eartag matches. "
-                "Use the trait boxes to keep animals between a minimum and a maximum."
+                "Upload the Thomassons results file when a new one arrives. "
+                "Visual ID, eartag, date of birth, and sire stay on the table. "
+                "Use Columns to choose the other traits and their order."
             ),
             page_config={
                 "mode": "females",
                 "apiUrl": url_for("genetics_api_females"),
+                "uploadUrl": url_for("genetics_api_females_import"),
+                "canUpload": True,
+                "storageKey": "genetics-female-columns",
                 "noun": {"one": "female", "many": "females"},
             },
         ),
@@ -1534,17 +1538,37 @@ def genetics_embryo_calves():
             active_nav="genetics_embryo_calves",
             page_heading="Embryo Calves",
             about_text=(
-                "Heifer calves from an embryo implant whose eartag matches a female genomic result. "
-                "Recipient, dam, and due date come from that implant. "
-                "Genomic sire is the sire on the genomic file."
+                "Heifer calves from an implant whose visual ID or eartag matches the uploaded results. "
+                "Recipient, dam, due date, and flush sire stay on the table. "
+                "Genomic sire is the sire in the results file."
             ),
             page_config={
                 "mode": "embryo",
                 "apiUrl": url_for("genetics_api_embryo_calves"),
+                "canUpload": False,
+                "storageKey": "genetics-female-columns",
                 "noun": {"one": "embryo calf", "many": "embryo calves"},
             },
         ),
     )
+
+
+@app.route("/genetics/api/females/import", methods=["POST"])
+def genetics_api_females_import():
+    _user, error = _genetics_json_user()
+    if error:
+        return error
+    upload = request.files.get("file")
+    if upload is None or not (upload.filename or "").strip():
+        return jsonify({"error": "Choose a results file."}), 400
+    try:
+        with get_session() as session:
+            summary = import_female_results_workbook(session, upload.read(), upload.filename)
+            payload = list_females(session)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    payload["imported"] = summary
+    return jsonify(payload)
 
 
 @app.route("/genetics/api/females")
