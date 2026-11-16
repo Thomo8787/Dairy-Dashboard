@@ -111,7 +111,8 @@
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
-    #females-table td.negative { background: #fecaca; color: #991b1b; font-weight: 700; }
+    #females-table td.good { background: #bbf7d0; color: #166534; font-weight: 700; }
+    #females-table td.bad { background: #fecaca; color: #991b1b; font-weight: 700; }
     .empty-state { padding: 1.5rem; color: var(--muted); }
     .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
     .message { margin-bottom: 0.75rem; }
@@ -177,6 +178,18 @@
     .column-list li.selected { background: #dceaf7; }
     .column-list li[draggable="true"] { cursor: grab; }
     .columns-search { width: 100%; margin: 0; }
+    .colours-card { width: min(680px, 100%); }
+    .colours-scroll { max-height: 50vh; overflow: auto; margin: 0.8rem 0; }
+    .colours-table { width: 100%; border-collapse: collapse; }
+    .colours-table th, .colours-table td {
+      text-align: left;
+      padding: 0.35rem 0.4rem;
+      font-size: 0.84rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .colours-table th { color: var(--muted); font-weight: 600; }
+    .colours-table select, .colours-table input { width: 100%; margin: 0; }
+    .colours-table td:first-child { font-weight: 600; white-space: nowrap; }
   </style>
 {% endblock %}
 
@@ -216,6 +229,7 @@
       <p class="meta-line" id="meta-line">Loading…</p>
       <div class="action-bar">
         <button type="button" class="secondary small" id="columns-btn">Columns</button>
+        <button type="button" class="secondary small" id="colours-btn">Colours</button>
         {% if page_config.canUpload %}
           <button type="button" class="secondary small" id="upload-btn">Upload results</button>
           <input type="file" id="upload-input" accept=".xlsx,.xls,.csv" hidden>
@@ -260,6 +274,27 @@
       <div class="columns-foot">
         <button type="button" class="secondary small" id="columns-close">Close</button>
         <button type="button" id="columns-update">Update</button>
+      </div>
+    </div>
+  </div>
+  <div id="colours-overlay" class="columns-overlay" hidden>
+    <div class="columns-card colours-card" role="dialog" aria-labelledby="colours-title">
+      <div class="columns-head">
+        <h2 id="colours-title">Colours</h2>
+        <button type="button" class="secondary small" id="colours-clear">Clear colours</button>
+      </div>
+      <p class="help-text" id="colours-note">Only traits on the table are listed. Higher means a bigger number is good. Leave a box empty to skip that colour.</p>
+      <div class="colours-scroll">
+        <table class="colours-table">
+          <thead>
+            <tr><th>Trait</th><th>Good when</th><th>Green from</th><th>Red from</th></tr>
+          </thead>
+          <tbody id="colours-rows"></tbody>
+        </table>
+      </div>
+      <div class="columns-foot">
+        <button type="button" class="secondary small" id="colours-close">Close</button>
+        <button type="button" id="colours-update">Update</button>
       </div>
     </div>
   </div>

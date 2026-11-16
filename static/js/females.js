@@ -17,11 +17,13 @@ const FIXED_COLUMNS = PAGE.mode === "embryo" ? [
 const SEARCH_KEYS = PAGE.mode === "embryo"
   ? ["visual_id", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn"]
   : ["visual_id", "eartag", "sire_name", "cow_id", "hbn"];
+const COLOUR_STORAGE_KEY = "genetics-female-colours";
 const PAGE_SIZE = 100;
 const sortState = { key: "visual_id", dir: 1 };
 let rows = [];
 let catalog = [];
 let displayedKeys = loadDisplayed();
+let colourRules = loadColourRules();
 let draftKeys = [];
 let selectedAvailable = new Set();
 let selectedDisplayed = new Set();
@@ -36,6 +38,32 @@ function loadDisplayed() {
   } catch (err) {
     return [];
   }
+}
+
+function loadColourRules() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLOUR_STORAGE_KEY) || "{}");
+    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function numericColumns() {
+  return activeColumns().filter((col) => col.type === "num");
+}
+
+function colourClass(key, value) {
+  const rule = colourRules[key];
+  if (!rule) return "";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "";
+  const green = rule.green === "" || rule.green == null ? null : Number(rule.green);
+  const red = rule.red === "" || rule.red == null ? null : Number(rule.red);
+  const higherIsGood = rule.direction !== "low";
+  if (Number.isFinite(green) && (higherIsGood ? num >= green : num <= green)) return "good";
+  if (Number.isFinite(red) && (higherIsGood ? num < red : num > red)) return "bad";
+  return "";
 }
 
 function catalogByKey(key) {
@@ -214,7 +242,8 @@ function renderTable() {
   body.innerHTML = pageRows.map((row) => {
     return "<tr>" + columns.map((col) => {
       const classes = [col.type === "num" ? "num" : ""];
-      if (col.type === "num" && Number(row[col.key]) < 0) classes.push("negative");
+      const tone = col.type === "num" ? colourClass(col.key, row[col.key]) : "";
+      if (tone) classes.push(tone);
       const cls = classes.filter(Boolean).join(" ");
       return "<td" + (cls ? ' class="' + cls + '"' : "") + ">" + cellHtml(row, col) + "</td>";
     }).join("") + "</tr>";
@@ -325,7 +354,63 @@ document.getElementById("page-next").addEventListener("click", () => {
   currentPage += 1;
   renderTable();
 });
+function renderColourRows() {
+  const traits = numericColumns();
+  const body = document.getElementById("colours-rows");
+  if (!traits.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty-state">Add a trait in Columns to set colours.</td></tr>';
+    return;
+  }
+  body.innerHTML = traits.map((trait) => {
+    const rule = colourRules[trait.key] || {};
+    const direction = rule.direction === "low" ? "low" : "high";
+    const green = rule.green == null ? "" : rule.green;
+    const red = rule.red == null ? "" : rule.red;
+    return '<tr data-key="' + escapeHtml(trait.key) + '">' +
+      "<td>" + escapeHtml(trait.label) + "</td>" +
+      '<td><select data-bound="direction">' +
+      '<option value="high"' + (direction === "high" ? " selected" : "") + ">Higher</option>" +
+      '<option value="low"' + (direction === "low" ? " selected" : "") + ">Lower</option>" +
+      "</select></td>" +
+      '<td><input type="number" data-bound="green" step="any" value="' + escapeHtml(green) + '"></td>' +
+      '<td><input type="number" data-bound="red" step="any" value="' + escapeHtml(red) + '"></td>' +
+      "</tr>";
+  }).join("");
+}
+
+function openColours() {
+  document.getElementById("colours-overlay").hidden = false;
+  renderColourRows();
+}
+
+function closeColours() {
+  document.getElementById("colours-overlay").hidden = true;
+}
+
 document.getElementById("columns-btn").addEventListener("click", openColumns);
+document.getElementById("colours-btn").addEventListener("click", openColours);
+document.getElementById("colours-close").addEventListener("click", closeColours);
+document.getElementById("colours-clear").addEventListener("click", () => {
+  document.querySelectorAll("#colours-rows tr[data-key]").forEach((row) => {
+    row.querySelector("select").value = "high";
+    row.querySelectorAll("input").forEach((input) => { input.value = ""; });
+  });
+});
+document.getElementById("colours-update").addEventListener("click", () => {
+  const next = Object.assign({}, colourRules);
+  document.querySelectorAll("#colours-rows tr[data-key]").forEach((row) => {
+    const key = row.dataset.key;
+    const direction = row.querySelector("select").value === "low" ? "low" : "high";
+    const green = row.querySelector('[data-bound="green"]').value.trim();
+    const red = row.querySelector('[data-bound="red"]').value.trim();
+    if (direction === "high" && green === "" && red === "") delete next[key];
+    else next[key] = { direction: direction, green: green, red: red };
+  });
+  colourRules = next;
+  localStorage.setItem(COLOUR_STORAGE_KEY, JSON.stringify(colourRules));
+  closeColours();
+  renderTable();
+});
 document.getElementById("columns-close").addEventListener("click", closeColumns);
 document.getElementById("columns-default").addEventListener("click", () => {
   draftKeys = [];
