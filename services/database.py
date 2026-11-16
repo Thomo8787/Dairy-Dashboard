@@ -741,6 +741,8 @@ class EmbryoBatch(Base):
     dam = Column(String(128), nullable=False, index=True)
     sire_1 = Column(String(128), nullable=False)
     sire_2 = Column(String(128))
+    sire_1_hbn = Column(String(32))
+    sire_2_hbn = Column(String(32))
     event_date = Column(Date, index=True)
     grade_1 = Column(Integer)
     grade_2 = Column(Integer)
@@ -1066,6 +1068,22 @@ def _ensure_nml_milk_result_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_embryo_batch_columns(engine) -> None:
+    """create_all will not add sire herd-book numbers to an existing flush table."""
+    inspector = inspect(engine)
+    if "embryo_batches" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("embryo_batches")}
+    needed = {
+        "sire_1_hbn": "ALTER TABLE embryo_batches ADD COLUMN sire_1_hbn VARCHAR(32)",
+        "sire_2_hbn": "ALTER TABLE embryo_batches ADD COLUMN sire_2_hbn VARCHAR(32)",
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def _ensure_genomic_result_columns(engine) -> None:
     """create_all will not add new columns to an existing genomic_results table."""
     inspector = inspect(engine)
@@ -1090,6 +1108,7 @@ def init_db():
     Base.metadata.create_all(engine)
     _ensure_user_permission_columns(engine)
     _ensure_genomic_result_columns(engine)
+    _ensure_embryo_batch_columns(engine)
     _ensure_herd_inventory_columns(engine)
     _ensure_nml_milk_result_columns(engine)
     _ensure_sales_payment_columns(engine)

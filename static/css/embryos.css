@@ -61,6 +61,68 @@
   font-weight: 650;
 }
 
+.embryo-dam a,
+.embryo-meta a,
+.embryo-kicker a,
+.embryo-panel h2 a,
+.embryo-table a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+
+.embryo-average {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.embryo-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.sire-pick {
+  position: relative;
+}
+
+.sire-matches {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% - 0.15rem);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.sire-matches button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sire-matches button:last-child {
+  border-bottom: 0;
+}
+
+.sire-matches button:hover {
+  background: #f3f4f6;
+}
+
 .embryo-panel {
   background: var(--panel);
   border: 1px solid var(--line);

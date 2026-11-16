@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from services.database import EmbryoBatch, EmbryoImplant
+from services.database import AhdbBull, EmbryoBatch, EmbryoImplant, GenomicResult, _clean_bull_name
 
 GESTATION_DAYS = 269
 
@@ -117,6 +117,32 @@ def _parse_sires(form: Any) -> tuple[str, str | None]:
     if sire_2.casefold() == sire_1.casefold():
         sire_2 = ""
     return sire_1, sire_2 or None
+
+
+def _resolve_one_sire(session: Session, name: Any, hbn: Any) -> tuple[str | None, str | None]:
+    """Keep a typed name, or the Bull Search name and herd book number when one was picked."""
+    typed = _clean(name)
+    wanted = _clean(hbn)
+    if wanted:
+        bull = session.scalar(select(AhdbBull).where(AhdbBull.hbn == wanted))
+        if bull is not None:
+            display = _clean_bull_name(bull.bull_name) or typed or wanted
+            return display, bull.hbn
+    if not typed:
+        return None, None
+    return typed, None
+
+
+def _resolve_sires(session: Session, form: Any) -> tuple[str, str | None, str | None, str | None]:
+    sire_1, sire_1_hbn = _resolve_one_sire(session, form.get("sire_1"), form.get("sire_1_hbn"))
+    if not sire_1:
+        raise ValueError("Enter the sire.")
+    sire_2, sire_2_hbn = _resolve_one_sire(session, form.get("sire_2"), form.get("sire_2_hbn"))
+    same_name = bool(sire_2) and sire_2.casefold() == sire_1.casefold()
+    same_bull = bool(sire_2_hbn) and sire_2_hbn == sire_1_hbn
+    if same_name or same_bull:
+        sire_2, sire_2_hbn = None, None
+    return sire_1, sire_1_hbn, sire_2, sire_2_hbn
 
 
 def _due_date(implant_date: dt.date) -> dt.date:
@@ -232,13 +258,15 @@ def create_flush(session: Session, form: Any) -> EmbryoBatch:
     dam = _clean(form.get("dam"))
     if not dam:
         raise ValueError("Enter the dam.")
-    sire_1, sire_2 = _parse_sires(form)
+    sire_1, sire_1_hbn, sire_2, sire_2_hbn = _resolve_sires(session, form)
     flush_date = _parse_date(form.get("flush_date"), "the flush date")
     batch = EmbryoBatch(
         kind="flush",
         dam=dam,
         sire_1=sire_1,
         sire_2=sire_2,
+        sire_1_hbn=sire_1_hbn,
+        sire_2_hbn=sire_2_hbn,
         event_date=flush_date,
         frozen_grade_1=0,
         frozen_grade_2=0,
@@ -256,11 +284,13 @@ def update_flush_plan(session: Session, batch_id: int, form: Any) -> None:
     dam = _clean(form.get("dam"))
     if not dam:
         raise ValueError("Enter the dam.")
-    sire_1, sire_2 = _parse_sires(form)
+    sire_1, sire_1_hbn, sire_2, sire_2_hbn = _resolve_sires(session, form)
     flush_date = _parse_date(form.get("flush_date"), "the flush date")
     batch.dam = dam
     batch.sire_1 = sire_1
     batch.sire_2 = sire_2
+    batch.sire_1_hbn = sire_1_hbn
+    batch.sire_2_hbn = sire_2_hbn
     batch.event_date = flush_date
     for row in _implants_of(batch, fresh=True):
         row.implant_date = flush_date
@@ -470,7 +500,127 @@ def _implant_dict(row: EmbryoImplant, batch: EmbryoBatch) -> dict[str, Any]:
     }
 
 
-def _batch_dict(batch: EmbryoBatch) -> dict[str, Any]:
+_AVERAGE_TRAITS = (
+    ("pli", "£PLI", 0),
+    ("milk", "Milk", 0),
+    ("fat_pct", "Fat %", 2),
+    ("prot_pct", "Prot %", 2),
+    ("lifespan", "Lifespan", 0),
+)
+
+
+def _trait_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
+
+
+def _format_average(value: float, digits: int) -> str:
+    if digits <= 0:
+        return f"{int(round(value)):,}"
+    return f"{value:.{digits}f}"
+
+
+def _dam_trait_index(session: Session) -> dict[str, dict[str, float | None]]:
+    found: dict[str, dict[str, float | None]] = {}
+    rows = session.execute(
+        select(
+            GenomicResult.visual_id,
+            GenomicResult.pli,
+            GenomicResult.milk_kg,
+            GenomicResult.fat_pct,
+            GenomicResult.protein_pct,
+            GenomicResult.life_span,
+        )
+    )
+    for visual_id, pli, milk, fat_pct, protein_pct, life_span in rows:
+        key = str(visual_id or "").strip().casefold()
+        if not key or key in found:
+            continue
+        found[key] = {
+            "pli": _trait_number(pli),
+            "milk": _trait_number(milk),
+            "fat_pct": _trait_number(fat_pct),
+            "prot_pct": _trait_number(protein_pct),
+            "lifespan": _trait_number(life_span),
+        }
+    return found
+
+
+def _bull_trait_index(session: Session) -> dict[str, dict[str, float | None]]:
+    found: dict[str, dict[str, float | None]] = {}
+    rows = session.execute(
+        select(
+            AhdbBull.hbn,
+            AhdbBull.pli,
+            AhdbBull.milk_kg,
+            AhdbBull.fat_pct,
+            AhdbBull.protein_pct,
+            AhdbBull.lifespan_days,
+        )
+    )
+    for hbn, pli, milk, fat_pct, protein_pct, lifespan_days in rows:
+        key = str(hbn or "").strip()
+        if not key or key in found:
+            continue
+        found[key] = {
+            "pli": _trait_number(pli),
+            "milk": _trait_number(milk),
+            "fat_pct": _trait_number(fat_pct),
+            "prot_pct": _trait_number(protein_pct),
+            "lifespan": _trait_number(lifespan_days),
+        }
+    return found
+
+
+def _parent_average(
+    dam_traits: dict[str, float | None] | None,
+    bull_traits: dict[str, float | None] | None,
+    sire_name: str,
+) -> dict[str, Any] | None:
+    if not dam_traits or not bull_traits:
+        return None
+    traits = []
+    for key, label, digits in _AVERAGE_TRAITS:
+        left = dam_traits.get(key)
+        right = bull_traits.get(key)
+        if left is None or right is None:
+            continue
+        traits.append({"label": label, "value": _format_average((left + right) / 2, digits)})
+    if not traits:
+        return None
+    return {"sire": sire_name, "traits": traits}
+
+
+def _parent_averages(
+    batch: EmbryoBatch,
+    dams: dict[str, dict[str, float | None]] | None,
+    bulls: dict[str, dict[str, float | None]] | None,
+) -> list[dict[str, Any]]:
+    if not dams or not bulls:
+        return []
+    dam_traits = dams.get((batch.dam or "").strip().casefold())
+    averages = []
+    for name, hbn in ((batch.sire_1, batch.sire_1_hbn), (batch.sire_2, batch.sire_2_hbn)):
+        if not name or not hbn:
+            continue
+        average = _parent_average(dam_traits, bulls.get(str(hbn).strip()), name)
+        if average:
+            averages.append(average)
+    return averages
+
+
+def _batch_dict(
+    batch: EmbryoBatch,
+    dams: dict[str, dict[str, float | None]] | None = None,
+    bulls: dict[str, dict[str, float | None]] | None = None,
+) -> dict[str, Any]:
     suggest_1, suggest_2 = suggest_freeze(batch)
     left_1, left_2 = _frozen_remaining(batch)
     fresh = _implants_of(batch, fresh=True)
@@ -483,7 +633,10 @@ def _batch_dict(batch: EmbryoBatch) -> dict[str, Any]:
         "dam": batch.dam,
         "sire_1": batch.sire_1,
         "sire_2": batch.sire_2 or "",
+        "sire_1_hbn": batch.sire_1_hbn or "",
+        "sire_2_hbn": batch.sire_2_hbn or "",
         "sire_label": sire_label(batch.sire_1, batch.sire_2),
+        "parent_averages": _parent_averages(batch, dams, bulls),
         "event_date": batch.event_date.isoformat() if batch.event_date else "",
         "event_date_label": format_date(batch.event_date),
         "grade_1": batch.grade_1,
@@ -520,10 +673,12 @@ def _load_batches(session: Session) -> list[EmbryoBatch]:
 def list_flushes(session: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     planned: list[dict[str, Any]] = []
     recorded: list[dict[str, Any]] = []
+    dams = _dam_trait_index(session)
+    bulls = _bull_trait_index(session)
     for batch in _load_batches(session):
         if batch.kind != "flush":
             continue
-        item = _batch_dict(batch)
+        item = _batch_dict(batch, dams, bulls)
         if item["planned"]:
             planned.append(item)
         else:

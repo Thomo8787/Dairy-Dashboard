@@ -430,4 +430,6 @@ if (uploadButton) {
   });
 }
 
+const presetSearch = new URLSearchParams(window.location.search).get("q");
+if (presetSearch) document.getElementById("search-input").value = presetSearch;
 loadRows();

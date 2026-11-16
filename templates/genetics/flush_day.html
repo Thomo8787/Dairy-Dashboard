@@ -9,10 +9,24 @@
 {% block content %}
   <div class="embryo-page">
     <section class="embryo-panel">
-      <p class="embryo-kicker">{{ flush.event_date_label }}</p>
-      <h2>Serve to {{ flush.sire_label }}</h2>
+      <p class="embryo-kicker">{{ flush.event_date_label }} · <a href="{{ url_for('genetics_females', q=flush.dam) }}">{{ flush.dam }}</a></p>
+      <h2>Serve to
+        {% if flush.sire_1_hbn %}
+          <a href="{{ url_for('genetics_bull_search', q=flush.sire_1_hbn) }}">{{ flush.sire_1 }}</a>
+        {% else %}
+          {{ flush.sire_1 }}
+        {% endif %}
+        {% if flush.sire_2 %}
+          or
+          {% if flush.sire_2_hbn %}
+            <a href="{{ url_for('genetics_bull_search', q=flush.sire_2_hbn) }}">{{ flush.sire_2 }}</a>
+          {% else %}
+            {{ flush.sire_2 }}
+          {% endif %}
+        {% endif %}
+      </h2>
       <p class="embryo-note">Fresh implants use this flush date. Due date is 269 days later.</p>
-      <details class="edit-details">
+      <details class="edit-details" id="edit-flush" {% if edit_open %}open{% endif %}>
         <summary>Edit dam, sire, or date</summary>
         <form class="embryo-form two" method="post" style="margin-top: 0.8rem;">
           <input type="hidden" name="action" value="plan">
@@ -24,14 +38,19 @@
             <span>Flush date</span>
             <input name="flush_date" type="date" required value="{{ flush.event_date }}">
           </label>
-          <label class="embryo-field">
+          <label class="embryo-field sire-pick">
             <span>Sire</span>
-            <input name="sire_1" required value="{{ flush.sire_1 }}">
+            <input name="sire_1" required value="{{ flush.sire_1 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+            <input type="hidden" name="sire_1_hbn" value="{{ flush.sire_1_hbn }}">
+            <div class="sire-matches" hidden></div>
           </label>
-          <label class="embryo-field">
+          <label class="embryo-field sire-pick">
             <span>Second sire, if used</span>
-            <input name="sire_2" value="{{ flush.sire_2 }}">
+            <input name="sire_2" value="{{ flush.sire_2 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+            <input type="hidden" name="sire_2_hbn" value="{{ flush.sire_2_hbn }}">
+            <div class="sire-matches" hidden></div>
           </label>
+          <p class="embryo-note wide embryo-field">Pick a bull to link his figures. If he is not on the list yet, type his name and save.</p>
           <div class="embryo-actions embryo-field wide">
             <button class="btn secondary" type="submit">Save flush</button>
           </div>
@@ -158,4 +177,5 @@
       }
     </script>
   {% endif %}
+  <script src="{{ url_for('static', filename='js/embryo_sire_picker.js') }}" data-bulls-url="{{ url_for('genetics_api_bull_search') }}"></script>
 {% endblock %}

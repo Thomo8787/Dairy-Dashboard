@@ -1688,6 +1688,7 @@ def genetics_flush_day(batch_id: int):
         **_page_context(active_nav="genetics_flushes", page_heading="Flush day"),
         flush=flush,
         add_recipient=request.args.get("add") == "1",
+        edit_open=request.args.get("edit") == "1",
     )
 
 

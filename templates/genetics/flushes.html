@@ -10,15 +10,37 @@
   <div class="embryo-page">
     <section class="embryo-panel">
       <h2>Heifers to flush</h2>
-      <p class="embryo-note">This is the list for the people serving heifers before a flush. The sire shown here is the bull to use.</p>
+      <p class="embryo-note">This is the list for the people serving heifers before a flush. The sire shown here is the bull to use. The heifer opens her genomic results. A sire opens Bull Search when he was picked from that list.</p>
       {% if planned %}
         <div class="embryo-grid" style="margin-top: 0.9rem;">
           {% for flush in planned %}
             <article class="embryo-card">
               <p class="embryo-kicker">{{ flush.event_date_label }}</p>
-              <p class="embryo-dam">{{ flush.dam }}</p>
-              <p class="embryo-meta">Serve to <strong>{{ flush.sire_label }}</strong></p>
-              <a class="btn" href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open flush day</a>
+              <p class="embryo-dam"><a href="{{ url_for('genetics_females', q=flush.dam) }}">{{ flush.dam }}</a></p>
+              <p class="embryo-meta">Serve to
+                {% if flush.sire_1_hbn %}
+                  <a href="{{ url_for('genetics_bull_search', q=flush.sire_1_hbn) }}"><strong>{{ flush.sire_1 }}</strong></a>
+                {% else %}
+                  <strong>{{ flush.sire_1 }}</strong>
+                {% endif %}
+                {% if flush.sire_2 %}
+                  or
+                  {% if flush.sire_2_hbn %}
+                    <a href="{{ url_for('genetics_bull_search', q=flush.sire_2_hbn) }}"><strong>{{ flush.sire_2 }}</strong></a>
+                  {% else %}
+                    <strong>{{ flush.sire_2 }}</strong>
+                  {% endif %}
+                {% endif %}
+              </p>
+              {% for average in flush.parent_averages %}
+                <p class="embryo-average">Parent average{% if flush.sire_2 %}, {{ average.sire }}{% endif %}:
+                  {% for trait in average.traits %}{{ trait.label }} {{ trait.value }}{% if not loop.last %} · {% endif %}{% endfor %}
+                </p>
+              {% endfor %}
+              <div class="embryo-card-actions">
+                <a class="btn" href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open flush day</a>
+                <a class="btn secondary" href="{{ url_for('genetics_flush_day', batch_id=flush.id, edit=1) }}">Edit</a>
+              </div>
             </article>
           {% endfor %}
         </div>
@@ -38,14 +60,19 @@
           <span>Flush date</span>
           <input name="flush_date" type="date" required value="{{ today }}">
         </label>
-        <label class="embryo-field">
+        <label class="embryo-field sire-pick">
           <span>Sire</span>
-          <input name="sire_1" required autocomplete="off">
+          <input name="sire_1" required autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_1_hbn" value="">
+          <div class="sire-matches" hidden></div>
         </label>
-        <label class="embryo-field">
+        <label class="embryo-field sire-pick">
           <span>Second sire, if used</span>
-          <input name="sire_2" autocomplete="off">
+          <input name="sire_2" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_2_hbn" value="">
+          <div class="sire-matches" hidden></div>
         </label>
+        <p class="embryo-note wide embryo-field">Pick a bull to link his figures and show the parent average. If he is not on the list yet, type his name and save.</p>
         <div class="embryo-actions wide embryo-field">
           <button class="btn" type="submit">Add flush</button>
         </div>
@@ -74,14 +101,31 @@
               {% for flush in recorded %}
                 <tr>
                   <td>{{ flush.event_date_label }}</td>
-                  <td>{{ flush.dam }}</td>
-                  <td>{{ flush.sire_label }}</td>
+                  <td><a href="{{ url_for('genetics_females', q=flush.dam) }}">{{ flush.dam }}</a></td>
+                  <td>
+                    {% if flush.sire_1_hbn %}
+                      <a href="{{ url_for('genetics_bull_search', q=flush.sire_1_hbn) }}">{{ flush.sire_1 }}</a>
+                    {% else %}
+                      {{ flush.sire_1 }}
+                    {% endif %}
+                    {% if flush.sire_2 %}
+                      or
+                      {% if flush.sire_2_hbn %}
+                        <a href="{{ url_for('genetics_bull_search', q=flush.sire_2_hbn) }}">{{ flush.sire_2 }}</a>
+                      {% else %}
+                        {{ flush.sire_2 }}
+                      {% endif %}
+                    {% endif %}
+                  </td>
                   <td>{{ flush.grade_1 }}</td>
                   <td>{{ flush.grade_2 }}</td>
                   <td>{{ flush.unfertilised }}</td>
                   <td>{{ flush.fresh_count }}</td>
                   <td>{{ flush.frozen_grade_1 }} grade 1, {{ flush.frozen_grade_2 }} grade 2</td>
-                  <td><a href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open</a></td>
+                  <td>
+                    <a href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open</a>
+                    <a href="{{ url_for('genetics_flush_day', batch_id=flush.id, edit=1) }}">Edit</a>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -92,4 +136,5 @@
       {% endif %}
     </section>
   </div>
+  <script src="{{ url_for('static', filename='js/embryo_sire_picker.js') }}" data-bulls-url="{{ url_for('genetics_api_bull_search') }}"></script>
 {% endblock %}
