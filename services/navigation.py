@@ -191,6 +191,18 @@ NAV_ITEMS = [
                 "permission": "perm_genetics",
             },
             {
+                "id": "genetics_females",
+                "label": "Females",
+                "endpoint": "genetics_females",
+                "permission": "perm_genetics",
+            },
+            {
+                "id": "genetics_embryo_calves",
+                "label": "Embryo Calves",
+                "endpoint": "genetics_embryo_calves",
+                "permission": "perm_genetics",
+            },
+            {
                 "id": "genetics_flushes",
                 "label": "Flushes",
                 "endpoint": "genetics_flushes",

@@ -1,0 +1,456 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+      max-height: calc(100vh - 8rem);
+      overflow: auto;
+    }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .search-input { width: 100%; margin: 0; }
+    .dob-filters { display: grid; gap: 0.45rem; }
+    .dob-filters label {
+      display: grid;
+      grid-template-columns: 2.4rem minmax(0, 1fr);
+      gap: 0.35rem;
+      align-items: center;
+      font-size: 0.78rem;
+    }
+    .dob-filters input { width: 100%; margin: 0; }
+    .trait-filters { display: grid; gap: 0.3rem; }
+    .trait-filter-head,
+    .trait-filter-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 4.4rem 4.4rem;
+      gap: 0.3rem;
+      align-items: center;
+    }
+    .trait-filter-head {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .trait-filter-head span:not(:first-child) { text-align: center; }
+    .trait-filter-row label { font-size: 0.78rem; color: var(--text); }
+    .trait-filter-row input {
+      width: 100%;
+      margin: 0;
+      padding: 0.22rem 0.3rem;
+      font-size: 0.78rem;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
+    .action-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .pager {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
+    }
+    .pager span { font-size: 0.8125rem; color: var(--muted); }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 14rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    #females-table { width: max-content; border-collapse: collapse; font-size: 0.8125rem; }
+    #females-table th, #females-table td {
+      padding: 0.4rem 0.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    #females-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    #females-table thead th[data-sort] { cursor: pointer; user-select: none; }
+    #females-table thead th[data-sort]:hover { background: #274b73; }
+    #females-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    #females-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    #females-table td.num, #females-table th.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #females-table td.negative { background: #fecaca; color: #991b1b; font-weight: 700; }
+    .empty-state { padding: 1.5rem; color: var(--muted); }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .message { margin-bottom: 0.75rem; }
+    .message.err { color: #b91c1c; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Search</span>
+          <input type="search" id="search-input" class="search-input" placeholder="Herd ID, eartag, or sire" autocomplete="off">
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Date of birth</span>
+          <div class="dob-filters">
+            <label>From <input type="date" id="dob-from"></label>
+            <label>To <input type="date" id="dob-to"></label>
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Trait filters</span>
+          <div class="trait-filter-head"><span></span><span>Min</span><span>Max</span></div>
+          <div class="trait-filters" id="trait-filters"></div>
+        </div>
+        <div class="filter-section">
+          <button type="button" class="secondary small" id="clear-filters-btn">Clear filters</button>
+        </div>
+      </aside>
+      <aside class="filter-panel">
+        <h2>About</h2>
+        <p class="help-text">{{ about_text }}</p>
+      </aside>
+    </div>
+
+    <section>
+      <div id="status-message" class="message"></div>
+      <p class="meta-line" id="meta-line">Loading…</p>
+      <div class="action-bar">
+        <div class="pager">
+          <button type="button" class="secondary small" id="page-prev">Previous</button>
+          <span id="page-label">Page 1</span>
+          <button type="button" class="secondary small" id="page-next">Next</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="females-table">
+          <thead><tr id="females-head"></tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script id="page-config" type="application/json">{{ page_config | tojson }}</script>
+  <script>
+    const PAGE = JSON.parse(document.getElementById("page-config").textContent);
+    const FEMALE_COLUMNS = [
+      { key: "animal", label: "Animal", type: "text" },
+      { key: "eartag", label: "Eartag", type: "text" },
+      { key: "dob", label: "DOB", type: "date" },
+      { key: "sire_name", label: "Sire", type: "text" },
+      { key: "pli", label: "£PLI", type: "num", digits: 0 },
+      { key: "milk_kg", label: "Milk", type: "num", digits: 0 },
+      { key: "fat_kg", label: "Fat kg", type: "num", digits: 1 },
+      { key: "protein_kg", label: "Prot kg", type: "num", digits: 1 },
+      { key: "fat_pct", label: "Fat %", type: "num", digits: 2 },
+      { key: "protein_pct", label: "Prot %", type: "num", digits: 2 },
+      { key: "fertility_index", label: "FI", type: "num", digits: 1 },
+      { key: "life_span", label: "LS", type: "num", digits: 0 },
+      { key: "scc", label: "SCC", type: "num", digits: 0 },
+      { key: "mastitis", label: "Mast", type: "num", digits: 0 },
+      { key: "type_merit", label: "Type", type: "num", digits: 2 },
+      { key: "mammary", label: "Mammary", type: "num", digits: 2 },
+      { key: "legs_and_feet", label: "Legs", type: "num", digits: 2 },
+    ];
+    const EMBRYO_COLUMNS = [
+      { key: "animal", label: "Calf", type: "text" },
+      { key: "dob", label: "DOB", type: "date" },
+      { key: "recipient_id", label: "Recipient", type: "text" },
+      { key: "dam", label: "Dam", type: "text" },
+      { key: "due_date", label: "Due", type: "date", display: "due_label" },
+      { key: "flush_sire", label: "Flush sire", type: "text" },
+      { key: "sire_name", label: "Genomic sire", type: "text" },
+      { key: "eartag", label: "Eartag", type: "text" },
+      { key: "pli", label: "£PLI", type: "num", digits: 0 },
+      { key: "milk_kg", label: "Milk", type: "num", digits: 0 },
+      { key: "fat_kg", label: "Fat kg", type: "num", digits: 1 },
+      { key: "protein_kg", label: "Prot kg", type: "num", digits: 1 },
+      { key: "fat_pct", label: "Fat %", type: "num", digits: 2 },
+      { key: "protein_pct", label: "Prot %", type: "num", digits: 2 },
+      { key: "fertility_index", label: "FI", type: "num", digits: 1 },
+      { key: "life_span", label: "LS", type: "num", digits: 0 },
+      { key: "scc", label: "SCC", type: "num", digits: 0 },
+      { key: "mastitis", label: "Mast", type: "num", digits: 0 },
+      { key: "type_merit", label: "Type", type: "num", digits: 2 },
+    ];
+    const COLUMNS = PAGE.mode === "embryo" ? EMBRYO_COLUMNS : FEMALE_COLUMNS;
+    const SEARCH_KEYS = PAGE.mode === "embryo"
+      ? ["animal", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn"]
+      : ["animal", "eartag", "sire_name", "cow_id", "hbn"];
+    const TRAIT_FILTERS = [
+      { key: "pli", label: "£PLI", step: "1" },
+      { key: "milk_kg", label: "Milk", step: "1" },
+      { key: "fat_kg", label: "Fat kg", step: "0.1" },
+      { key: "protein_kg", label: "Prot kg", step: "0.1" },
+      { key: "fat_pct", label: "Fat %", step: "0.01" },
+      { key: "protein_pct", label: "Prot %", step: "0.01" },
+      { key: "fertility_index", label: "FI", step: "0.1" },
+      { key: "life_span", label: "LS", step: "1" },
+      { key: "scc", label: "SCC", step: "1" },
+      { key: "mastitis", label: "Mast", step: "1" },
+      { key: "type_merit", label: "Type", step: "0.01" },
+    ];
+    const NEGATIVE_KEYS = new Set(["fat_pct", "protein_pct", "fertility_index"]);
+    const PAGE_SIZE = 100;
+    const sortState = { key: "pli", dir: -1 };
+    let rows = [];
+    let currentPage = 1;
+    let renderTimer = 0;
+
+    function escapeHtml(str) {
+      return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showMessage(text, kind) {
+      const el = document.getElementById("status-message");
+      el.textContent = text || "";
+      el.className = "message" + (kind ? " " + kind : "");
+    }
+
+    function searchQuery() {
+      return document.getElementById("search-input").value.trim().toLowerCase();
+    }
+
+    function readTraitBounds() {
+      const bounds = [];
+      TRAIT_FILTERS.forEach((trait) => {
+        const minInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="min"]');
+        const maxInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="max"]');
+        const min = minInput && minInput.value !== "" ? Number(minInput.value) : null;
+        const max = maxInput && maxInput.value !== "" ? Number(maxInput.value) : null;
+        if (Number.isFinite(min) || Number.isFinite(max)) {
+          bounds.push({
+            key: trait.key,
+            min: Number.isFinite(min) ? min : null,
+            max: Number.isFinite(max) ? max : null,
+          });
+        }
+      });
+      return bounds;
+    }
+
+    function passesTraitFilters(row, bounds) {
+      return bounds.every((bound) => {
+        const value = Number(row[bound.key]);
+        if (!Number.isFinite(value)) return false;
+        if (bound.min !== null && value < bound.min) return false;
+        if (bound.max !== null && value > bound.max) return false;
+        return true;
+      });
+    }
+
+    function passesDob(row) {
+      const from = document.getElementById("dob-from").value;
+      const to = document.getElementById("dob-to").value;
+      if (!from && !to) return true;
+      if (!row.dob) return false;
+      if (from && row.dob < from) return false;
+      if (to && row.dob > to) return false;
+      return true;
+    }
+
+    function filteredRows() {
+      const q = searchQuery();
+      const bounds = readTraitBounds();
+      return rows.filter((row) => {
+        if (!passesDob(row) || !passesTraitFilters(row, bounds)) return false;
+        if (!q) return true;
+        return SEARCH_KEYS.some((key) => String(row[key] || "").toLowerCase().includes(q));
+      });
+    }
+
+    function sortValue(row, key) {
+      const column = COLUMNS.find((col) => col.key === key);
+      const value = row[key];
+      if (value === null || value === undefined || value === "") return -Infinity;
+      if (column && column.type === "num") {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : -Infinity;
+      }
+      return String(value).toLowerCase();
+    }
+
+    function sortedRows(source) {
+      const copy = source.slice();
+      copy.sort((a, b) => {
+        const av = sortValue(a, sortState.key);
+        const bv = sortValue(b, sortState.key);
+        if (av < bv) return -1 * sortState.dir;
+        if (av > bv) return 1 * sortState.dir;
+        return String(a.animal || "").localeCompare(String(b.animal || ""));
+      });
+      return copy;
+    }
+
+    function fmtNum(value, digits) {
+      if (value === null || value === undefined || value === "") return "—";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "—";
+      return num.toFixed(digits);
+    }
+
+    function cellHtml(row, col) {
+      if (col.type === "date") {
+        const label = row[col.display || "dob_label"] || "";
+        if (col.key === "due_date") return escapeHtml(row.due_label || "—");
+        return escapeHtml(label || "—");
+      }
+      if (col.type === "num") return fmtNum(row[col.key], col.digits || 0);
+      const text = row[col.key];
+      return escapeHtml(text == null || text === "" ? "—" : text);
+    }
+
+    function scheduleRender(resetPage) {
+      if (resetPage) currentPage = 1;
+      window.clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(renderTable, 80);
+    }
+
+    function renderTraitFilters() {
+      const host = document.getElementById("trait-filters");
+      host.innerHTML = TRAIT_FILTERS.map((trait) => {
+        return '<div class="trait-filter-row">' +
+          "<label>" + escapeHtml(trait.label) + "</label>" +
+          '<input type="number" data-key="' + trait.key + '" data-bound="min" step="' + trait.step + '" placeholder="—">' +
+          '<input type="number" data-key="' + trait.key + '" data-bound="max" step="' + trait.step + '" placeholder="—">' +
+          "</div>";
+      }).join("");
+      host.addEventListener("input", () => scheduleRender(true));
+    }
+
+    function renderHead() {
+      document.getElementById("females-head").innerHTML = COLUMNS.map((col) => {
+        const cls = [
+          col.type === "num" ? "num" : "",
+          sortState.key === col.key ? (sortState.dir > 0 ? "sorted-asc" : "sorted-desc") : "",
+        ].filter(Boolean).join(" ");
+        return '<th data-sort="' + col.key + '" class="' + cls + '">' + escapeHtml(col.label) + "</th>";
+      }).join("");
+    }
+
+    function renderTable() {
+      renderHead();
+      const visible = sortedRows(filteredRows());
+      const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+      if (currentPage > pageCount) currentPage = pageCount;
+      const start = (currentPage - 1) * PAGE_SIZE;
+      const pageRows = visible.slice(start, start + PAGE_SIZE);
+      const noun = PAGE.noun;
+      const parts = [visible.length.toLocaleString("en-GB") + " " + (visible.length === 1 ? noun.one : noun.many)];
+      if (visible.length !== rows.length) parts.push("of " + rows.length.toLocaleString("en-GB"));
+      if (visible.length) parts.push("showing " + (start + 1) + "–" + (start + pageRows.length));
+      document.getElementById("meta-line").textContent = parts.join(" · ");
+      document.getElementById("page-label").textContent = "Page " + currentPage + " of " + pageCount;
+      document.getElementById("page-prev").disabled = currentPage <= 1;
+      document.getElementById("page-next").disabled = currentPage >= pageCount;
+      const body = document.getElementById("table-body");
+      if (!visible.length) {
+        body.innerHTML = '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">No ' +
+          escapeHtml(noun.many) + " match the current filters.</td></tr>";
+        return;
+      }
+      body.innerHTML = pageRows.map((row) => {
+        return "<tr>" + COLUMNS.map((col) => {
+          const classes = [col.type === "num" ? "num" : ""];
+          if (NEGATIVE_KEYS.has(col.key) && Number.isFinite(Number(row[col.key])) && Number(row[col.key]) < 0) {
+            classes.push("negative");
+          }
+          const cls = classes.filter(Boolean).join(" ");
+          return "<td" + (cls ? ' class="' + cls + '"' : "") + ">" + cellHtml(row, col) + "</td>";
+        }).join("") + "</tr>";
+      }).join("");
+    }
+
+    async function loadRows() {
+      document.getElementById("meta-line").textContent = "Loading…";
+      document.getElementById("table-body").innerHTML =
+        '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">Loading…</td></tr>';
+      try {
+        const res = await fetch(PAGE.apiUrl);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to load females");
+        rows = data.rows || [];
+        renderTable();
+      } catch (err) {
+        showMessage(err.message || "Failed to load females", "err");
+        document.getElementById("meta-line").textContent = "";
+        document.getElementById("table-body").innerHTML = "";
+      }
+    }
+
+    document.getElementById("females-head").addEventListener("click", (event) => {
+      const th = event.target.closest("th[data-sort]");
+      if (!th) return;
+      const key = th.dataset.sort;
+      if (sortState.key === key) sortState.dir *= -1;
+      else {
+        sortState.key = key;
+        const column = COLUMNS.find((col) => col.key === key);
+        sortState.dir = column && column.type === "text" ? 1 : -1;
+      }
+      renderTable();
+    });
+    document.getElementById("search-input").addEventListener("input", () => scheduleRender(true));
+    document.getElementById("dob-from").addEventListener("change", () => scheduleRender(true));
+    document.getElementById("dob-to").addEventListener("change", () => scheduleRender(true));
+    document.getElementById("clear-filters-btn").addEventListener("click", () => {
+      document.querySelectorAll("#trait-filters input").forEach((input) => { input.value = ""; });
+      document.getElementById("dob-from").value = "";
+      document.getElementById("dob-to").value = "";
+      document.getElementById("search-input").value = "";
+      scheduleRender(true);
+    });
+    document.getElementById("page-prev").addEventListener("click", () => {
+      if (currentPage > 1) { currentPage -= 1; renderTable(); }
+    });
+    document.getElementById("page-next").addEventListener("click", () => {
+      currentPage += 1;
+      renderTable();
+    });
+
+    renderTraitFilters();
+    loadRows();
+  </script>
+{% endblock %}

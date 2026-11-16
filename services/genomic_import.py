@@ -59,6 +59,8 @@ TRAIT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 EARTAG_ALIASES = ("Eartag", "EarTag", "Ear Tag", "EarTag Number", "Ear Tag Number")
 SIRE_NAME_ALIASES = ("Sire full name", "Sire")
 SIRE_REG_ALIASES = ("Sire reg number", "Sire Reg No ID", "Sire NAAB code")
+ANIMAL_NAME_ALIASES = ("Animal name", "Animal Name", "Cow name", "Female name")
+DOB_ALIASES = ("Date of birth", "Date of Birth", "DOB", "Birth date", "Birth Date")
 
 
 def _col_key(name: str) -> str:
@@ -244,10 +246,31 @@ def _dataframe_to_mappings(df: pd.DataFrame, import_time: dt.datetime) -> list[d
             return _empty()
         return pd.to_numeric(df[col], errors="coerce")
 
+    def series_date(aliases: tuple[str, ...]) -> pd.Series:
+        col = _resolve_column(lookup, aliases)
+        if col is None:
+            return _empty()
+        parsed = pd.to_datetime(df[col], errors="coerce")
+
+        def _as_date(value: Any) -> dt.date | None:
+            if value is None or pd.isna(value):
+                return None
+            if isinstance(value, pd.Timestamp):
+                return value.date()
+            if isinstance(value, dt.datetime):
+                return value.date()
+            if isinstance(value, dt.date):
+                return value
+            return None
+
+        return parsed.map(_as_date)
+
     out = pd.DataFrame(
         {
             "hbn": df[eartag_col].map(eartag_match_key),
             "eartag": series_str(EARTAG_ALIASES),
+            "animal_name": series_str(ANIMAL_NAME_ALIASES),
+            "dob": series_date(DOB_ALIASES),
             "sire_name": series_str(SIRE_NAME_ALIASES),
             "sire_reg": series_str(SIRE_REG_ALIASES),
             "updated_at": pd.Series([import_time] * len(df), index=df.index),
