@@ -389,14 +389,27 @@ document.getElementById("displayed-list").addEventListener("drop", (event) => {
 });
 
 const uploadButton = document.getElementById("upload-btn");
+let uploadBusy = false;
 if (uploadButton) {
   const uploadInput = document.getElementById("upload-input");
-  uploadButton.addEventListener("click", () => uploadInput.click());
+  function setUploadBusy(busy) {
+    uploadBusy = busy;
+    uploadButton.disabled = busy;
+    uploadButton.textContent = busy ? "Uploading…" : "Upload results";
+    uploadButton.setAttribute("aria-busy", busy ? "true" : "false");
+  }
+  uploadButton.addEventListener("click", () => {
+    if (uploadBusy) return;
+    uploadInput.click();
+  });
   uploadInput.addEventListener("change", async () => {
+    if (uploadBusy) return;
     const file = uploadInput.files && uploadInput.files[0];
-    uploadInput.value = "";
     if (!file) return;
-    showMessage("Uploading…", "");
+    setUploadBusy(true);
+    uploadInput.value = "";
+    showMessage("Uploading the results file. This can take a minute.", "busy");
+    document.getElementById("meta-line").textContent = "Uploading…";
     const body = new FormData();
     body.append("file", file);
     try {
@@ -410,6 +423,9 @@ if (uploadButton) {
       );
     } catch (err) {
       showMessage(err.message || "Upload failed", "err");
+      renderTable();
+    } finally {
+      setUploadBusy(false);
     }
   });
 }

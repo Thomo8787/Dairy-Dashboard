@@ -117,6 +117,15 @@
     .message { margin-bottom: 0.75rem; }
     .message.ok { color: #047857; }
     .message.err { color: #b91c1c; }
+    .message.busy {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 0.7rem 0.85rem;
+      font-weight: 600;
+    }
+    #upload-btn:disabled { opacity: 0.55; cursor: not-allowed; }
     .columns-overlay {
       position: fixed;
       inset: 0;
