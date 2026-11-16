@@ -54,6 +54,7 @@ def list_females(session: Session, *, embryo_only: bool = False) -> dict[str, An
     visual_to_hbn = _visual_index(genomics)
     identities, cow_keys = _identities(session)
     embryo_by_hbn = _embryo_matches(session, by_hbn, cow_keys, visual_to_hbn)
+    farm_by_id, farm_by_tag = _inventory_farms(session)
 
     rows: list[dict[str, Any]] = []
     updated: dt.datetime | None = None
@@ -64,7 +65,7 @@ def list_females(session: Session, *, embryo_only: bool = False) -> dict[str, An
         embryo = embryo_by_hbn.get(genomic.hbn or "")
         if genomic.updated_at is not None and (updated is None or genomic.updated_at > updated):
             updated = genomic.updated_at
-        rows.append(_row(genomic, identity, embryo))
+        rows.append(_row(genomic, identity, embryo, farm_by_id, farm_by_tag))
 
     return {
         "rows": rows,
@@ -72,6 +73,39 @@ def list_females(session: Session, *, embryo_only: bool = False) -> dict[str, An
         "columns": load_female_columns(session),
         "updated_at": updated.isoformat() if updated else None,
     }
+
+
+def _inventory_farms(session: Session) -> tuple[dict[str, str], dict[str, str]]:
+    """Map current inventory cow numbers and eartag keys to a farm code."""
+    by_id: dict[str, str] = {}
+    by_tag: dict[str, str] = {}
+    for cow_id, etag, farm in session.execute(
+        select(HerdInventory.cow_id, HerdInventory.etag, HerdInventory.farm)
+    ):
+        code = str(farm or "").strip()
+        herd_id = _norm_id(cow_id)
+        if herd_id and herd_id not in by_id:
+            by_id[herd_id] = code
+        key = eartag_match_key(etag)
+        if key and key not in by_tag:
+            by_tag[key] = code
+    return by_id, by_tag
+
+
+def _herd_farm(
+    genomic: GenomicResult,
+    identity: _Identity | None,
+    farm_by_id: dict[str, str],
+    farm_by_tag: dict[str, str],
+) -> str | None:
+    if genomic.hbn and genomic.hbn in farm_by_tag:
+        return farm_by_tag[genomic.hbn]
+    visual = _norm_id(genomic.visual_id)
+    if visual and visual in farm_by_id:
+        return farm_by_id[visual]
+    if identity and identity.from_inventory and identity.cow_id in farm_by_id:
+        return farm_by_id[identity.cow_id]
+    return None
 
 
 def _visual_index(genomics: list[GenomicResult]) -> dict[str, str]:
@@ -183,6 +217,8 @@ def _row(
     genomic: GenomicResult,
     identity: _Identity | None,
     embryo: EmbryoImplant | None,
+    farm_by_id: dict[str, str],
+    farm_by_tag: dict[str, str],
 ) -> dict[str, Any]:
     cow_id = identity.cow_id if identity else ""
     visual_id = _norm_id(genomic.visual_id) or cow_id
@@ -192,6 +228,7 @@ def _row(
     if dob is None and embryo is not None:
         dob = _as_date(embryo.calf_dob)
     batch = embryo.batch if embryo is not None else None
+    herd_farm = _herd_farm(genomic, identity, farm_by_id, farm_by_tag)
     row: dict[str, Any] = {
         "animal": animal,
         "cow_id": cow_id,
@@ -201,6 +238,9 @@ def _row(
         "dob": dob.isoformat() if dob else "",
         "dob_label": format_date(dob),
         "sire_name": (genomic.sire_name or "").strip(),
+        "herd_status": "on_farm" if herd_farm is not None else "left",
+        "herd_status_label": "On farm" if herd_farm is not None else "Left",
+        "herd_farm": herd_farm or "",
         "recipient_id": embryo.recipient_id if embryo else "",
         "dam": batch.dam if batch is not None else "",
         "due_date": embryo.due_date.isoformat() if embryo and embryo.due_date else "",

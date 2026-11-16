@@ -37,15 +37,32 @@
       margin-bottom: 0.35rem;
     }
     .search-input { width: 100%; margin: 0; }
-    .dob-filters { display: grid; gap: 0.45rem; }
-    .dob-filters label {
-      display: grid;
-      grid-template-columns: 2.4rem minmax(0, 1fr);
-      gap: 0.35rem;
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .herd-slicer { grid-template-columns: 1fr 1fr 1fr; }
+    .slicer-btn {
+      display: flex;
       align-items: center;
-      font-size: 0.78rem;
+      justify-content: center;
+      min-height: 2.6rem;
+      padding: 0.45rem 0.35rem;
+      border: 2px solid var(--line, var(--border));
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
     }
-    .dob-filters input { width: 100%; margin: 0; }
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .date-inputs input[type="range"] { width: 100%; margin: 0; }
+    .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; }
     .trait-filters { display: grid; gap: 0.3rem; }
     .trait-filter-head,
     .trait-filter-row {
@@ -203,10 +220,20 @@
           <input type="search" id="search-input" class="search-input" placeholder="Herd ID, eartag, or sire" autocomplete="off">
         </div>
         <div class="filter-section">
+          <span class="section-label">Herd</span>
+          <div class="slicer-group herd-slicer" role="group" aria-label="Herd">
+            <button type="button" class="slicer-btn selected" data-value="all" aria-pressed="true">All</button>
+            <button type="button" class="slicer-btn" data-value="on_farm" aria-pressed="false">On farm</button>
+            <button type="button" class="slicer-btn" data-value="left" aria-pressed="false">Left</button>
+          </div>
+        </div>
+        <div class="filter-section">
           <span class="section-label">Date of birth</span>
-          <div class="dob-filters">
-            <label>From <input type="date" id="dob-from"></label>
-            <label>To <input type="date" id="dob-to"></label>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="dob-from-label">—</span></label>
+            <input type="range" id="dob-from" min="0" max="0" value="0">
+            <label>To <span class="month-label" id="dob-to-label">—</span></label>
+            <input type="range" id="dob-to" min="0" max="0" value="0">
           </div>
         </div>
         <div class="filter-section">

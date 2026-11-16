@@ -1,6 +1,8 @@
 const PAGE = JSON.parse(document.getElementById("page-config").textContent);
 const FIXED_COLUMNS = PAGE.mode === "embryo" ? [
   { key: "visual_id", label: "Calf", type: "text" },
+  { key: "herd_status_label", label: "Herd", type: "text" },
+  { key: "herd_farm", label: "Farm", type: "text" },
   { key: "dob", label: "DOB", type: "date" },
   { key: "recipient_id", label: "Recipient", type: "text" },
   { key: "dam", label: "Dam", type: "text" },
@@ -10,13 +12,15 @@ const FIXED_COLUMNS = PAGE.mode === "embryo" ? [
   { key: "eartag", label: "Eartag", type: "text" },
 ] : [
   { key: "visual_id", label: "Visual ID", type: "text" },
+  { key: "herd_status_label", label: "Herd", type: "text" },
+  { key: "herd_farm", label: "Farm", type: "text" },
   { key: "eartag", label: "Eartag", type: "text" },
   { key: "dob", label: "Date of birth", type: "date" },
   { key: "sire_name", label: "Sire", type: "text" },
 ];
 const SEARCH_KEYS = PAGE.mode === "embryo"
-  ? ["visual_id", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn"]
-  : ["visual_id", "eartag", "sire_name", "cow_id", "hbn"];
+  ? ["visual_id", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn", "herd_status_label", "herd_farm"]
+  : ["visual_id", "eartag", "sire_name", "cow_id", "hbn", "herd_status_label", "herd_farm"];
 const COLOUR_STORAGE_KEY = "genetics-female-colours";
 const PAGE_SIZE = 100;
 const sortState = { key: "visual_id", dir: 1 };
@@ -28,6 +32,8 @@ let draftKeys = [];
 let selectedAvailable = new Set();
 let selectedDisplayed = new Set();
 let dragKey = "";
+let herdFilter = "all";
+let monthList = [];
 let currentPage = 1;
 let renderTimer = 0;
 
@@ -125,21 +131,103 @@ function passesTraitFilters(row, bounds) {
   });
 }
 
+function monthStart(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function buildMonthList(minIso, maxIso) {
+  const months = [];
+  let cursor = monthStart(new Date(minIso + "T00:00:00"));
+  const end = monthStart(new Date(maxIso + "T00:00:00"));
+  while (cursor <= end) {
+    months.push(new Date(cursor));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  return months;
+}
+
+function formatMonthLabel(date) {
+  const mon = date.toLocaleDateString("en-GB", { month: "short" });
+  return mon + "-" + String(date.getFullYear()).slice(-2);
+}
+
+function isoDate(date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return date.getFullYear() + "-" + month + "-" + day;
+}
+
+function lastDayOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function updateDobLabels() {
+  const from = document.getElementById("dob-from");
+  const to = document.getElementById("dob-to");
+  const fromIdx = Number(from.value);
+  const toIdx = Number(to.value);
+  document.getElementById("dob-from-label").textContent = monthList[fromIdx] ? formatMonthLabel(monthList[fromIdx]) : "—";
+  document.getElementById("dob-to-label").textContent = monthList[toIdx] ? formatMonthLabel(monthList[toIdx]) : "—";
+}
+
+function syncDobSliders(reset) {
+  const dates = rows.map((row) => row.dob).filter(Boolean).sort();
+  const from = document.getElementById("dob-from");
+  const to = document.getElementById("dob-to");
+  const previousFrom = monthList[Number(from.value)];
+  const previousTo = monthList[Number(to.value)];
+  const wasFull = monthList.length && Number(from.value) === 0 && Number(to.value) === monthList.length - 1;
+  if (!dates.length) {
+    monthList = [];
+    from.min = 0;
+    from.max = 0;
+    to.min = 0;
+    to.max = 0;
+    from.value = 0;
+    to.value = 0;
+    updateDobLabels();
+    return;
+  }
+  monthList = buildMonthList(dates[0], dates[dates.length - 1]);
+  const maxIdx = Math.max(0, monthList.length - 1);
+  from.min = 0;
+  from.max = maxIdx;
+  to.min = 0;
+  to.max = maxIdx;
+  if (reset || wasFull || !previousFrom || !previousTo) {
+    from.value = 0;
+    to.value = maxIdx;
+  } else {
+    const fromIdx = monthList.findIndex((date) => date.getTime() === monthStart(previousFrom).getTime());
+    const toIdx = monthList.findIndex((date) => date.getTime() === monthStart(previousTo).getTime());
+    from.value = fromIdx >= 0 ? fromIdx : 0;
+    to.value = toIdx >= 0 ? toIdx : maxIdx;
+    if (Number(from.value) > Number(to.value)) to.value = from.value;
+  }
+  updateDobLabels();
+}
+
+function passesHerd(row) {
+  if (herdFilter === "all") return true;
+  return row.herd_status === herdFilter;
+}
+
 function passesDob(row) {
-  const from = document.getElementById("dob-from").value;
-  const to = document.getElementById("dob-to").value;
-  if (!from && !to) return true;
+  if (!monthList.length) return true;
+  const fromIdx = Number(document.getElementById("dob-from").value);
+  const toIdx = Number(document.getElementById("dob-to").value);
+  if (fromIdx <= 0 && toIdx >= monthList.length - 1) return true;
   if (!row.dob) return false;
-  if (from && row.dob < from) return false;
-  if (to && row.dob > to) return false;
-  return true;
+  const fromIso = isoDate(monthList[fromIdx]);
+  const toIso = isoDate(lastDayOfMonth(monthList[toIdx]));
+  return row.dob >= fromIso && row.dob <= toIso;
 }
 
 function filteredRows() {
   const q = searchQuery();
   const bounds = readTraitBounds();
   return rows.filter((row) => {
-    if (!passesDob(row) || !passesTraitFilters(row, bounds)) return false;
+    if (!passesHerd(row) || !passesDob(row) || !passesTraitFilters(row, bounds)) return false;
     if (!q) return true;
     return SEARCH_KEYS.some((key) => String(row[key] || "").toLowerCase().includes(q));
   });
@@ -254,6 +342,7 @@ function applyPayload(data) {
   rows = data.rows || [];
   catalog = data.columns || [];
   displayedKeys = displayedKeys.filter((key) => catalogByKey(key));
+  syncDobSliders(false);
   renderTraitFilters();
   renderTable();
 }
@@ -292,8 +381,8 @@ function openColumns() {
   selectedAvailable = new Set();
   selectedDisplayed = new Set();
   document.getElementById("columns-note").textContent = PAGE.mode === "embryo"
-    ? "Calf, dates, recipient, dam, and both sires stay on the table. Drag the displayed traits to change their order."
-    : "Visual ID, eartag, date of birth, and sire stay on the table. Drag the displayed traits to change their order.";
+    ? "Calf, herd, farm, dates, recipient, dam, and both sires stay on the table. Drag the displayed traits to change their order."
+    : "Visual ID, herd, farm, eartag, date of birth, and sire stay on the table. Drag the displayed traits to change their order.";
   document.getElementById("columns-overlay").hidden = false;
   renderColumnLists();
 }
@@ -334,14 +423,38 @@ document.getElementById("females-head").addEventListener("click", (event) => {
   renderTable();
 });
 document.getElementById("search-input").addEventListener("input", () => scheduleRender(true));
-document.getElementById("dob-from").addEventListener("change", () => scheduleRender(true));
-document.getElementById("dob-to").addEventListener("change", () => scheduleRender(true));
+function onDobSlider(changed) {
+  const from = document.getElementById("dob-from");
+  const to = document.getElementById("dob-to");
+  if (changed === "from" && Number(from.value) > Number(to.value)) to.value = from.value;
+  if (changed === "to" && Number(to.value) < Number(from.value)) from.value = to.value;
+  updateDobLabels();
+  scheduleRender(true);
+}
+document.getElementById("dob-from").addEventListener("input", () => onDobSlider("from"));
+document.getElementById("dob-to").addEventListener("input", () => onDobSlider("to"));
 document.getElementById("trait-filters").addEventListener("input", () => scheduleRender(true));
+document.querySelectorAll(".herd-slicer .slicer-btn").forEach((button) => {
+  button.addEventListener("click", () => {
+    herdFilter = button.dataset.value || "all";
+    document.querySelectorAll(".herd-slicer .slicer-btn").forEach((item) => {
+      const selected = item === button;
+      item.classList.toggle("selected", selected);
+      item.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+    scheduleRender(true);
+  });
+});
 document.getElementById("clear-filters-btn").addEventListener("click", () => {
   document.querySelectorAll("#trait-filters input").forEach((input) => { input.value = ""; });
-  document.getElementById("dob-from").value = "";
-  document.getElementById("dob-to").value = "";
   document.getElementById("search-input").value = "";
+  herdFilter = "all";
+  document.querySelectorAll(".herd-slicer .slicer-btn").forEach((item) => {
+    const selected = item.dataset.value === "all";
+    item.classList.toggle("selected", selected);
+    item.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+  syncDobSliders(true);
   scheduleRender(true);
 });
 document.getElementById("page-prev").addEventListener("click", () => {
