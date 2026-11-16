@@ -92,6 +92,7 @@ from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
 from services.ahdb_bulls import AhdbBullsError, ensure_imported, list_bulls, refresh_bulls
+from services.female_genomics import list_females
 from services.custom_indexes import reset_index_settings, save_index_settings
 from services.genomic_progress import (
     build_genomic_progress,
@@ -1500,6 +1501,68 @@ def genetics_api_bull_index_settings():
     with get_session() as session:
         save_index_settings(session, body)
         return jsonify(list_bulls(session))
+
+
+@app.route("/genetics/females")
+@permission_required("perm_genetics")
+def genetics_females():
+    return render_template(
+        "genetics/females.html",
+        **_page_context(
+            active_nav="genetics_females",
+            page_heading="Females",
+            about_text=(
+                "Female genomic results from the animals_ahdb file. "
+                "Date of birth is the herd birth date when the eartag matches. "
+                "Use the trait boxes to keep animals between a minimum and a maximum."
+            ),
+            page_config={
+                "mode": "females",
+                "apiUrl": url_for("genetics_api_females"),
+                "noun": {"one": "female", "many": "females"},
+            },
+        ),
+    )
+
+
+@app.route("/genetics/embryo-calves")
+@permission_required("perm_genetics")
+def genetics_embryo_calves():
+    return render_template(
+        "genetics/females.html",
+        **_page_context(
+            active_nav="genetics_embryo_calves",
+            page_heading="Embryo Calves",
+            about_text=(
+                "Heifer calves from an embryo implant whose eartag matches a female genomic result. "
+                "Recipient, dam, and due date come from that implant. "
+                "Genomic sire is the sire on the genomic file."
+            ),
+            page_config={
+                "mode": "embryo",
+                "apiUrl": url_for("genetics_api_embryo_calves"),
+                "noun": {"one": "embryo calf", "many": "embryo calves"},
+            },
+        ),
+    )
+
+
+@app.route("/genetics/api/females")
+def genetics_api_females():
+    _user, error = _genetics_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(list_females(session))
+
+
+@app.route("/genetics/api/embryo-calves")
+def genetics_api_embryo_calves():
+    _user, error = _genetics_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify(list_females(session, embryo_only=True))
 
 
 @app.route("/genetics/api/bull-search/index-settings/reset", methods=["POST"])

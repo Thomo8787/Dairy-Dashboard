@@ -524,6 +524,8 @@ class GenomicResult(Base):
     id = Column(Integer, primary_key=True)
     hbn = Column(String(32), unique=True, nullable=False, index=True)
     eartag = Column(String(64))
+    animal_name = Column(String(128))
+    dob = Column(Date)
     sire_name = Column(String(128))
     sire_reg = Column(String(64))
     milk_kg = Column(Float)
@@ -1061,10 +1063,27 @@ def _ensure_nml_milk_result_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_genomic_result_columns(engine) -> None:
+    """create_all will not add new columns to an existing genomic_results table."""
+    inspector = inspect(engine)
+    if "genomic_results" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("genomic_results")}
+    needed = {
+        "animal_name": "ALTER TABLE genomic_results ADD COLUMN animal_name VARCHAR(128)",
+        "dob": "ALTER TABLE genomic_results ADD COLUMN dob DATE",
+    }
+    with engine.begin() as conn:
+        for column, ddl in needed.items():
+            if column not in existing:
+                conn.execute(text(ddl))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_user_permission_columns(engine)
+    _ensure_genomic_result_columns(engine)
     _ensure_herd_inventory_columns(engine)
     _ensure_nml_milk_result_columns(engine)
     _ensure_sales_payment_columns(engine)
