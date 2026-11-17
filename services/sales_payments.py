@@ -37,6 +37,7 @@ from services.events_common import (
     SALES_MAPPED_REMARKS,
     SALES_TABLE_REASON_ORDER,
     SALES_TB_REMARKS,
+    dairy_remark_clause,
     died_cert_clause,
     normalize_farms,
     ofs_sales_clause,
@@ -168,7 +169,7 @@ def _payment_sales_reason_expression():
         (_payment_dairy_bull_clause(), literal("Beef")),
         (CowEvent.remark.in_(list(SALES_BEEF_REMARKS)), literal("Beef")),
         (or_(
-            CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
+            dairy_remark_clause(),
             _payment_dairy_transfer_clause(),
         ), literal("Dairy")),
         else_=literal("CULL"),
@@ -207,7 +208,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
         conditions.append(
             or_(
                 and_(
-                    CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)),
+                    dairy_remark_clause(),
                     ~beef_calf,
                     ~dairy_bull,
                     ~ofs,
@@ -226,6 +227,7 @@ def _reason_filter_conditions(reasons: list[str] | None):
                 ~dairy_bull,
                 ~ofs,
                 ~dairy_transfer,
+                ~dairy_remark_clause(),
             )
         )
     if not conditions:
@@ -777,7 +779,7 @@ def _remittance_sales_reason(buyer: str | None, identity) -> str:
     remark = (getattr(identity, "remark", None) or "").strip().upper()
     if remark in SALES_BEEF_REMARKS:
         return "Beef"
-    if remark in {"CAR18", "CAR19"} or _identity_is_dairy_transfer(identity):
+    if remark in SALES_DAIRY_REMARKS or _identity_is_dairy_transfer(identity):
         return "Dairy"
     buyer_u = (buyer or "").upper()
     if any(token in buyer_u for token in ("DRAYTON", "BLADE", "GAMECHANGER", "WARRENDALE", "WARREN")):

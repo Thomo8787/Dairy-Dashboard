@@ -91,7 +91,7 @@ PARITY_GROUPS: tuple[str, ...] = ("primiparous", "multiparous", "beef")
 PAGES_WITH_PARITY_FILTER: frozenset[str] = frozenset({"sales", "deaths", "disease", "breedings"})
 SALES_REASON_ORDER: tuple[str, ...] = ("OFS", "TB", "Beef", "Dairy", "CULL")
 SALES_TABLE_REASON_ORDER: tuple[str, ...] = ("CULL", "TB", "OFS", "Beef", "Dairy")
-SALES_DAIRY_REMARKS: tuple[str, ...] = ("CAR18", "CAR19")
+SALES_DAIRY_REMARKS: tuple[str, ...] = ("CAR18", "CAR19", "DAIRY")
 SALES_TB_REMARKS: tuple[str, ...] = ("CAR11", "TB")
 SALES_BEEF_REMARKS: tuple[str, ...] = ("CAR16", "BLADE", "DRAYTON", "WARREN")
 SALES_MAPPED_REMARKS: tuple[str, ...] = (
@@ -150,6 +150,11 @@ def died_cert_clause():
 def ofs_sales_clause():
     """Remark OFS, or DEST is a fallen-stock collector / OFS."""
     return or_(_remark_upper() == "OFS", ofs_dest_clause())
+
+
+def dairy_remark_clause():
+    """Remark CAR18, CAR19, or Dairy (the DairyComp SOLD-Dairy line)."""
+    return _remark_upper().in_(list(SALES_DAIRY_REMARKS))
 
 
 def died_as_sales_clause():
@@ -389,7 +394,7 @@ def _sales_reason_expression():
         (or_(ofs_sales_clause(), died_cert_clause()), literal("OFS")),
         (CowEvent.remark.in_(list(SALES_TB_REMARKS)), literal("TB")),
         (CowEvent.remark.in_(list(SALES_BEEF_REMARKS)), literal("Beef")),
-        (CowEvent.remark.in_(list(SALES_DAIRY_REMARKS)), literal("Dairy")),
+        (dairy_remark_clause(), literal("Dairy")),
         else_=literal("CULL"),
     )
 

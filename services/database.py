@@ -429,6 +429,7 @@ class StockAccrualSnapshot(Base):
     month_start = Column(Date, nullable=False, index=True)
     opening_count = Column(Integer, nullable=False, default=0)
     sales = Column(JSON, nullable=False)
+    dairy_destinations = Column(JSON, nullable=False, default=dict)
     sales_total = Column(Integer, nullable=False, default=0)
     deaths = Column(Integer, nullable=False, default=0)
     births = Column(Integer, nullable=False, default=0)
@@ -1103,9 +1104,33 @@ def _ensure_genomic_result_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_stock_accrual_columns(engine) -> None:
+    """create_all will not add columns to an existing stock_accrual_snapshots table."""
+    inspector = inspect(engine)
+    if "stock_accrual_snapshots" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("stock_accrual_snapshots")}
+    if "dairy_destinations" in existing:
+        return
+    dialect = engine.dialect.name
+    if dialect == "postgresql":
+        ddl = (
+            "ALTER TABLE stock_accrual_snapshots "
+            "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'::json"
+        )
+    else:
+        ddl = (
+            "ALTER TABLE stock_accrual_snapshots "
+            "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'"
+        )
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _ensure_stock_accrual_columns(engine)
     _ensure_user_permission_columns(engine)
     _ensure_genomic_result_columns(engine)
     _ensure_embryo_batch_columns(engine)
