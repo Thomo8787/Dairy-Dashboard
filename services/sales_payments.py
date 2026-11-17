@@ -33,11 +33,11 @@ from services.database import (
 from services.events_common import (
     OFS_DEST_PREFIXES,
     SALES_BEEF_REMARKS,
-    SALES_DAIRY_REMARKS,
     SALES_MAPPED_REMARKS,
     SALES_TABLE_REASON_ORDER,
     SALES_TB_REMARKS,
     dairy_remark_clause,
+    is_dairy_sale_remark,
     died_cert_clause,
     normalize_farms,
     ofs_sales_clause,
@@ -779,7 +779,7 @@ def _remittance_sales_reason(buyer: str | None, identity) -> str:
     remark = (getattr(identity, "remark", None) or "").strip().upper()
     if remark in SALES_BEEF_REMARKS:
         return "Beef"
-    if remark in SALES_DAIRY_REMARKS or _identity_is_dairy_transfer(identity):
+    if is_dairy_sale_remark(remark) or _identity_is_dairy_transfer(identity):
         return "Dairy"
     buyer_u = (buyer or "").upper()
     if any(token in buyer_u for token in ("DRAYTON", "BLADE", "GAMECHANGER", "WARRENDALE", "WARREN")):

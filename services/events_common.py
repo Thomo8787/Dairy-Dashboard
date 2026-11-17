@@ -92,6 +92,20 @@ PAGES_WITH_PARITY_FILTER: frozenset[str] = frozenset({"sales", "deaths", "diseas
 SALES_REASON_ORDER: tuple[str, ...] = ("OFS", "TB", "Beef", "Dairy", "CULL")
 SALES_TABLE_REASON_ORDER: tuple[str, ...] = ("CULL", "TB", "OFS", "Beef", "Dairy")
 SALES_DAIRY_REMARKS: tuple[str, ...] = ("CAR18", "CAR19", "DAIRY")
+# Farm names written in the DairyComp remark. DEST is not used.
+DAIRY_FARM_REMARKS: tuple[str, ...] = (
+    "CO",
+    "CHERRY",
+    "COF",
+    "PARK",
+    "SFR",
+    "PARKES",
+    "PKS",
+    "PRK",
+    "ALH",
+    "BNK",
+)
+DAIRY_FARM_REMARK_PREFIXES: tuple[str, ...] = ("CHERRY", "PARK HALL", "THE PARKES")
 SALES_TB_REMARKS: tuple[str, ...] = ("CAR11", "TB")
 SALES_BEEF_REMARKS: tuple[str, ...] = ("CAR16", "BLADE", "DRAYTON", "WARREN")
 SALES_MAPPED_REMARKS: tuple[str, ...] = (
@@ -99,6 +113,7 @@ SALES_MAPPED_REMARKS: tuple[str, ...] = (
     *SALES_TB_REMARKS,
     *SALES_BEEF_REMARKS,
     *SALES_DAIRY_REMARKS,
+    *DAIRY_FARM_REMARKS,
 )
 # DairyComp DIED + these remarks used to be rewritten to SOLD on import for sales
 # reporting. We now keep the original DIED event for BCMS, and still treat them as
@@ -152,9 +167,22 @@ def ofs_sales_clause():
     return or_(_remark_upper() == "OFS", ofs_dest_clause())
 
 
+def is_dairy_sale_remark(remark: str | None) -> bool:
+    """True when the remark is a dairy code or a farm the heifer or cow went to."""
+    text = (remark or "").strip().upper()
+    if not text:
+        return False
+    if text in SALES_DAIRY_REMARKS or text in DAIRY_FARM_REMARKS:
+        return True
+    return any(text.startswith(prefix) for prefix in DAIRY_FARM_REMARK_PREFIXES)
+
+
 def dairy_remark_clause():
-    """Remark CAR18, CAR19, or Dairy (the DairyComp SOLD-Dairy line)."""
-    return _remark_upper().in_(list(SALES_DAIRY_REMARKS))
+    """Remark CAR18, CAR19, Dairy, or a farm name such as CO, Cherry, Park, Parkes."""
+    remark = _remark_upper()
+    exact = remark.in_([*SALES_DAIRY_REMARKS, *DAIRY_FARM_REMARKS])
+    prefixes = [remark.like(f"{prefix}%") for prefix in DAIRY_FARM_REMARK_PREFIXES]
+    return or_(exact, *prefixes)
 
 
 def died_as_sales_clause():

@@ -29,6 +29,7 @@ from services.events_common import (
     SALES_TABLE_REASON_ORDER,
     _fiscal_year_calendar_bounds,
     _iter_month_starts,
+    _remark_upper,
     _sales_reason_expression,
     dairy_remark_clause,
     death_report_event_clause,
@@ -44,7 +45,7 @@ from services.stock_purchase_derivation import ensure_stock_purchases
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "ys-age-v1"
+ACCRUAL_LOGIC_VERSION = "dairy-farm-remark-v1"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
@@ -176,9 +177,9 @@ def _fetch_sales_by_month(
 
 
 def _dairy_dest_label():
-    """DEST on a dairy sale. A blank destination is Other."""
-    dest = func.nullif(func.upper(func.trim(func.coalesce(CowEvent.dest, ""))), "")
-    return func.coalesce(dest, literal(DAIRY_DEST_OTHER))
+    """Remark on a dairy sale, which names the farm she went to."""
+    remark = func.nullif(_remark_upper(), "")
+    return func.coalesce(remark, literal(DAIRY_DEST_OTHER))
 
 
 def _fetch_dairy_dest_by_month(
@@ -189,7 +190,7 @@ def _fetch_dairy_dest_by_month(
     month_from: dt.date,
     month_to: dt.date,
 ) -> dict[tuple[int, int], dict[str, int]]:
-    """Where dairy sales went, for the same rows the Dairy column counts."""
+    """Farm remark on dairy sales, for the same rows the Dairy column counts."""
     dest_expr = _dairy_dest_label()
     query = (
         select(
