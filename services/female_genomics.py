@@ -238,9 +238,9 @@ def _row(
         "dob": dob.isoformat() if dob else "",
         "dob_label": format_date(dob),
         "sire_name": (genomic.sire_name or "").strip(),
+        "data_type": (genomic.data_type or "").strip(),
         "herd_status": "on_farm" if herd_farm is not None else "left",
-        "herd_status_label": "On farm" if herd_farm is not None else "Left",
-        "herd_farm": herd_farm or "",
+        "herd_farm": herd_farm if herd_farm else "LEFT",
         "recipient_id": embryo.recipient_id if embryo else "",
         "dam": batch.dam if batch is not None else "",
         "due_date": embryo.due_date.isoformat() if embryo and embryo.due_date else "",
@@ -252,6 +252,8 @@ def _row(
         row[field] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     traits = _trait_values(genomic.traits)
     row.update(traits)
+    row["data_type"] = (genomic.data_type or "").strip()
+    row["herd_farm"] = herd_farm if herd_farm else "LEFT"
     return row
 
 
