@@ -119,14 +119,44 @@
       position: sticky;
       top: 0;
       z-index: 3;
+      height: 2.8rem;
+      vertical-align: bottom;
+      line-height: 1.15;
     }
     #females-table thead th[data-sort] { cursor: pointer; user-select: none; }
     #females-table thead th[data-sort]:hover { background: #274b73; }
     #females-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
     #females-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
     #females-table td.num, #females-table th.num {
-      text-align: right;
       font-variant-numeric: tabular-nums;
+    }
+    #females-table th.mark, #females-table td.mark {
+      width: 2.2rem;
+      min-width: 2.2rem;
+      max-width: 2.2rem;
+      text-align: center;
+      padding-left: 0.25rem;
+      padding-right: 0.25rem;
+    }
+    #females-table th.trait, #females-table td.trait {
+      width: 4.4rem;
+      min-width: 4.4rem;
+      max-width: 4.4rem;
+      text-align: center;
+    }
+    #females-table th.trait {
+      white-space: normal;
+    }
+    #females-table .list-pill {
+      display: inline-block;
+      min-width: 1.35rem;
+      text-align: center;
+      padding: 0.1rem 0.3rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: #dceaf7;
+      color: #1e3a5f;
     }
     #females-table td.good { background: #bbf7d0; color: #166534; font-weight: 700; }
     #females-table td.bad { background: #fecaca; color: #991b1b; font-weight: 700; }

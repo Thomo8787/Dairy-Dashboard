@@ -1514,7 +1514,7 @@ def genetics_females():
             page_heading="Females",
             about_text=(
                 "Upload the Thomassons results file when a new one arrives. "
-                "Herd is On farm when the visual ID or eartag is in the current DairyComp inventory, and Farm is that herd. "
+                "Farm is the DairyComp herd, or LEFT when the heifer is not in the current inventory. "
                 "Use Columns to choose the other traits and their order."
             ),
             page_config={
@@ -1540,7 +1540,7 @@ def genetics_embryo_calves():
             about_text=(
                 "Heifer calves from an implant whose visual ID or eartag matches the uploaded results. "
                 "Recipient, dam, due date, and flush sire stay on the table. "
-                "Herd is On farm when the calf is in the current DairyComp inventory."
+                "Farm is the DairyComp herd, or LEFT when the calf is not in the current inventory."
             ),
             page_config={
                 "mode": "embryo",
