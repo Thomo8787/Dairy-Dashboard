@@ -114,6 +114,8 @@
       font-size: 0.75rem;
       opacity: 0.9;
     }
+    #accruals-table thead th.dest-col { background: #2a4a73; }
+    #accruals-table td.dest-col { color: #1e3a5f; }
     #accruals-table tfoot th,
     #accruals-table tfoot td {
       background: #f3f4f6;
@@ -237,6 +239,7 @@
     let loadTimer = null;
     let initialBoundsSynced = false;
     let salesExpanded = false;
+    let dairyExpanded = false;
     let cachedRows = [];
     let cachedStockGroup = "cows";
     let salesToggleBound = false;
@@ -388,11 +391,52 @@
       return `<button type="button" class="sales-toggle" aria-expanded="${expanded}" title="Expand sales breakdown">Sales <span class="chevron">${chevron}</span></button>`;
     }
 
-    function salesHeaderCells() {
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function dairyDestColumns(rows) {
+      const names = new Set();
+      for (const row of rows || []) {
+        for (const [name, count] of Object.entries(row.dairy_destinations || {})) {
+          if (count) names.add(name);
+        }
+      }
+      const ordered = [...names].filter(name => name !== "Other").sort((a, b) => a.localeCompare(b, "en-GB"));
+      if (names.has("Other")) ordered.push("Other");
+      return ordered;
+    }
+
+    function dairyToggleButton() {
+      const chevron = dairyExpanded ? "▾" : "▸";
+      const title = dairyExpanded ? "Collapse where dairy sales went" : "Expand where dairy sales went";
+      return `<button type="button" class="sales-toggle dairy-toggle" aria-expanded="${dairyExpanded}" title="${title}"><span class="chevron">${chevron}</span> Dairy</button>`;
+    }
+
+    function destHeaderCells(dests) {
+      return dests.map(name => `<th class="dest-col">${escapeHtml(name)}</th>`).join("");
+    }
+
+    function destBodyCells(row, dests) {
+      return dests.map(name => {
+        const count = row.dairy_destinations?.[name] || 0;
+        return `<td class="dest-col">${count.toLocaleString("en-GB")}</td>`;
+      }).join("");
+    }
+
+    function salesHeaderCells(rows) {
       if (!salesExpanded) {
         return `<th>${salesToggleButton(false, false)}</th>`;
       }
+      const dests = dairyExpanded ? dairyDestColumns(rows) : [];
       return SALES_REASONS.map((reason, idx) => {
+        if (reason === "Dairy") {
+          return `<th>${dairyToggleButton()}</th>${destHeaderCells(dests)}`;
+        }
         if (idx === 0) {
           return `<th>${salesToggleButton(true, true)} ${reason}</th>`;
         }
@@ -400,13 +444,15 @@
       }).join("");
     }
 
-    function salesBodyCells(row) {
+    function salesBodyCells(row, dests) {
       if (!salesExpanded) {
         return `<td>${(row.sales_total || 0).toLocaleString("en-GB")}</td>`;
       }
-      return SALES_REASONS.map(reason =>
-        `<td>${(row.sales?.[reason] || 0).toLocaleString("en-GB")}</td>`
-      ).join("");
+      return SALES_REASONS.map(reason => {
+        const cell = `<td>${(row.sales?.[reason] || 0).toLocaleString("en-GB")}</td>`;
+        if (reason !== "Dairy" || !dairyExpanded) return cell;
+        return cell + destBodyCells(row, dests);
+      }).join("");
     }
 
     function formatTotal(n) {
@@ -417,7 +463,7 @@
       return n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     }
 
-    function salesFooterCells(stats, isAverage) {
+    function salesFooterCells(stats, isAverage, dests) {
       const fmt = isAverage ? formatAverage : formatTotal;
       if (!salesExpanded) {
         const value = isAverage ? stats.sales_total_avg : stats.sales_total;
@@ -425,7 +471,14 @@
       }
       return SALES_REASONS.map(reason => {
         const value = isAverage ? stats.sales_avg[reason] : stats.sales[reason];
-        return `<td>${fmt(value)}</td>`;
+        let cells = `<td>${fmt(value)}</td>`;
+        if (reason === "Dairy" && dairyExpanded) {
+          cells += dests.map(name => {
+            const destValue = isAverage ? stats.dest_avg[name] : stats.destinations[name];
+            return `<td class="dest-col">${fmt(destValue || 0)}</td>`;
+          }).join("");
+        }
+        return cells;
       }).join("");
     }
 
@@ -440,6 +493,7 @@
         births: 0,
         calvings: 0,
         purchases: 0,
+        destinations: {},
       };
       let avgStockSum = 0;
       let monthsWithClosing = 0;
@@ -453,6 +507,9 @@
         stats.births += row.births || 0;
         stats.calvings += row.calvings || 0;
         stats.purchases += row.purchases || 0;
+        for (const [name, count] of Object.entries(row.dairy_destinations || {})) {
+          stats.destinations[name] = (stats.destinations[name] || 0) + (count || 0);
+        }
         if (row.closing != null && !Number.isNaN(row.closing)) {
           avgStockSum += (row.opening + row.closing) / 2;
           monthsWithClosing += 1;
@@ -469,6 +526,9 @@
         births_avg: stats.births / n,
         calvings_avg: stats.calvings / n,
         purchases_avg: stats.purchases / n,
+        dest_avg: Object.fromEntries(
+          Object.entries(stats.destinations).map(([name, total]) => [name, total / n])
+        ),
         avgStock: monthsWithClosing ? avgStockSum / monthsWithClosing : 0,
         monthsWithClosing,
         monthCount: n,
@@ -497,11 +557,12 @@
         return;
       }
       const showBirths = showBirthsColumn(stockGroup);
+      const dests = dairyExpanded ? dairyDestColumns(rows) : [];
       foot.innerHTML = `
         <tr class="total-row">
           <td>Total</td>
           <td>—</td>
-          ${salesFooterCells(stats, false)}
+          ${salesFooterCells(stats, false, dests)}
           <td>${formatTotal(stats.deaths)}</td>
           ${showBirths ? `<td>${formatTotal(stats.births)}</td>` : ""}
           <td>${formatTotal(stats.calvings)}</td>
@@ -511,7 +572,7 @@
         <tr class="average-row">
           <td>Average</td>
           <td>—</td>
-          ${salesFooterCells(stats, true)}
+          ${salesFooterCells(stats, true, dests)}
           <td>${formatAverage(stats.deaths_avg)}</td>
           ${showBirths ? `<td>${formatAverage(stats.births_avg)}</td>` : ""}
           <td>${formatAverage(stats.calvings_avg)}</td>
@@ -526,6 +587,11 @@
       if (salesToggleBound) return;
       salesToggleBound = true;
       document.getElementById("table-head").addEventListener("click", event => {
+        if (event.target.closest(".dairy-toggle")) {
+          dairyExpanded = !dairyExpanded;
+          renderTable(cachedRows, cachedStockGroup);
+          return;
+        }
         const btn = event.target.closest(".sales-toggle");
         if (!btn) return;
         salesExpanded = !salesExpanded;
@@ -533,13 +599,13 @@
       });
     }
 
-    function renderTableHead(stockGroup) {
+    function renderTableHead(stockGroup, rows) {
       const showBirths = showBirthsColumn(stockGroup);
       document.getElementById("table-head").innerHTML = `
         <tr>
           <th>Month</th>
           <th>Opening</th>
-          ${salesHeaderCells()}
+          ${salesHeaderCells(rows)}
           <th>Deaths</th>
           ${showBirths ? "<th>Births</th>" : ""}
           <th>Calvings</th>
@@ -551,13 +617,14 @@
 
     function renderTable(rows, stockGroup) {
       const body = document.getElementById("table-body");
-      renderTableHead(stockGroup);
+      const dests = dairyExpanded ? dairyDestColumns(rows) : [];
+      renderTableHead(stockGroup, rows);
       const showBirths = showBirthsColumn(stockGroup);
       body.innerHTML = rows.map(row => `
         <tr class="${row.warning ? "warn-row" : ""}">
           <td>${row.event_month}</td>
           <td>${row.opening.toLocaleString("en-GB")}</td>
-          ${salesBodyCells(row)}
+          ${salesBodyCells(row, dests)}
           <td>${row.deaths.toLocaleString("en-GB")}</td>
           ${showBirths ? `<td>${row.births.toLocaleString("en-GB")}</td>` : ""}
           <td>${row.calvings.toLocaleString("en-GB")}</td>

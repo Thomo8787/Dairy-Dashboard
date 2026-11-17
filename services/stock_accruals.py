@@ -6,7 +6,7 @@ import datetime as dt
 import gc
 from typing import Any
 
-from sqlalchemy import and_, delete, extract, func, or_, select
+from sqlalchemy import and_, delete, extract, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from services.database import (
@@ -28,8 +28,11 @@ from services.events_common import (
     _fiscal_year_calendar_bounds,
     _iter_month_starts,
     _sales_reason_expression,
+    dairy_remark_clause,
     death_report_event_clause,
+    died_cert_clause,
     normalize_farms,
+    ofs_sales_clause,
     sales_classified_event_clause,
 )
 from services.farms import HERD_FARM_OPTIONS
@@ -39,7 +42,8 @@ from services.stock_purchase_derivation import ensure_stock_purchases
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "ofs-cert-v2"
+ACCRUAL_LOGIC_VERSION = "dairy-dest-v1"
+DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
 
@@ -121,6 +125,54 @@ def _fetch_sales_by_month(
         reason_key = str(reason)
         if reason_key in pivot[key]:
             pivot[key][reason_key] = int(count)
+    return pivot
+
+
+def _dairy_dest_label():
+    """DEST on a dairy sale. A blank destination is Other."""
+    dest = func.nullif(func.upper(func.trim(func.coalesce(CowEvent.dest, ""))), "")
+    return func.coalesce(dest, literal(DAIRY_DEST_OTHER))
+
+
+def _fetch_dairy_dest_by_month(
+    db: Session,
+    *,
+    farm: str,
+    stock_group: str,
+    month_from: dt.date,
+    month_to: dt.date,
+) -> dict[tuple[int, int], dict[str, int]]:
+    """Where dairy sales went, for the same rows the Dairy column counts."""
+    dest_expr = _dairy_dest_label()
+    query = (
+        select(
+            extract("year", CowEvent.event_date),
+            extract("month", CowEvent.event_date),
+            dest_expr,
+            func.count(),
+        )
+        .where(sales_classified_event_clause())
+        .where(~or_(ofs_sales_clause(), died_cert_clause()))
+        .where(dairy_remark_clause())
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.farm == farm)
+        .where(CowEvent.event_date >= month_from)
+        .where(CowEvent.event_date <= month_to)
+    )
+    query = _apply_cow_event_stock_group(query, stock_group)
+    query = query.group_by(
+        extract("year", CowEvent.event_date),
+        extract("month", CowEvent.event_date),
+        dest_expr,
+    )
+
+    pivot: dict[tuple[int, int], dict[str, int]] = {}
+    for year, month, dest, count in db.execute(query).all():
+        if year is None or month is None or not dest:
+            continue
+        key = (int(year), int(month))
+        bucket = pivot.setdefault(key, {})
+        bucket[str(dest)] = int(count)
     return pivot
 
 
@@ -476,6 +528,9 @@ def _compute_farm_rows(
     sales = _fetch_sales_by_month(
         db, farm=farm, stock_group=stock_group, month_from=baseline_month, month_to=calc_end
     )
+    dairy_destinations = _fetch_dairy_dest_by_month(
+        db, farm=farm, stock_group=stock_group, month_from=baseline_month, month_to=calc_end
+    )
     deaths = _fetch_event_count_by_month(
         db,
         farm=farm,
@@ -557,6 +612,7 @@ def _compute_farm_rows(
                 "event_month": month_start.strftime("%b-%y"),
                 "opening": opening,
                 "sales": dict(month_sales),
+                "dairy_destinations": dict(dairy_destinations.get(key, {})),
                 "sales_total": sales_total,
                 "deaths": month_deaths,
                 "births": month_births,
@@ -593,6 +649,7 @@ def _merge_farm_rows(farm_rows: list[list[dict[str, Any]]]) -> list[dict[str, An
                     "event_month": row["event_month"],
                     "opening": 0,
                     "sales": dict(_ZERO_SALES),
+                    "dairy_destinations": {},
                     "sales_total": 0,
                     "deaths": 0,
                     "births": 0,
@@ -612,6 +669,10 @@ def _merge_farm_rows(farm_rows: list[list[dict[str, Any]]]) -> list[dict[str, An
             merged["warning"] = merged["warning"] or row["warning"]
             for reason in SALES_TABLE_REASON_ORDER:
                 merged["sales"][reason] += row["sales"].get(reason, 0)
+            for dest, count in (row.get("dairy_destinations") or {}).items():
+                merged["dairy_destinations"][dest] = (
+                    merged["dairy_destinations"].get(dest, 0) + int(count)
+                )
 
     return sorted(by_month.values(), key=lambda row: row["month_start"])
 
@@ -665,6 +726,10 @@ def _snapshot_from_row(snapshot: StockAccrualSnapshot) -> dict[str, Any]:
         "event_month": month_start.strftime("%b-%y"),
         "opening": int(snapshot.opening_count),
         "sales": sales,
+        "dairy_destinations": {
+            str(dest): int(count)
+            for dest, count in (snapshot.dairy_destinations or {}).items()
+        },
         "sales_total": int(snapshot.sales_total),
         "deaths": int(snapshot.deaths),
         "births": int(snapshot.births),
@@ -690,6 +755,10 @@ def _snapshot_from_farm_month(
         month_start=dt.date.fromisoformat(row["month_start"]),
         opening_count=int(row["opening"]),
         sales=sales,
+        dairy_destinations={
+            str(dest): int(count)
+            for dest, count in (row.get("dairy_destinations") or {}).items()
+        },
         sales_total=int(row["sales_total"]),
         deaths=int(row["deaths"]),
         births=int(row["births"]),
