@@ -1,29 +1,30 @@
 const PAGE = JSON.parse(document.getElementById("page-config").textContent);
 const FIXED_COLUMNS = PAGE.mode === "embryo" ? [
+  { key: "data_type", label: "", type: "mark" },
   { key: "visual_id", label: "Calf", type: "text" },
-  { key: "herd_status_label", label: "Herd", type: "text" },
   { key: "herd_farm", label: "Farm", type: "text" },
+  { key: "eartag", label: "Eartag", type: "text" },
   { key: "dob", label: "DOB", type: "date" },
   { key: "recipient_id", label: "Recipient", type: "text" },
   { key: "dam", label: "Dam", type: "text" },
   { key: "due_date", label: "Due", type: "date" },
   { key: "flush_sire", label: "Flush sire", type: "text" },
   { key: "sire_name", label: "Genomic sire", type: "text" },
-  { key: "eartag", label: "Eartag", type: "text" },
 ] : [
+  { key: "data_type", label: "", type: "mark" },
   { key: "visual_id", label: "Visual ID", type: "text" },
-  { key: "herd_status_label", label: "Herd", type: "text" },
   { key: "herd_farm", label: "Farm", type: "text" },
   { key: "eartag", label: "Eartag", type: "text" },
   { key: "dob", label: "Date of birth", type: "date" },
   { key: "sire_name", label: "Sire", type: "text" },
 ];
 const SEARCH_KEYS = PAGE.mode === "embryo"
-  ? ["visual_id", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn", "herd_status_label", "herd_farm"]
-  : ["visual_id", "eartag", "sire_name", "cow_id", "hbn", "herd_status_label", "herd_farm"];
+  ? ["visual_id", "eartag", "sire_name", "flush_sire", "recipient_id", "dam", "hbn", "herd_farm"]
+  : ["visual_id", "eartag", "sire_name", "cow_id", "hbn", "herd_farm"];
 const COLOUR_STORAGE_KEY = "genetics-female-colours";
 const PAGE_SIZE = 100;
-const sortState = { key: "visual_id", dir: 1 };
+const sortState = { key: "customindex", dir: -1 };
+let sortTouched = false;
 let rows = [];
 let catalog = [];
 let displayedKeys = loadDisplayed();
@@ -74,6 +75,21 @@ function colourClass(key, value) {
 
 function catalogByKey(key) {
   return catalog.find((col) => col.key === key);
+}
+
+function isDataTypeColumn(col) {
+  if (!col) return false;
+  const key = String(col.key || "").toLowerCase();
+  const label = String(col.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return key === "genomicindicator" || key === "datatype" || label === "datatype";
+}
+
+function customIndexKey() {
+  const col = catalog.find((item) => {
+    const label = String(item.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return item.key === "customindex" || label === "customindex";
+  });
+  return col ? col.key : "customindex";
 }
 
 function activeColumns() {
@@ -234,10 +250,11 @@ function filteredRows() {
 }
 
 function sortValue(row, key) {
-  const column = activeColumns().find((col) => col.key === key);
+  const column = activeColumns().find((col) => col.key === key) || catalogByKey(key);
   const value = row[key];
-  if (value === null || value === undefined || value === "") return -Infinity;
-  if (column && column.type === "num") {
+  const numeric = (column && (column.type === "num" || column.numeric)) || key === customIndexKey();
+  if (value === null || value === undefined || value === "") return numeric ? -Infinity : "";
+  if (numeric) {
     const num = Number(value);
     return Number.isFinite(num) ? num : -Infinity;
   }
@@ -262,7 +279,15 @@ function fmtNum(value) {
   return num.toLocaleString("en-GB", { maximumFractionDigits: 2 });
 }
 
+function proofMark(value) {
+  if (String(value || "").trim().toUpperCase() === "G") {
+    return '<span class="list-pill genomic">G</span>';
+  }
+  return "PA";
+}
+
 function cellHtml(row, col) {
+  if (col.type === "mark") return proofMark(row.data_type);
   if (col.type === "date") {
     if (col.key === "due_date") return escapeHtml(row.due_label || "—");
     return escapeHtml(row.dob_label || "—");
@@ -294,14 +319,21 @@ function renderTraitFilters() {
   }).join("");
 }
 
+function columnClass(col, index, columns) {
+  const sireAt = columns.findIndex((item) => item.key === "sire_name");
+  const classes = [];
+  if (col.type === "num") classes.push("num");
+  if (col.type === "mark") classes.push("mark");
+  if (sireAt >= 0 && index > sireAt) classes.push("trait");
+  if (sortState.key === col.key) classes.push(sortState.dir > 0 ? "sorted-asc" : "sorted-desc");
+  return classes.filter(Boolean).join(" ");
+}
+
 function renderHead() {
   const columns = activeColumns();
-  document.getElementById("females-head").innerHTML = columns.map((col) => {
-    const cls = [
-      col.type === "num" ? "num" : "",
-      sortState.key === col.key ? (sortState.dir > 0 ? "sorted-asc" : "sorted-desc") : "",
-    ].filter(Boolean).join(" ");
-    return '<th data-sort="' + col.key + '" class="' + cls + '">' + escapeHtml(col.label) + "</th>";
+  document.getElementById("females-head").innerHTML = columns.map((col, index) => {
+    const cls = columnClass(col, index, columns);
+    return '<th data-sort="' + col.key + '"' + (cls ? ' class="' + cls + '"' : "") + ">" + escapeHtml(col.label) + "</th>";
   }).join("");
 }
 
@@ -328,11 +360,11 @@ function renderTable() {
     return;
   }
   body.innerHTML = pageRows.map((row) => {
-    return "<tr>" + columns.map((col) => {
-      const classes = [col.type === "num" ? "num" : ""];
+    return "<tr>" + columns.map((col, index) => {
+      const classes = columnClass(col, index, columns).split(" ").filter((name) => name && name !== "sorted-asc" && name !== "sorted-desc");
       const tone = col.type === "num" ? colourClass(col.key, row[col.key]) : "";
       if (tone) classes.push(tone);
-      const cls = classes.filter(Boolean).join(" ");
+      const cls = classes.join(" ");
       return "<td" + (cls ? ' class="' + cls + '"' : "") + ">" + cellHtml(row, col) + "</td>";
     }).join("") + "</tr>";
   }).join("");
@@ -341,7 +373,14 @@ function renderTable() {
 function applyPayload(data) {
   rows = data.rows || [];
   catalog = data.columns || [];
-  displayedKeys = displayedKeys.filter((key) => catalogByKey(key));
+  displayedKeys = displayedKeys.filter((key) => {
+    const col = catalogByKey(key);
+    return col && !isDataTypeColumn(col);
+  });
+  if (!sortTouched) {
+    sortState.key = customIndexKey();
+    sortState.dir = -1;
+  }
   syncDobSliders(false);
   renderTraitFilters();
   renderTable();
@@ -361,7 +400,9 @@ function listItems(keys, selected, search, draggable) {
 }
 
 function renderColumnLists() {
-  const available = catalog.map((col) => col.key).filter((key) => !draftKeys.includes(key));
+  const available = catalog
+    .filter((col) => !isDataTypeColumn(col) && !draftKeys.includes(col.key))
+    .map((col) => col.key);
   document.getElementById("available-list").innerHTML = listItems(
     available,
     selectedAvailable,
@@ -381,8 +422,8 @@ function openColumns() {
   selectedAvailable = new Set();
   selectedDisplayed = new Set();
   document.getElementById("columns-note").textContent = PAGE.mode === "embryo"
-    ? "Calf, herd, farm, dates, recipient, dam, and both sires stay on the table. Drag the displayed traits to change their order."
-    : "Visual ID, herd, farm, eartag, date of birth, and sire stay on the table. Drag the displayed traits to change their order.";
+    ? "Data type, calf, farm, eartag, dates, recipient, dam, and both sires stay on the table. Drag the displayed traits to change their order."
+    : "Data type, visual ID, farm, eartag, date of birth, and sire stay on the table. Drag the displayed traits to change their order.";
   document.getElementById("columns-overlay").hidden = false;
   renderColumnLists();
 }
@@ -414,6 +455,7 @@ document.getElementById("females-head").addEventListener("click", (event) => {
   const th = event.target.closest("th[data-sort]");
   if (!th) return;
   const key = th.dataset.sort;
+  sortTouched = true;
   if (sortState.key === key) sortState.dir *= -1;
   else {
     sortState.key = key;
