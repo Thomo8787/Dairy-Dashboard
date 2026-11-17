@@ -32,7 +32,9 @@
       margin-bottom: 0.35rem;
     }
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .stock-group-slicer { grid-template-columns: 1fr 1fr 1fr; }
+    .stock-group-slicer { grid-template-columns: 1fr 1fr; }
+    .stock-group-slicer .span-2 { grid-column: 1 / -1; }
+    .slicer-btn .slicer-sub { font-size: 0.75rem; font-weight: 600; }
     .slicer-btn {
       display: flex;
       flex-direction: column;
@@ -58,7 +60,9 @@
     }
     .slicer-btn[data-value="cows"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
     .slicer-btn[data-value="GAD"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
-    .slicer-btn[data-value="youngstock"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+    .slicer-btn[data-value="youngstock"].selected,
+    .slicer-btn[data-value="ys_0_12"].selected,
+    .slicer-btn[data-value="ys_12_plus"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
     .slicer-btn[data-value="beef"].selected { background: #ede9fe; border-color: #a78bfa; color: #5b21b6; }
     .date-inputs { display: grid; gap: 0.5rem; }
     .filter-select { width: 100%; margin: 0; }
@@ -184,8 +188,10 @@
           <span class="section-label">Stock group</span>
           <div class="slicer-group stock-group-slicer" role="group" aria-label="Stock group">
             <button type="button" class="slicer-btn selected" data-value="cows" aria-pressed="true">Cows</button>
-            <button type="button" class="slicer-btn" data-value="youngstock" aria-pressed="false">Youngstock</button>
             <button type="button" class="slicer-btn" data-value="beef" aria-pressed="false">Beef</button>
+            <button type="button" class="slicer-btn" data-value="ys_0_12" aria-pressed="false">Youngstock<span class="slicer-sub">0–12 months</span></button>
+            <button type="button" class="slicer-btn" data-value="ys_12_plus" aria-pressed="false">Youngstock<span class="slicer-sub">12+ months</span></button>
+            <button type="button" class="slicer-btn span-2" data-value="youngstock" aria-pressed="false">Youngstock total</button>
           </div>
         </div>
         <div class="filter-section">
@@ -232,7 +238,9 @@
     const SALES_REASONS = ["CULL", "TB", "OFS", "Beef", "Dairy"];
     const STOCK_GROUP_LABELS = {
       cows: "Cows",
-      youngstock: "Youngstock (F)",
+      youngstock: "Youngstock total",
+      ys_0_12: "Youngstock 0–12 months",
+      ys_12_plus: "Youngstock 12+ months",
       beef: "Beef",
     };
     let monthList = [];
@@ -263,7 +271,11 @@
 
 
     function showBirthsColumn(stockGroup) {
-      return stockGroup === "youngstock" || stockGroup === "beef";
+      return stockGroup === "youngstock" || stockGroup === "ys_0_12" || stockGroup === "beef";
+    }
+
+    function showTurned12Column(stockGroup) {
+      return stockGroup === "ys_0_12" || stockGroup === "ys_12_plus";
     }
 
     function stockGroupLabel(stockGroup) {
@@ -493,6 +505,7 @@
         births: 0,
         calvings: 0,
         purchases: 0,
+        turned12: 0,
         destinations: {},
       };
       let avgStockSum = 0;
@@ -507,6 +520,7 @@
         stats.births += row.births || 0;
         stats.calvings += row.calvings || 0;
         stats.purchases += row.purchases || 0;
+        stats.turned12 += row.turned_12 || 0;
         for (const [name, count] of Object.entries(row.dairy_destinations || {})) {
           stats.destinations[name] = (stats.destinations[name] || 0) + (count || 0);
         }
@@ -526,6 +540,7 @@
         births_avg: stats.births / n,
         calvings_avg: stats.calvings / n,
         purchases_avg: stats.purchases / n,
+        turned12_avg: stats.turned12 / n,
         dest_avg: Object.fromEntries(
           Object.entries(stats.destinations).map(([name, total]) => [name, total / n])
         ),
@@ -557,6 +572,7 @@
         return;
       }
       const showBirths = showBirthsColumn(stockGroup);
+      const showTurned = showTurned12Column(stockGroup);
       const dests = dairyExpanded ? dairyDestColumns(rows) : [];
       foot.innerHTML = `
         <tr class="total-row">
@@ -567,6 +583,7 @@
           ${showBirths ? `<td>${formatTotal(stats.births)}</td>` : ""}
           <td>${formatTotal(stats.calvings)}</td>
           <td>${formatTotal(stats.purchases)}</td>
+          ${showTurned ? `<td>${formatTotal(stats.turned12)}</td>` : ""}
           <td>—</td>
         </tr>
         <tr class="average-row">
@@ -577,6 +594,7 @@
           ${showBirths ? `<td>${formatAverage(stats.births_avg)}</td>` : ""}
           <td>${formatAverage(stats.calvings_avg)}</td>
           <td>${formatAverage(stats.purchases_avg)}</td>
+          ${showTurned ? `<td>${formatAverage(stats.turned12_avg)}</td>` : ""}
           <td>—</td>
         </tr>
       `;
@@ -610,6 +628,7 @@
           ${showBirths ? "<th>Births</th>" : ""}
           <th>Calvings</th>
           <th>Purchases</th>
+          ${showTurned12Column(stockGroup) ? "<th>Turned 12</th>" : ""}
           <th>Closing</th>
         </tr>
       `;
@@ -620,6 +639,7 @@
       const dests = dairyExpanded ? dairyDestColumns(rows) : [];
       renderTableHead(stockGroup, rows);
       const showBirths = showBirthsColumn(stockGroup);
+      const showTurned = showTurned12Column(stockGroup);
       body.innerHTML = rows.map(row => `
         <tr class="${row.warning ? "warn-row" : ""}">
           <td>${row.event_month}</td>
@@ -629,6 +649,7 @@
           ${showBirths ? `<td>${row.births.toLocaleString("en-GB")}</td>` : ""}
           <td>${row.calvings.toLocaleString("en-GB")}</td>
           <td>${row.purchases.toLocaleString("en-GB")}</td>
+          ${showTurned ? `<td>${(row.turned_12 || 0).toLocaleString("en-GB")}</td>` : ""}
           <td>${row.closing.toLocaleString("en-GB")}</td>
         </tr>
       `).join("");

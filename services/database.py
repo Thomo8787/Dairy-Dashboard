@@ -380,15 +380,21 @@ class HerdInventory(Base):
 
 STOCK_GROUP_COWS = "cows"
 STOCK_GROUP_YOUNGSTOCK = "youngstock"
+STOCK_GROUP_YOUNGSTOCK_0_12 = "ys_0_12"
+STOCK_GROUP_YOUNGSTOCK_12_PLUS = "ys_12_plus"
 STOCK_GROUP_BEEF = "beef"
 STOCK_GROUP_OPTIONS: tuple[str, ...] = (
     STOCK_GROUP_COWS,
     STOCK_GROUP_YOUNGSTOCK,
+    STOCK_GROUP_YOUNGSTOCK_0_12,
+    STOCK_GROUP_YOUNGSTOCK_12_PLUS,
     STOCK_GROUP_BEEF,
 )
 STOCK_GROUP_CATEGORY: dict[str, str] = {
     STOCK_GROUP_COWS: "Dairy",
     STOCK_GROUP_YOUNGSTOCK: "Youngstock",
+    STOCK_GROUP_YOUNGSTOCK_0_12: "Youngstock",
+    STOCK_GROUP_YOUNGSTOCK_12_PLUS: "Youngstock",
     STOCK_GROUP_BEEF: "Beef",
 }
 
@@ -435,6 +441,7 @@ class StockAccrualSnapshot(Base):
     births = Column(Integer, nullable=False, default=0)
     calvings = Column(Integer, nullable=False, default=0)
     purchases = Column(Integer, nullable=False, default=0)
+    turned_12 = Column(Integer, nullable=False, default=0)
     closing_count = Column(Integer, nullable=False, default=0)
     warning = Column(Boolean, nullable=False, default=False)
 
@@ -1110,21 +1117,29 @@ def _ensure_stock_accrual_columns(engine) -> None:
     if "stock_accrual_snapshots" not in inspector.get_table_names():
         return
     existing = {col["name"] for col in inspector.get_columns("stock_accrual_snapshots")}
-    if "dairy_destinations" in existing:
-        return
     dialect = engine.dialect.name
-    if dialect == "postgresql":
-        ddl = (
+    statements: list[str] = []
+    if "dairy_destinations" not in existing:
+        if dialect == "postgresql":
+            statements.append(
+                "ALTER TABLE stock_accrual_snapshots "
+                "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'::json"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE stock_accrual_snapshots "
+                "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'"
+            )
+    if "turned_12" not in existing:
+        statements.append(
             "ALTER TABLE stock_accrual_snapshots "
-            "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'::json"
+            "ADD COLUMN turned_12 INTEGER NOT NULL DEFAULT 0"
         )
-    else:
-        ddl = (
-            "ALTER TABLE stock_accrual_snapshots "
-            "ADD COLUMN dairy_destinations JSON NOT NULL DEFAULT '{}'"
-        )
+    if not statements:
+        return
     with engine.begin() as conn:
-        conn.execute(text(ddl))
+        for ddl in statements:
+            conn.execute(text(ddl))
 
 
 def init_db():

@@ -6,7 +6,7 @@ import datetime as dt
 import gc
 from typing import Any
 
-from sqlalchemy import and_, delete, extract, func, literal, or_, select
+from sqlalchemy import and_, case, delete, extract, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from services.database import (
@@ -15,6 +15,8 @@ from services.database import (
     STOCK_GROUP_COWS,
     STOCK_GROUP_OPTIONS,
     STOCK_GROUP_YOUNGSTOCK,
+    STOCK_GROUP_YOUNGSTOCK_0_12,
+    STOCK_GROUP_YOUNGSTOCK_12_PLUS,
     AppSetting,
     CowEvent,
     HerdBirth,
@@ -42,7 +44,7 @@ from services.stock_purchase_derivation import ensure_stock_purchases
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "dairy-dest-v1"
+ACCRUAL_LOGIC_VERSION = "ys-age-v1"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
@@ -59,6 +61,51 @@ def _last_day_of_month(value: dt.date) -> dt.date:
     if value.month == 12:
         return dt.date(value.year, 12, 31)
     return dt.date(value.year, value.month + 1, 1) - dt.timedelta(days=1)
+
+
+def _youngstock_groups() -> tuple[str, ...]:
+    return (
+        STOCK_GROUP_YOUNGSTOCK,
+        STOCK_GROUP_YOUNGSTOCK_0_12,
+        STOCK_GROUP_YOUNGSTOCK_12_PLUS,
+    )
+
+
+def _completed_months(born: dt.date, on: dt.date) -> int:
+    """Whole months completed from born to on. The 12-month birthday counts as 12."""
+    months = (on.year - born.year) * 12 + (on.month - born.month)
+    if on.day < born.day:
+        months -= 1
+    return months
+
+
+def _add_months(value: dt.date, months: int) -> dt.date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    last_day = _last_day_of_month(dt.date(year, month, 1)).day
+    return dt.date(year, month, min(value.day, last_day))
+
+
+def _completed_months_expr(on_date, born):
+    months = (extract("year", on_date) - extract("year", born)) * 12 + (
+        extract("month", on_date) - extract("month", born)
+    )
+    return case(
+        (extract("day", on_date) < extract("day", born), months - 1),
+        else_=months,
+    )
+
+
+def _apply_youngstock_age_band(query, stock_group: str, on_date, born):
+    """0–12 is under 12 months. 12+ starts on the 12-month birthday."""
+    if stock_group == STOCK_GROUP_YOUNGSTOCK_0_12:
+        return query.where(born.isnot(None)).where(_completed_months_expr(on_date, born) < 12)
+    if stock_group == STOCK_GROUP_YOUNGSTOCK_12_PLUS:
+        return query.where(
+            or_(born.is_(None), _completed_months_expr(on_date, born) >= 12)
+        )
+    return query
 
 
 def _youngstock_cow_event_filter():
@@ -84,7 +131,7 @@ def _apply_cow_event_stock_group(query, stock_group: str):
         )
     for condition in _youngstock_cow_event_filter():
         query = query.where(condition)
-    return query
+    return _apply_youngstock_age_band(query, stock_group, CowEvent.event_date, CowEvent.bdat)
 
 
 def _fetch_sales_by_month(
@@ -208,6 +255,7 @@ def _fetch_event_count_by_month(
         query = query.where(func.upper(func.coalesce(CowEvent.gndr, "")) == "F")
         query = query.where(CowEvent.cbrd.isnot(None))
         query = query.where(CowEvent.cbrd < BEEF_CBREED_MIN)
+        query = _apply_youngstock_age_band(query, stock_group, CowEvent.event_date, CowEvent.bdat)
     elif lact_filter == "fresh_cows":
         query = query.where(CowEvent.lact == 1)
     else:
@@ -311,17 +359,25 @@ def _fetch_purchases_by_month(
     month_from: dt.date,
     month_to: dt.date,
 ) -> dict[tuple[int, int], int]:
-    rows = db.execute(
+    purchase_group = stock_group
+    if stock_group in (STOCK_GROUP_YOUNGSTOCK_0_12, STOCK_GROUP_YOUNGSTOCK_12_PLUS):
+        purchase_group = STOCK_GROUP_YOUNGSTOCK
+    query = (
         select(
             extract("year", StockPurchaseAnimal.edat),
             extract("month", StockPurchaseAnimal.edat),
             func.count(),
         )
         .where(StockPurchaseAnimal.farm == farm)
-        .where(StockPurchaseAnimal.stock_group == stock_group)
+        .where(StockPurchaseAnimal.stock_group == purchase_group)
         .where(StockPurchaseAnimal.edat >= month_from)
         .where(StockPurchaseAnimal.edat <= month_to)
-        .group_by(
+    )
+    query = _apply_youngstock_age_band(
+        query, stock_group, StockPurchaseAnimal.edat, StockPurchaseAnimal.bdat
+    )
+    rows = db.execute(
+        query.group_by(
             extract("year", StockPurchaseAnimal.edat),
             extract("month", StockPurchaseAnimal.edat),
         )
@@ -331,6 +387,130 @@ def _fetch_purchases_by_month(
         for year, month, count in rows
         if year is not None and month is not None
     }
+
+
+def _animal_key(etag: str | None, cow_id: str | None) -> str | None:
+    etag_text = (etag or "").strip()
+    if etag_text:
+        return f"e:{etag_text}"
+    cow_text = (cow_id or "").strip()
+    if cow_text:
+        return f"c:{cow_text}"
+    return None
+
+
+def _fetch_turned_12_by_month(
+    db: Session,
+    *,
+    farm: str,
+    month_from: dt.date,
+    month_to: dt.date,
+) -> dict[tuple[int, int], int]:
+    """Heifers who reach 12 months while still on the farm.
+
+    A heifer bought already 12 months or older enters through Purchases.
+    One who leaves before her 12-month birthday does not move bands.
+    """
+    animals: dict[str, dict[str, dt.date | None]] = {}
+    born_here: set[str] = set()
+
+    births = db.execute(
+        select(HerdBirth.cow_id, HerdBirth.etag, HerdBirth.bdat)
+        .where(HerdBirth.farm == farm)
+        .where(HerdBirth.bdat.isnot(None))
+        .where(func.upper(func.coalesce(HerdBirth.gndr, "")) == "F")
+        .where(
+            or_(
+                HerdBirth.category == CATEGORY_DAIRY,
+                and_(
+                    HerdBirth.category.is_(None),
+                    HerdBirth.cbrd.isnot(None),
+                    HerdBirth.cbrd < BEEF_CBREED_MIN,
+                ),
+            )
+        )
+    ).all()
+    for cow_id, etag, bdat in births:
+        key = _animal_key(etag, cow_id)
+        if key is None or bdat is None:
+            continue
+        animals[key] = {"bdat": bdat, "arrived": bdat, "exit": None}
+        born_here.add(key)
+
+    inventory_rows = db.execute(
+        select(HerdInventory.cow_id, HerdInventory.etag, HerdInventory.bdat)
+        .where(HerdInventory.farm == farm)
+        .where(HerdInventory.category == "Youngstock")
+        .where(HerdInventory.gender == "Female")
+        .where(HerdInventory.bdat.isnot(None))
+    ).all()
+    for cow_id, etag, bdat in inventory_rows:
+        key = _animal_key(etag, cow_id)
+        if key is None or bdat is None or key in animals:
+            continue
+        animals[key] = {"bdat": bdat, "arrived": bdat, "exit": None}
+
+    purchases = db.execute(
+        select(StockPurchaseAnimal.etag, StockPurchaseAnimal.bdat, StockPurchaseAnimal.edat)
+        .where(StockPurchaseAnimal.farm == farm)
+        .where(StockPurchaseAnimal.stock_group == STOCK_GROUP_YOUNGSTOCK)
+    ).all()
+    for etag, bdat, edat in purchases:
+        key = _animal_key(etag, None)
+        if key is None or bdat is None or edat is None:
+            continue
+        if _completed_months(bdat, edat) >= 12:
+            if key not in born_here:
+                animals.pop(key, None)
+            continue
+        if key in born_here:
+            continue
+        animals[key] = {"bdat": bdat, "arrived": edat, "exit": None}
+
+    exits = db.execute(
+        select(CowEvent.cow_id, CowEvent.etag, CowEvent.event_date)
+        .where(CowEvent.farm == farm)
+        .where(CowEvent.event_date.isnot(None))
+        .where(
+            or_(
+                and_(
+                    CowEvent.event.in_(("SOLD", "DIED")),
+                    *_youngstock_cow_event_filter(),
+                ),
+                and_(
+                    CowEvent.event == "FRESH",
+                    CowEvent.lact == 1,
+                    func.upper(func.coalesce(CowEvent.gndr, "")) == "F",
+                    CowEvent.cbrd.isnot(None),
+                    CowEvent.cbrd < BEEF_CBREED_MIN,
+                ),
+            )
+        )
+    ).all()
+    for cow_id, etag, event_date in exits:
+        key = _animal_key(etag, cow_id)
+        record = animals.get(key) if key is not None else None
+        if record is None or event_date is None:
+            continue
+        current_exit = record["exit"]
+        if current_exit is None or event_date < current_exit:
+            record["exit"] = event_date
+
+    counts: dict[tuple[int, int], int] = {}
+    for record in animals.values():
+        bdat = record["bdat"]
+        arrived = record["arrived"]
+        if bdat is None or arrived is None:
+            continue
+        birthday = _add_months(bdat, 12)
+        if birthday < month_from or birthday > month_to or arrived > birthday:
+            continue
+        exit_date = record["exit"]
+        if exit_date is not None and exit_date < birthday:
+            continue
+        key = (birthday.year, birthday.month)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _get_baseline(
@@ -383,6 +563,7 @@ def _movement_totals(
     )
     births = 0
     calvings = 0
+    turned_12 = 0
     if stock_group == STOCK_GROUP_YOUNGSTOCK:
         births = _sum_month_counts(
             _fetch_births_by_month(db, farm=farm, month_from=month_from, month_to=month_to)
@@ -396,6 +577,43 @@ def _movement_totals(
                 month_from=month_from,
                 month_to=month_to,
                 lact_filter="fresh_heifers",
+            )
+        )
+    elif stock_group == STOCK_GROUP_YOUNGSTOCK_0_12:
+        births = _sum_month_counts(
+            _fetch_births_by_month(db, farm=farm, month_from=month_from, month_to=month_to)
+        )
+        calvings = -_sum_month_counts(
+            _fetch_event_count_by_month(
+                db,
+                farm=farm,
+                stock_group=stock_group,
+                event_type="FRESH",
+                month_from=month_from,
+                month_to=month_to,
+                lact_filter="fresh_heifers",
+            )
+        )
+        turned_12 = -_sum_month_counts(
+            _fetch_turned_12_by_month(
+                db, farm=farm, month_from=month_from, month_to=month_to
+            )
+        )
+    elif stock_group == STOCK_GROUP_YOUNGSTOCK_12_PLUS:
+        calvings = -_sum_month_counts(
+            _fetch_event_count_by_month(
+                db,
+                farm=farm,
+                stock_group=stock_group,
+                event_type="FRESH",
+                month_from=month_from,
+                month_to=month_to,
+                lact_filter="fresh_heifers",
+            )
+        )
+        turned_12 = _sum_month_counts(
+            _fetch_turned_12_by_month(
+                db, farm=farm, month_from=month_from, month_to=month_to
             )
         )
     elif stock_group == STOCK_GROUP_BEEF:
@@ -422,10 +640,13 @@ def _movement_totals(
         "births": births,
         "calvings": calvings,
         "purchases": purchases,
+        "turned_12": turned_12,
     }
 
 
 def _inventory_count(db: Session, farm: str, stock_group: str) -> int:
+    if stock_group in (STOCK_GROUP_YOUNGSTOCK_0_12, STOCK_GROUP_YOUNGSTOCK_12_PLUS):
+        return _youngstock_age_inventory_count(db, farm, stock_group)
     category = STOCK_GROUP_CATEGORY[stock_group]
     return (
         db.scalar(
@@ -435,6 +656,31 @@ def _inventory_count(db: Session, farm: str, stock_group: str) -> int:
         )
         or 0
     )
+
+
+def _youngstock_age_inventory_count(db: Session, farm: str, stock_group: str) -> int:
+    """Current dairy heifers split at the 12-month birthday."""
+    today = dt.date.today()
+    rows = db.execute(
+        select(HerdInventory.bdat, HerdInventory.months_old)
+        .where(HerdInventory.farm == farm)
+        .where(HerdInventory.category == "Youngstock")
+        .where(HerdInventory.gender == "Female")
+    ).all()
+    count = 0
+    for bdat, months_old in rows:
+        if bdat is not None:
+            age = _completed_months(bdat, today)
+        elif months_old is not None:
+            age = int(months_old)
+        else:
+            age = 12
+        under_12 = age < 12
+        if stock_group == STOCK_GROUP_YOUNGSTOCK_0_12 and under_12:
+            count += 1
+        elif stock_group == STOCK_GROUP_YOUNGSTOCK_12_PLUS and not under_12:
+            count += 1
+    return count
 
 
 def _baseline_month_for_farm(db: Session, farm: str) -> dt.date | None:
@@ -481,6 +727,7 @@ def ensure_stock_opening_baselines(db: Session) -> dict[str, Any]:
                 + movements["births"]
                 + movements["calvings"]
                 + movements["purchases"]
+                + movements["turned_12"]
             )
             opening_count = inventory - net
             existing = _get_baseline(db, farm, stock_group)
@@ -549,6 +796,7 @@ def _compute_farm_rows(
 
     births: dict[tuple[int, int], int] = {}
     calvings: dict[tuple[int, int], int] = {}
+    turned_12: dict[tuple[int, int], int] = {}
     if stock_group == STOCK_GROUP_YOUNGSTOCK:
         births = _fetch_births_by_month(
             db, farm=farm, month_from=baseline_month, month_to=calc_end
@@ -561,6 +809,38 @@ def _compute_farm_rows(
             month_from=baseline_month,
             month_to=calc_end,
             lact_filter="fresh_heifers",
+        )
+    elif stock_group == STOCK_GROUP_YOUNGSTOCK_0_12:
+        births = _fetch_births_by_month(
+            db, farm=farm, month_from=baseline_month, month_to=calc_end
+        )
+        calvings = _fetch_event_count_by_month(
+            db,
+            farm=farm,
+            stock_group=stock_group,
+            event_type="FRESH",
+            month_from=baseline_month,
+            month_to=calc_end,
+            lact_filter="fresh_heifers",
+        )
+        turned_12 = {
+            key: -count
+            for key, count in _fetch_turned_12_by_month(
+                db, farm=farm, month_from=baseline_month, month_to=calc_end
+            ).items()
+        }
+    elif stock_group == STOCK_GROUP_YOUNGSTOCK_12_PLUS:
+        calvings = _fetch_event_count_by_month(
+            db,
+            farm=farm,
+            stock_group=stock_group,
+            event_type="FRESH",
+            month_from=baseline_month,
+            month_to=calc_end,
+            lact_filter="fresh_heifers",
+        )
+        turned_12 = _fetch_turned_12_by_month(
+            db, farm=farm, month_from=baseline_month, month_to=calc_end
         )
     elif stock_group == STOCK_GROUP_BEEF:
         births = _fetch_beef_births_by_month(
@@ -586,16 +866,21 @@ def _compute_farm_rows(
         month_sales = sales.get(key, dict(_ZERO_SALES))
         sales_total = sum(month_sales.values())
         month_deaths = deaths.get(key, 0)
-        show_births = stock_group in (STOCK_GROUP_YOUNGSTOCK, STOCK_GROUP_BEEF)
+        show_births = stock_group in (
+            STOCK_GROUP_YOUNGSTOCK,
+            STOCK_GROUP_YOUNGSTOCK_0_12,
+            STOCK_GROUP_BEEF,
+        )
         month_births = births.get(key, 0) if show_births else 0
         raw_calvings = calvings.get(key, 0)
         if stock_group == STOCK_GROUP_COWS:
             month_calvings = raw_calvings
-        elif stock_group == STOCK_GROUP_YOUNGSTOCK:
+        elif stock_group in _youngstock_groups():
             month_calvings = -raw_calvings
         else:
             month_calvings = 0
         month_purchases = purchases.get(key, 0)
+        month_turned = turned_12.get(key, 0)
 
         closing = (
             opening
@@ -604,6 +889,7 @@ def _compute_farm_rows(
             + month_births
             + month_calvings
             + month_purchases
+            + month_turned
         )
 
         computed.append(
@@ -618,6 +904,7 @@ def _compute_farm_rows(
                 "births": month_births,
                 "calvings": month_calvings,
                 "purchases": month_purchases,
+                "turned_12": month_turned,
                 "closing": closing,
                 "warning": closing < 0 or opening < 0,
             }
@@ -655,6 +942,7 @@ def _merge_farm_rows(farm_rows: list[list[dict[str, Any]]]) -> list[dict[str, An
                     "births": 0,
                     "calvings": 0,
                     "purchases": 0,
+                    "turned_12": 0,
                     "closing": 0,
                     "warning": False,
                 }
@@ -665,6 +953,7 @@ def _merge_farm_rows(farm_rows: list[list[dict[str, Any]]]) -> list[dict[str, An
             merged["births"] += row["births"]
             merged["calvings"] += row["calvings"]
             merged["purchases"] += row["purchases"]
+            merged["turned_12"] += row.get("turned_12", 0)
             merged["closing"] += row["closing"]
             merged["warning"] = merged["warning"] or row["warning"]
             for reason in SALES_TABLE_REASON_ORDER:
@@ -735,6 +1024,7 @@ def _snapshot_from_row(snapshot: StockAccrualSnapshot) -> dict[str, Any]:
         "births": int(snapshot.births),
         "calvings": int(snapshot.calvings),
         "purchases": int(snapshot.purchases),
+        "turned_12": int(snapshot.turned_12 or 0),
         "closing": int(snapshot.closing_count),
         "warning": bool(snapshot.warning),
     }
@@ -764,6 +1054,7 @@ def _snapshot_from_farm_month(
         births=int(row["births"]),
         calvings=int(row["calvings"]),
         purchases=int(row["purchases"]),
+        turned_12=int(row.get("turned_12") or 0),
         closing_count=int(row["closing"]),
         warning=bool(row["warning"]),
     )
