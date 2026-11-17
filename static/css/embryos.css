@@ -24,6 +24,9 @@
 }
 
 .embryo-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -73,16 +76,41 @@
 }
 
 .embryo-average {
-  margin: 0 0 0.75rem;
+  margin: 0;
   color: var(--muted);
   font-size: 0.82rem;
-  line-height: 1.4;
+  line-height: 1.45;
+}
+
+.embryo-average p {
+  margin: 0;
+}
+
+.embryo-average-title {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.embryo-average-sire {
+  margin-top: 0.45rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.embryo-average a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.15em;
 }
 
 .embryo-card-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
   gap: 0.45rem;
+  margin-top: auto;
+  padding-top: 0.9rem;
 }
 
 .sire-pick {

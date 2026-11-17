@@ -501,11 +501,11 @@ def _implant_dict(row: EmbryoImplant, batch: EmbryoBatch) -> dict[str, Any]:
 
 
 _AVERAGE_TRAITS = (
-    ("pli", "£PLI", 0),
-    ("milk", "Milk", 0),
-    ("fat_pct", "Fat %", 2),
-    ("prot_pct", "Prot %", 2),
-    ("lifespan", "Lifespan", 0),
+    ("pli", "PLI"),
+    ("milk", "Milk"),
+    ("fat_pct", "Fat"),
+    ("prot_pct", "Prot"),
+    ("lifespan", "Lifespan"),
 )
 
 
@@ -521,10 +521,14 @@ def _trait_number(value: Any) -> float | None:
     return number
 
 
-def _format_average(value: float, digits: int) -> str:
-    if digits <= 0:
-        return f"{int(round(value)):,}"
-    return f"{value:.{digits}f}"
+def _format_average(key: str, value: float) -> str:
+    if key == "pli":
+        return f"£{int(round(value)):,}"
+    if key == "milk":
+        return f"{int(round(value)):,}kg"
+    if key in {"fat_pct", "prot_pct"}:
+        return f"{value:.2f}%"
+    return f"{int(round(value)):,}"
 
 
 def _dam_trait_index(session: Session) -> dict[str, dict[str, float | None]]:
@@ -583,19 +587,20 @@ def _parent_average(
     dam_traits: dict[str, float | None] | None,
     bull_traits: dict[str, float | None] | None,
     sire_name: str,
+    sire_hbn: str,
 ) -> dict[str, Any] | None:
     if not dam_traits or not bull_traits:
         return None
     traits = []
-    for key, label, digits in _AVERAGE_TRAITS:
+    for key, label in _AVERAGE_TRAITS:
         left = dam_traits.get(key)
         right = bull_traits.get(key)
         if left is None or right is None:
             continue
-        traits.append({"label": label, "value": _format_average((left + right) / 2, digits)})
+        traits.append({"label": label, "value": _format_average(key, (left + right) / 2)})
     if not traits:
         return None
-    return {"sire": sire_name, "traits": traits}
+    return {"sire": sire_name, "hbn": sire_hbn, "traits": traits}
 
 
 def _parent_averages(
@@ -610,7 +615,7 @@ def _parent_averages(
     for name, hbn in ((batch.sire_1, batch.sire_1_hbn), (batch.sire_2, batch.sire_2_hbn)):
         if not name or not hbn:
             continue
-        average = _parent_average(dam_traits, bulls.get(str(hbn).strip()), name)
+        average = _parent_average(dam_traits, bulls.get(str(hbn).strip()), name, str(hbn).strip())
         if average:
             averages.append(average)
     return averages

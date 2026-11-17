@@ -32,11 +32,23 @@
                   {% endif %}
                 {% endif %}
               </p>
-              {% for average in flush.parent_averages %}
-                <p class="embryo-average">Parent average{% if flush.sire_2 %}, {{ average.sire }}{% endif %}:
-                  {% for trait in average.traits %}{{ trait.label }} {{ trait.value }}{% if not loop.last %} · {% endif %}{% endfor %}
-                </p>
-              {% endfor %}
+              {% if flush.parent_averages %}
+                <div class="embryo-average">
+                  <p class="embryo-average-title">Parent Average:</p>
+                  {% for average in flush.parent_averages %}
+                    <p class="embryo-average-sire">
+                      {% if average.hbn %}
+                        <a href="{{ url_for('genetics_bull_search', q=average.hbn) }}">{{ average.sire }}</a>
+                      {% else %}
+                        {{ average.sire }}
+                      {% endif %}
+                    </p>
+                    <p class="embryo-average-traits">
+                      {% for trait in average.traits %}{{ trait.label }} {{ trait.value }}{% if not loop.last %} {% endif %}{% endfor %}
+                    </p>
+                  {% endfor %}
+                </div>
+              {% endif %}
               <div class="embryo-card-actions">
                 <a class="btn" href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open flush day</a>
                 <a class="btn secondary" href="{{ url_for('genetics_flush_day', batch_id=flush.id, edit=1) }}">Edit</a>
