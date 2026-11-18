@@ -92,20 +92,22 @@ PAGES_WITH_PARITY_FILTER: frozenset[str] = frozenset({"sales", "deaths", "diseas
 SALES_REASON_ORDER: tuple[str, ...] = ("OFS", "TB", "Beef", "Dairy", "CULL")
 SALES_TABLE_REASON_ORDER: tuple[str, ...] = ("CULL", "TB", "OFS", "Beef", "Dairy")
 SALES_DAIRY_REMARKS: tuple[str, ...] = ("CAR18", "CAR19", "DAIRY")
-# Farm names written in the DairyComp remark. DEST is not used.
+# DairyComp remark spellings grouped to the farm column shown under Dairy.
+# CHERRY and CO are COF. PH is SFR. PARK and PKS are PKS. ARL and ALH are ALH.
 DAIRY_FARM_REMARKS: tuple[str, ...] = (
     "CO",
     "CHERRY",
     "COF",
-    "PARK",
+    "PH",
     "SFR",
+    "PARK",
     "PARKES",
     "PKS",
     "PRK",
+    "ARL",
     "ALH",
     "BNK",
 )
-DAIRY_FARM_REMARK_PREFIXES: tuple[str, ...] = ("CHERRY", "PARK HALL", "THE PARKES")
 SALES_TB_REMARKS: tuple[str, ...] = ("CAR11", "TB")
 SALES_BEEF_REMARKS: tuple[str, ...] = ("CAR16", "BLADE", "DRAYTON", "WARREN")
 SALES_MAPPED_REMARKS: tuple[str, ...] = (
@@ -167,22 +169,63 @@ def ofs_sales_clause():
     return or_(_remark_upper() == "OFS", ofs_dest_clause())
 
 
-def is_dairy_sale_remark(remark: str | None) -> bool:
-    """True when the remark is a dairy code or a farm the heifer or cow went to."""
+def dairy_remark_farm(remark: str | None) -> str | None:
+    """Farm code for a dairy-sale remark. None when the remark is not a farm."""
     text = (remark or "").strip().upper()
     if not text:
-        return False
-    if text in SALES_DAIRY_REMARKS or text in DAIRY_FARM_REMARKS:
-        return True
-    return any(text.startswith(prefix) for prefix in DAIRY_FARM_REMARK_PREFIXES)
+        return None
+    if text.startswith("CHERRY") or text in {"CO", "COF"}:
+        return "COF"
+    if text in {"PH", "SFR"} or text.startswith("PARK HALL"):
+        return "SFR"
+    if text in {"PARK", "PKS", "PRK", "PARKES"} or text.startswith("THE PARKES"):
+        return "PKS"
+    if text in {"ARL", "ALH"}:
+        return "ALH"
+    if text == "BNK":
+        return "BNK"
+    return None
+
+
+def is_dairy_sale_remark(remark: str | None) -> bool:
+    """True when the remark is a dairy code or a farm the cow went to."""
+    text = (remark or "").strip().upper()
+    return dairy_remark_farm(text) is not None or text in SALES_DAIRY_REMARKS
+
+
+def dairy_remark_farm_expr(remark=None):
+    """SQL label for the farm column under Dairy. CAR18 and DAIRY stay as written."""
+    remark = _remark_upper() if remark is None else remark
+    return case(
+        (remark.like("CHERRY%"), literal("COF")),
+        (remark.in_(("CO", "COF")), literal("COF")),
+        (or_(remark.in_(("PH", "SFR")), remark.like("PARK HALL%")), literal("SFR")),
+        (
+            or_(
+                remark.in_(("PARK", "PKS", "PRK", "PARKES")),
+                remark.like("THE PARKES%"),
+            ),
+            literal("PKS"),
+        ),
+        (remark.in_(("ARL", "ALH")), literal("ALH")),
+        (remark == "BNK", literal("BNK")),
+        else_=remark,
+    )
 
 
 def dairy_remark_clause():
-    """Remark CAR18, CAR19, Dairy, or a farm name such as CO, Cherry, Park, Parkes."""
+    """Remark CAR18, CAR19, Dairy, or a farm name such as CO, PH, Park, or ARL."""
     remark = _remark_upper()
-    exact = remark.in_([*SALES_DAIRY_REMARKS, *DAIRY_FARM_REMARKS])
-    prefixes = [remark.like(f"{prefix}%") for prefix in DAIRY_FARM_REMARK_PREFIXES]
-    return or_(exact, *prefixes)
+    return or_(
+        remark.like("CHERRY%"),
+        remark.in_(("CO", "COF")),
+        remark.in_(("PH", "SFR")),
+        remark.like("PARK HALL%"),
+        remark.in_(("PARK", "PKS", "PRK", "PARKES")),
+        remark.like("THE PARKES%"),
+        remark.in_(("ARL", "ALH", "BNK")),
+        remark.in_(list(SALES_DAIRY_REMARKS)),
+    )
 
 
 def died_as_sales_clause():

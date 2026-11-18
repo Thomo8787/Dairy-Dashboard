@@ -29,9 +29,9 @@ from services.events_common import (
     SALES_TABLE_REASON_ORDER,
     _fiscal_year_calendar_bounds,
     _iter_month_starts,
-    _remark_upper,
     _sales_reason_expression,
     dairy_remark_clause,
+    dairy_remark_farm_expr,
     death_report_event_clause,
     died_cert_clause,
     normalize_farms,
@@ -45,7 +45,7 @@ from services.stock_purchase_derivation import ensure_stock_purchases
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "dairy-farm-remark-v1"
+ACCRUAL_LOGIC_VERSION = "dairy-farm-group-v1"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
@@ -177,9 +177,8 @@ def _fetch_sales_by_month(
 
 
 def _dairy_dest_label():
-    """Remark on a dairy sale, which names the farm she went to."""
-    remark = func.nullif(_remark_upper(), "")
-    return func.coalesce(remark, literal(DAIRY_DEST_OTHER))
+    """Farm code for a dairy sale, taken from the remark."""
+    return func.coalesce(dairy_remark_farm_expr(), literal(DAIRY_DEST_OTHER))
 
 
 def _fetch_dairy_dest_by_month(
