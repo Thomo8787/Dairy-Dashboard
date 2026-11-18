@@ -3,8 +3,11 @@
 Windows end yesterday (UK), so today's incomplete tanker volumes are excluded.
 The headline figure is a plain 7-day calendar mean (yesterday and the six days
 before). Daily quality points are litre-weighted from tanker loads. Days in the
-window with no figure are skipped. COF and BNK milk per cow, for both the 7-day
-and 30-day figures, uses only days with two collections that have a volume.
+window with no figure are skipped. COF and BNK milk per cow, for both the
+7-day and 30-day figures, uses days with two collections that have a volume.
+A single collection also counts when that day's volume is within 5% of the
+7-day milk-per-day average, so a farm that has moved to once-a-day collection
+still gets a figure, and a missed second load does not.
 """
 
 from __future__ import annotations
@@ -21,9 +24,11 @@ _UK = ZoneInfo("Europe/London")
 _LOOKBACK_PAD_DAYS = 45
 _SHORT_WINDOW_DAYS = 7
 _LONG_WINDOW_DAYS = 30
-# These farms collect twice a day. A single load is an incomplete day.
+# These farms normally collect twice a day. A single load counts only when its
+# volume is close to the recent daily average (a full once-a-day collection).
 _TWO_COLLECTION_FARMS = frozenset({"COF", "BNK"})
 _MIN_COLLECTIONS = 2
+_SINGLE_LOAD_VOLUME_BAND = 0.05
 
 
 def _uk_today() -> dt.date:
@@ -155,18 +160,44 @@ def _bundle_for_days(
     }
 
 
+def _single_load_is_full_day(point: dict[str, Any], daily_average: float | None) -> bool:
+    """True when one collection's volume is within 5% of the 7-day milk/day average."""
+    if daily_average is None:
+        return False
+    try:
+        average = float(daily_average)
+        volume = float(point.get("volume_litres"))
+    except (TypeError, ValueError):
+        return False
+    if average <= 0 or volume <= 0:
+        return False
+    return abs(volume - average) / average <= _SINGLE_LOAD_VOLUME_BAND
+
+
+def _counts_for_milk_per_cow(point: dict[str, Any], daily_average: float | None) -> bool:
+    count = int(point.get("collection_count") or 0)
+    if count >= _MIN_COLLECTIONS:
+        return True
+    if count == 1:
+        return _single_load_is_full_day(point, daily_average)
+    return False
+
+
 def _apply_two_collection_milk_per_cow(
     bundle: dict[str, Any],
     points: list[dict[str, Any]],
     *,
     days: int,
     window_end: dt.date,
+    daily_average: float | None,
 ) -> None:
-    """Replace milk per cow with days that have two collections with volume."""
+    """Replace milk per cow using full collection days.
+
+    Two loads always count. One load counts when its volume is within 5% of
+    ``daily_average`` (the 7-day milk-per-day figure).
+    """
     eligible = [
-        point
-        for point in points
-        if int(point.get("collection_count") or 0) >= _MIN_COLLECTIONS
+        point for point in points if _counts_for_milk_per_cow(point, daily_average)
     ]
     per_cow = _metric_window(
         eligible,
@@ -270,11 +301,20 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         d7 = _bundle_for_days(points, _SHORT_WINDOW_DAYS, window_end=completed_through)
         d30 = _bundle_for_days(points, _LONG_WINDOW_DAYS, window_end=completed_through)
         if farm in _TWO_COLLECTION_FARMS:
+            daily_average = d7["milk_per_day"]
             _apply_two_collection_milk_per_cow(
-                d7, points, days=_SHORT_WINDOW_DAYS, window_end=completed_through
+                d7,
+                points,
+                days=_SHORT_WINDOW_DAYS,
+                window_end=completed_through,
+                daily_average=daily_average,
             )
             _apply_two_collection_milk_per_cow(
-                d30, points, days=_LONG_WINDOW_DAYS, window_end=completed_through
+                d30,
+                points,
+                days=_LONG_WINDOW_DAYS,
+                window_end=completed_through,
+                daily_average=daily_average,
             )
         farms_out.append(
             {
