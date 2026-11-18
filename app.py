@@ -91,7 +91,13 @@ from services.beef_inventory import (
 from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
-from services.ahdb_bulls import AhdbBullsError, ensure_imported, list_bulls, refresh_bulls
+from services.ahdb_bulls import (
+    AhdbBullsError,
+    ensure_imported,
+    list_bulls,
+    refresh_bulls,
+    update_current_bulls,
+)
 from services.genomic_import import import_female_results_workbook
 from services.female_genomics import list_females
 from services.custom_indexes import reset_index_settings, save_index_settings
@@ -1489,6 +1495,23 @@ def genetics_api_bull_search_refresh():
             return jsonify(refresh_bulls(session))
     except AhdbBullsError as exc:
         return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/genetics/api/bull-search/current-bulls", methods=["PUT"])
+def genetics_api_bull_current_bulls():
+    _user, error = _genetics_json_user()
+    if error:
+        return error
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Current bulls must be a JSON object."}), 400
+    add = body.get("add") or []
+    remove = body.get("remove") or []
+    if not isinstance(add, list) or not isinstance(remove, list):
+        return jsonify({"error": "Add and remove must be lists of herd book numbers."}), 400
+    with get_session() as session:
+        update_current_bulls(session, add, remove)
+        return jsonify(list_bulls(session))
 
 
 @app.route("/genetics/api/bull-search/index-settings", methods=["PUT"])

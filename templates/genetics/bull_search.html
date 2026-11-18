@@ -107,6 +107,25 @@
       align-items: center;
       margin-bottom: 0.75rem;
     }
+    #current-bulls-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    #bulls-table th.pick,
+    #bulls-table td.pick {
+      width: 2.2rem;
+      min-width: 2.2rem;
+      text-align: center;
+      padding-left: 0.35rem;
+      padding-right: 0.35rem;
+    }
+    #bulls-table .pick input {
+      width: 1rem;
+      height: 1rem;
+      margin: 0;
+      accent-color: var(--accent);
+    }
     .gear-btn {
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -286,7 +305,8 @@
           Holstein bull proofs from
           <a href="https://breedingdairy.ahdb.org.uk/bull-and-cow-reports/tables" target="_blank" rel="noopener">AHDB Dairy Breeding</a>.
           <strong>G</strong> is marketed genomic; <strong>P</strong> is proven (UK marketed and top international, one row per bull).
-          Click a column heading to sort. Use this list to compare animals — do not republish the dataset.
+          Click a column heading to sort. Tick bulls and choose Add to current bulls to keep a short list for the farm.
+          Current bulls shows that group. Use this list to compare animals — do not republish the dataset.
         </p>
       </aside>
     </div>
@@ -295,6 +315,9 @@
       <div id="status-message" class="message"></div>
       <p class="meta-line" id="meta-line">Loading…</p>
       <div class="action-bar">
+        <button type="button" class="secondary small" id="current-bulls-btn" aria-pressed="false">Current bulls</button>
+        <button type="button" class="secondary small" id="add-current-btn">Add to current bulls</button>
+        <button type="button" class="secondary small" id="remove-current-btn" hidden>Remove</button>
         <button type="button" class="secondary small" id="refresh-btn">Refresh from AHDB</button>
         <button type="button" class="gear-btn" id="settings-toggle" aria-expanded="false"
           aria-controls="index-settings-panel" title="Change how £DP, £FW and £CM indexes are calculated">
@@ -408,6 +431,7 @@
   <script>
     const BULLS_URL = {{ url_for('genetics_api_bull_search') | tojson }};
     const BULLS_REFRESH_URL = {{ url_for('genetics_api_bull_search_refresh') | tojson }};
+    const BULLS_CURRENT_URL = {{ url_for('genetics_api_bull_current_bulls') | tojson }};
     const BULLS_INDEX_URL = {{ url_for('genetics_api_bull_index_settings') | tojson }};
     const BULLS_INDEX_RESET_URL = {{ url_for('genetics_api_bull_index_reset') | tojson }};
     const COLUMNS = [
@@ -488,6 +512,9 @@
     let selectedSuppliers = null;
     let currentPage = 1;
     let renderTimer = 0;
+    let currentBulls = new Set();
+    let showCurrentOnly = false;
+    let picked = new Set();
 
     function showMessage(text, kind) {
       const el = document.getElementById("status-message");
@@ -498,9 +525,31 @@
     function applyPayload(data) {
       rows = data.rows || [];
       fetchedAt = data.fetched_at || null;
+      currentBulls = new Set(data.current_bulls || []);
+      resetPicked();
       fillIndexForm(data.index_settings);
+      updateCurrentControls();
       renderSupplierSlicers();
       renderTable();
+    }
+
+    function resetPicked() {
+      picked = showCurrentOnly ? new Set() : new Set(currentBulls);
+    }
+
+    function updateCurrentControls() {
+      const toggle = document.getElementById("current-bulls-btn");
+      const count = currentBulls.size;
+      toggle.textContent = count ? "Current bulls (" + count + ")" : "Current bulls";
+      toggle.classList.toggle("selected", showCurrentOnly);
+      toggle.setAttribute("aria-pressed", showCurrentOnly ? "true" : "false");
+      document.getElementById("remove-current-btn").hidden = !showCurrentOnly;
+    }
+
+    function setPicked(hbn, on) {
+      if (!hbn) return;
+      if (on) picked.add(hbn);
+      else picked.delete(hbn);
     }
 
     function fillIndexForm(settings) {
@@ -624,6 +673,7 @@
       const q = searchQuery();
       const bounds = readTraitBounds();
       return rows.filter((row) => {
+        if (showCurrentOnly && !currentBulls.has(row.hbn)) return false;
         if (lists.length && !lists.includes(row.list_type)) return false;
         if (!suppliers.has(supplierKey(row))) return false;
         if (!passesTraitFilters(row, bounds)) return false;
@@ -718,7 +768,8 @@
 
     function renderHead() {
       const head = document.getElementById("bulls-head");
-      head.innerHTML = COLUMNS.map((col) => {
+      const pick = '<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select the bulls on this page"></th>';
+      head.innerHTML = pick + COLUMNS.map((col) => {
         const cls = [
           col.type === "num" ? "num" : "",
           col.key === "bull_name" ? "bull-name" : "",
@@ -752,11 +803,18 @@
       document.getElementById("page-next").disabled = currentPage >= pageCount;
 
       if (!visible.length) {
-        body.innerHTML = '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">No bulls match the current filters.</td></tr>';
+        const empty = showCurrentOnly && !currentBulls.size
+          ? "No current bulls yet. Tick bulls and choose Add to current bulls."
+          : "No bulls match the current filters.";
+        body.innerHTML = '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">' + empty + "</td></tr>";
+        syncPickAll();
         return;
       }
       body.innerHTML = pageRows.map((row) => {
-        return "<tr>" + COLUMNS.map((col) => {
+        const selected = picked.has(row.hbn);
+        const pick = '<td class="pick"><input type="checkbox" data-hbn="' + escapeHtml(row.hbn) + '"' +
+          (selected ? " checked" : "") + ' aria-label="Select ' + escapeHtml(row.bull_name || row.hbn) + '"></td>';
+        return "<tr>" + pick + COLUMNS.map((col) => {
           const classes = [
             col.type === "num" ? "num" : "",
             col.key === "bull_name" ? "bull-name" : "",
@@ -772,12 +830,69 @@
           return "<td" + cls + title + ">" + cellHtml(row, col) + "</td>";
         }).join("") + "</tr>";
       }).join("");
+      syncPickAll();
+    }
+
+    function syncPickAll() {
+      const all = document.getElementById("pick-all");
+      if (!all) return;
+      const boxes = [...document.querySelectorAll("#table-body input[data-hbn]")];
+      const checked = boxes.filter((box) => box.checked).length;
+      all.checked = boxes.length > 0 && checked === boxes.length;
+      all.indeterminate = checked > 0 && checked < boxes.length;
+      all.disabled = boxes.length === 0;
+    }
+
+    function checkedHbns() {
+      return [...document.querySelectorAll("#table-body input[data-hbn]:checked")]
+        .map((box) => box.dataset.hbn)
+        .filter(Boolean);
+    }
+
+    async function saveCurrentBulls(mode) {
+      const onPage = checkedHbns();
+      const hbns = mode === "add"
+        ? [...picked].filter((hbn) => !currentBulls.has(hbn))
+        : [...picked];
+      if (!hbns.length) {
+        showMessage(mode === "add"
+          ? (onPage.length ? "Those bulls are already in current bulls." : "Tick the bulls to add.")
+          : "Tick the bulls to remove.", "err");
+        return;
+      }
+      const addBtn = document.getElementById("add-current-btn");
+      const removeBtn = document.getElementById("remove-current-btn");
+      addBtn.disabled = true;
+      removeBtn.disabled = true;
+      showMessage(mode === "add" ? "Adding to current bulls…" : "Removing from current bulls…");
+      try {
+        const res = await fetch(BULLS_CURRENT_URL, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mode === "add" ? { add: hbns } : { remove: hbns }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.detail || "Could not save current bulls");
+        applyPayload(data);
+        const count = (data.current_bulls || []).length;
+        showMessage(
+          mode === "add"
+            ? "Added to current bulls. " + count + " saved."
+            : "Removed from current bulls. " + count + " saved.",
+          "ok"
+        );
+      } catch (err) {
+        showMessage(err.message, "err");
+      } finally {
+        addBtn.disabled = false;
+        removeBtn.disabled = false;
+      }
     }
 
     async function loadRows() {
       document.getElementById("meta-line").textContent = "Loading…";
-      document.getElementById("table-body").innerHTML =
-        '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">Loading AHDB bull lists…</td></tr>';
+        document.getElementById("table-body").innerHTML =
+        '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">Loading AHDB bull lists…</td></tr>';
       try {
         const res = await fetch(BULLS_URL);
         const data = await res.json().catch(() => ({}));
@@ -787,7 +902,7 @@
       } catch (err) {
         rows = [];
         document.getElementById("table-body").innerHTML =
-          '<tr><td colspan="' + COLUMNS.length + '" class="empty-state">Could not load bull lists.</td></tr>';
+          '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">Could not load bull lists.</td></tr>';
         document.getElementById("meta-line").textContent = "";
         showMessage(err.message, "err");
       }
@@ -843,6 +958,30 @@
       document.getElementById("page-next").addEventListener("click", () => {
         currentPage += 1;
         renderTable();
+      });
+      document.getElementById("current-bulls-btn").addEventListener("click", () => {
+        showCurrentOnly = !showCurrentOnly;
+        resetPicked();
+        updateCurrentControls();
+        scheduleRender(true);
+      });
+      document.getElementById("add-current-btn").addEventListener("click", () => saveCurrentBulls("add"));
+      document.getElementById("remove-current-btn").addEventListener("click", () => saveCurrentBulls("remove"));
+      document.getElementById("bulls-table").addEventListener("change", (event) => {
+        const box = event.target;
+        if (!(box instanceof HTMLInputElement) || box.type !== "checkbox") return;
+        if (box.id === "pick-all") {
+          document.querySelectorAll("#table-body input[data-hbn]").forEach((item) => {
+            item.checked = box.checked;
+            setPicked(item.dataset.hbn, box.checked);
+          });
+          box.indeterminate = false;
+          return;
+        }
+        if (box.dataset.hbn) {
+          setPicked(box.dataset.hbn, box.checked);
+          syncPickAll();
+        }
       });
       document.getElementById("bulls-head").addEventListener("click", (event) => {
         const th = event.target.closest("th[data-sort]");

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,11 +23,15 @@ from sqlalchemy.orm import Session
 from services.custom_indexes import attach_custom_indexes, load_index_settings
 from services.database import (
     AhdbBull,
+    AppSetting,
     _clean_bull_name,
     _float_or_none,
     _int_or_none,
     _str_or_none,
 )
+
+CURRENT_BULLS_KEY = "genetics.current_bulls"
+MAX_CURRENT_BULLS = 400
 
 AHDB_BASE = "https://breedingdairy.ahdb.org.uk"
 BULL_DATA_PATH = "/umbraco/api/bulldata/getbulldata"
@@ -286,6 +291,74 @@ def refresh_bulls(db: Session, *, keys: list[str] | None = None) -> dict[str, An
     return result
 
 
+def load_current_bulls(db: Session) -> list[str]:
+    row = db.scalar(select(AppSetting).where(AppSetting.key == CURRENT_BULLS_KEY))
+    if row is None or not (row.value or "").strip():
+        return []
+    try:
+        parsed = json.loads(row.value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for item in parsed:
+        hbn = str(item or "").strip()
+        if hbn and hbn not in seen:
+            seen.add(hbn)
+            found.append(hbn)
+    return found
+
+
+def _store_current_bulls(db: Session, hbns: list[str]) -> None:
+    payload = json.dumps(hbns)
+    row = db.scalar(select(AppSetting).where(AppSetting.key == CURRENT_BULLS_KEY))
+    if row is None:
+        db.add(AppSetting(key=CURRENT_BULLS_KEY, value=payload))
+    else:
+        row.value = payload
+    db.flush()
+
+
+def current_bulls_for_list(db: Session, known: set[str]) -> list[str]:
+    """Keep herd book numbers that are still on the AHDB list."""
+    saved = load_current_bulls(db)
+    if not known:
+        return saved
+    kept = [hbn for hbn in saved if hbn in known]
+    if kept != saved:
+        _store_current_bulls(db, kept)
+    return kept
+
+
+def update_current_bulls(db: Session, add: Any, remove: Any) -> list[str]:
+    """Add ticked bulls, or take ticked bulls out. Never rebuild the group from one page."""
+    known = {hbn for hbn in db.scalars(select(AhdbBull.hbn)) if hbn}
+    saved = load_current_bulls(db)
+    if known:
+        saved = [hbn for hbn in saved if hbn in known]
+    remove_set = {
+        str(item or "").strip()
+        for item in (remove or [])
+        if str(item or "").strip()
+    }
+    saved = [hbn for hbn in saved if hbn not in remove_set]
+    have = set(saved)
+    for item in add or []:
+        hbn = str(item or "").strip()
+        if not hbn or hbn in have:
+            continue
+        if known and hbn not in known:
+            continue
+        if len(saved) >= MAX_CURRENT_BULLS:
+            break
+        saved.append(hbn)
+        have.add(hbn)
+    _store_current_bulls(db, saved)
+    return saved
+
+
 def list_bulls(db: Session) -> dict[str, Any]:
     settings = load_index_settings(db)
     rows = list(db.scalars(select(AhdbBull).order_by(AhdbBull.rank, AhdbBull.bull_name)).all())
@@ -303,6 +376,7 @@ def list_bulls(db: Session) -> dict[str, Any]:
         "counts": counts,
         "fetched_at": fetched_at.isoformat() if fetched_at else None,
         "index_settings": settings,
+        "current_bulls": current_bulls_for_list(db, {row.hbn for row in rows if row.hbn}),
     }
 
 
