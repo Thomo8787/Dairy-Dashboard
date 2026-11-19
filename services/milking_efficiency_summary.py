@@ -20,7 +20,11 @@ from services.database import (
     init_db,
 )
 from services.farms import FARMS, FARMS_BY_CODE
-from services.cows_in_milk import _is_milking_inventory_row, cows_in_milk_for_dates
+from services.cows_in_milk import (
+    _is_milking_inventory_row,
+    cows_in_milk_for_dates,
+    shared_inventory_farm,
+)
 from services.parlour_link import (
     OVERNIGHT_NEXT_DAY_ID_BEFORE_S,
     match_milk_flow_to_entry_ids,
@@ -609,16 +613,34 @@ def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
     """Current DairyComp inventory cows-in-milk counts keyed by pen.
 
     Includes fresh cows (no DIM > 4) so ID Efficiency matches Entry IDs.
+    ALH and BNK are split by current pen: BNK is pens 89 to 93, ALH is the
+    other pens, and pen 150 is left out.
     """
-    rows = (
-        session.query(HerdInventory.pen, HerdInventory.rpro, HerdInventory.lact, HerdInventory.dim)
-        .filter(HerdInventory.farm == farm_code)
-        .all()
+    farm_code = (farm_code or "").strip().upper()
+    shared = farm_code in {"ALH", "BNK"}
+    query = session.query(
+        HerdInventory.cow_id,
+        HerdInventory.pen,
+        HerdInventory.rpro,
+        HerdInventory.lact,
+        HerdInventory.dim,
     )
+    if shared:
+        query = query.filter(HerdInventory.farm.in_(("ALH", "BNK")))
+    else:
+        query = query.filter(HerdInventory.farm == farm_code)
     counts: dict[str, int] = defaultdict(int)
-    for pen, rpro, lact, dim in rows:
+    seen: set[str] = set()
+    for cow_id, pen, rpro, lact, dim in query.all():
+        if shared and shared_inventory_farm(pen) != farm_code:
+            continue
+        identity = str(cow_id or "")
+        if identity and identity in seen:
+            continue
         if not _is_milking_inventory_row(rpro, lact, dim, min_dim=None):
             continue
+        if identity:
+            seen.add(identity)
         key = (pen or "").strip() or "Unknown"
         counts[key] += 1
     return dict(counts)
