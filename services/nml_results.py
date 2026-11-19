@@ -74,7 +74,10 @@ def _is_nml_matched(row: NmlMilkResult) -> bool:
     """Green tick when this load has volume and lab quality on the same row.
 
     Older imports sometimes left quality on the load but never set nml_matched.
+    An average filled in for a missing lab result stays a red cross.
     """
+    if getattr(row, "quality_estimated", False):
+        return False
     if bool(row.nml_matched):
         return True
     return _row_has_volume(row) and _row_has_quality(row)
@@ -165,6 +168,8 @@ def _backfill_nml_matched_flags(session: Any) -> int:
         select(NmlMilkResult).where(NmlMilkResult.nml_matched.is_(False))
     ).all()
     for row in rows:
+        if getattr(row, "quality_estimated", False):
+            continue
         if _row_has_volume(row) and _row_has_quality(row):
             row.nml_matched = True
             updated += 1
@@ -199,6 +204,7 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
         "source": row.source or "",
         "matched": status == "matched",
         "nml_status": status,
+        "quality_estimated": bool(getattr(row, "quality_estimated", False)),
     }
 
 
@@ -216,6 +222,111 @@ def _load_weight(row: dict[str, Any] | Any) -> float | None:
         if weight > 0:
             return weight
     return None
+
+
+_ESTIMATE_SPECS = (
+    ("butterfat_pct", 2, False),
+    ("protein_pct", 2, False),
+    ("scc", 0, True),
+    ("bactoscan", 0, True),
+    ("fpd", 0, True),
+    ("urea_pct", 3, False),
+)
+_QUALITY_FIELDS = tuple(field for field, _digits, _as_int in _ESTIMATE_SPECS)
+
+
+def _has_real_quality(row: Any) -> bool:
+    """Lab figures that came from NML, not from an earlier estimate."""
+    if getattr(row, "quality_estimated", False):
+        return False
+    return any(getattr(row, field, None) is not None for field in _QUALITY_FIELDS)
+
+
+def _average_metric(rows: list[Any], field: str, digits: int, as_int: bool) -> float | int | None:
+    """Litre-weighted average. A plain mean is used when none of the loads have litres."""
+    weighted = 0.0
+    weight = 0.0
+    plain: list[float] = []
+    for row in rows:
+        value = getattr(row, field, None)
+        if value is None:
+            continue
+        number = float(value)
+        plain.append(number)
+        litres = _load_weight(row)
+        if litres is not None:
+            weighted += number * litres
+            weight += litres
+    if weight > 0:
+        averaged = weighted / weight
+    elif plain:
+        averaged = sum(plain) / len(plain)
+    else:
+        return None
+    if as_int:
+        return int(math.floor(averaged + 0.5))
+    return round(averaged, digits)
+
+
+def _quality_averages(rows: list[Any]) -> dict[str, float | int | None]:
+    return {
+        field: _average_metric(rows, field, digits, as_int)
+        for field, digits, as_int in _ESTIMATE_SPECS
+    }
+
+
+def fill_missing_nml_quality(rows: list[Any], *, today: dt.date) -> int:
+    """Fill lab fields still empty more than 7 days after collection.
+
+    Use the other real loads that day, otherwise the nearest day for that farm
+    with a real result. An equal gap before and after uses the earlier day.
+    Estimated rows are never the source for another gap. The NML cross stays.
+    """
+    groups: dict[tuple[str, dt.date], list[Any]] = {}
+    for row in rows:
+        day = getattr(row, "sample_date", None)
+        farm = (getattr(row, "farm", None) or "").strip().upper()
+        if day is None or not farm:
+            continue
+        groups.setdefault((farm, day), []).append(row)
+
+    real_by_day: dict[tuple[str, dt.date], list[Any]] = {}
+    real_days: dict[str, list[dt.date]] = {}
+    for key, group in groups.items():
+        real = [row for row in group if _has_real_quality(row)]
+        if not real:
+            continue
+        real_by_day[key] = real
+        real_days.setdefault(key[0], []).append(key[1])
+
+    filled = 0
+    for (farm, day), group in groups.items():
+        if (today - day).days <= 7:
+            continue
+        sources = real_by_day.get((farm, day))
+        if not sources:
+            neighbours = real_days.get(farm) or []
+            if not neighbours:
+                continue
+            nearest = min(neighbours, key=lambda other: (abs((other - day).days), other))
+            sources = real_by_day[(farm, nearest)]
+        averages = _quality_averages(sources)
+        if all(value is None for value in averages.values()):
+            continue
+        for row in group:
+            if getattr(row, "quality_estimated", False) or _has_real_quality(row):
+                continue
+            wrote = False
+            for field, value in averages.items():
+                if value is None:
+                    continue
+                setattr(row, field, value)
+                wrote = True
+            if not wrote:
+                continue
+            row.quality_estimated = True
+            filled += 1
+    return filled
 
 
 def _weighted_avg(rows: list[Any], metric: str, digits: int = 2) -> float | None:
@@ -349,6 +460,17 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _in_result_window(row: Any, date_from: dt.date | None, date_to: dt.date | None) -> bool:
+    day = getattr(row, "sample_date", None)
+    if day is None:
+        return date_from is None and date_to is None
+    if date_from is not None and day < date_from:
+        return False
+    if date_to is not None and day > date_to:
+        return False
+    return True
+
+
 def list_nml_results(
     *,
     farms: list[str] | None = None,
@@ -366,18 +488,19 @@ def list_nml_results(
     selected_farms = _normalise_farms(farms)
     with get_session() as session:
         _backfill_nml_matched_flags(session)
-        query = select(NmlMilkResult).where(NmlMilkResult.farm.in_(selected_farms))
-        if date_from is not None:
-            query = query.where(NmlMilkResult.sample_date >= date_from)
-        if date_to is not None:
-            query = query.where(NmlMilkResult.sample_date <= date_to)
-        query = query.order_by(
-            NmlMilkResult.sample_date.desc(),
-            NmlMilkResult.load_number.asc(),
-            NmlMilkResult.sample_id.desc(),
+        history = list(
+            session.scalars(
+                select(NmlMilkResult).where(NmlMilkResult.farm.in_(selected_farms))
+            ).all()
         )
-        stored = list(session.scalars(query).all())
-        swap_crossed_ticket_litres(stored)
+        swap_crossed_ticket_litres(
+            [row for row in history if _in_result_window(row, date_from, date_to)]
+        )
+        fill_missing_nml_quality(history, today=dt.date.today())
+        stored = [row for row in history if _in_result_window(row, date_from, date_to)]
+        stored.sort(key=lambda row: row.sample_id or "", reverse=True)
+        stored.sort(key=lambda row: row.load_number if row.load_number is not None else 10**9)
+        stored.sort(key=lambda row: row.sample_date or dt.date.min, reverse=True)
         rows = [_row_to_dict(row, today=dt.date.today()) for row in stored]
         _attach_cows_in_milk(session, rows)
     return {

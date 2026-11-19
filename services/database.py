@@ -731,6 +731,7 @@ class NmlMilkResult(Base):
     urea_pct = Column(Float)
     sample_missing = Column(Boolean, nullable=False, default=False)
     nml_matched = Column(Boolean, nullable=False, default=False)
+    quality_estimated = Column(Boolean, nullable=False, default=False)
     source = Column(String(32))
     source_message_id = Column(String(256))
     source_file = Column(String(256))
@@ -1067,6 +1068,10 @@ def _ensure_nml_milk_result_columns(engine) -> None:
         "temp_c": "ALTER TABLE nml_milk_results ADD COLUMN temp_c FLOAT",
         "nml_matched": (
             "ALTER TABLE nml_milk_results ADD COLUMN nml_matched BOOLEAN "
+            "NOT NULL DEFAULT FALSE"
+        ),
+        "quality_estimated": (
+            "ALTER TABLE nml_milk_results ADD COLUMN quality_estimated BOOLEAN "
             "NOT NULL DEFAULT FALSE"
         ),
     }

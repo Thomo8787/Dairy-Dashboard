@@ -251,6 +251,9 @@
           (manual always wins). Blank loads are filled only when that farm’s load count
           matches the NML sample count for the same day — lowest sample number to the
           highest volume. A green tick means linked; a red cross means not yet linked.
+          A collection still missing lab results after 7 days takes the litre-weighted
+          average of the other loads that day, or the nearest day for that farm that has
+          results. The cross stays, and a later NML file replaces the estimate.
           Import Müller writes the tanker litres from a Müller CSV onto the weighbridge
           column of tickets already on this page. It does not add new rows, and it leaves
           the farm litres unchanged. When two loads on the same farm and day are crossed,
@@ -926,6 +929,9 @@
   function nmlCell(row) {
     if (row.matched || row.nml_status === "matched") {
       return '<span class="nml-mark ok" title="This load has volume and NML quality" aria-label="Matched to NML">✓</span>';
+    }
+    if (row.quality_estimated) {
+      return '<span class="nml-mark bad" title="Estimated from other collections. The lab result has not arrived." aria-label="Estimated, lab result missing">✕</span>';
     }
     return '<span class="nml-mark bad" title="This load is missing NML quality" aria-label="Not matched to NML">✕</span>';
   }

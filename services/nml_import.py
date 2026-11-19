@@ -338,6 +338,7 @@ def _apply_quality(row: NmlMilkResult, record: dict[str, Any]) -> None:
         row.source_message_id = record["source_message_id"]
     if record.get("source_file"):
         row.source_file = record["source_file"]
+    row.quality_estimated = False
     if _has_volume(row):
         row.nml_matched = True
     row.imported_at = dt.datetime.now(dt.timezone.utc)
