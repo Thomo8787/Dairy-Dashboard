@@ -56,8 +56,23 @@
     }
     #duplicates-table thead tr:first-child th { top: 0; }
     #duplicates-table thead tr:nth-child(2) th { top: 2.15rem; background: #2a4a73; }
-    #duplicates-table td.hit { background: #f4f7fb; }
     #duplicates-table td.etag { font-weight: 600; }
+    #duplicates-table .sort-btn {
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      margin: 0;
+      width: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    #duplicates-table .sort-btn:hover { text-decoration: underline; }
+    #duplicates-table .sort-btn .chevron { font-size: 0.7rem; opacity: 0.9; }
     .empty-state {
       padding: 1.5rem;
       border: 1px dashed var(--line);
@@ -77,7 +92,8 @@
           <p>
             The same ear tag on the current inventory of two DairyComps.
             ALH and BNK share one DairyComp, so an animal on only those two is not listed.
-            Cow number and pen are shown for each farm she is on.
+            Birth date is shown once. Each farm she is on shows her cow number, pen, and entry date.
+            Click Farm, Pen, or EDAT to sort.
           </p>
         </div>
         {% include "events/_refresh.html" %}
@@ -98,14 +114,17 @@
           <thead>
             <tr>
               <th rowspan="2">Ear tag</th>
-              {% for farm in farm_options %}
-              <th colspan="2">{{ farm }}</th>
+              <th rowspan="2">Birth date</th>
+              {% for slot in range(duplicate_report.slot_count) %}
+              <th colspan="4">Farm {{ slot + 1 }}</th>
               {% endfor %}
             </tr>
             <tr>
-              {% for farm in farm_options %}
+              {% for slot in range(duplicate_report.slot_count) %}
+              <th><button type="button" class="sort-btn" data-slot="{{ slot }}" data-key="farm">Farm <span class="chevron" aria-hidden="true"></span></button></th>
               <th>Cow</th>
-              <th>Pen</th>
+              <th><button type="button" class="sort-btn" data-slot="{{ slot }}" data-key="pen">Pen <span class="chevron" aria-hidden="true"></span></button></th>
+              <th><button type="button" class="sort-btn" data-slot="{{ slot }}" data-key="edat">EDAT <span class="chevron" aria-hidden="true"></span></button></th>
               {% endfor %}
             </tr>
           </thead>
@@ -113,10 +132,13 @@
             {% for animal in duplicate_report.animals %}
             <tr>
               <td class="etag">{{ animal.etag }}</td>
-              {% for farm in farm_options %}
-                {% set loc = animal.farms.get(farm) %}
-                <td class="{{ 'hit' if loc else '' }}">{{ loc.cow_id if loc else '' }}</td>
-                <td class="{{ 'hit' if loc else '' }}">{{ loc.pen if loc else '' }}</td>
+              <td>{{ animal.birth_date }}</td>
+              {% for slot in range(duplicate_report.slot_count) %}
+                {% set loc = animal.locations[slot] if slot < animal.locations|length else none %}
+                <td data-farm="{{ loc.farm if loc else '' }}">{{ loc.farm if loc else '' }}</td>
+                <td>{{ loc.cow_id if loc else '' }}</td>
+                <td data-pen="{{ loc.pen if loc else '' }}">{{ loc.pen if loc else '' }}</td>
+                <td data-edat="{{ loc.edat_iso if loc else '' }}">{{ loc.edat if loc else '' }}</td>
               {% endfor %}
             </tr>
             {% endfor %}
@@ -128,4 +150,60 @@
       {% endif %}
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const table = document.getElementById("duplicates-table");
+    if (table) {
+      const tbody = table.querySelector("tbody");
+      let active = null;
+
+      function cellValue(row, slot, key) {
+        const cell = row.cells[2 + slot * 4 + (key === "farm" ? 0 : key === "pen" ? 2 : 3)];
+        if (!cell) return null;
+        if (key === "farm") {
+          const farm = cell.dataset.farm || "";
+          return farm || null;
+        }
+        if (key === "pen") {
+          const pen = (cell.dataset.pen || "").trim();
+          if (!pen || Number.isNaN(Number(pen))) return null;
+          return Number(pen);
+        }
+        const edat = cell.dataset.edat || "";
+        return edat || null;
+      }
+
+      function compareRows(left, right, slot, key, direction) {
+        const a = cellValue(left, slot, key);
+        const b = cellValue(right, slot, key);
+        if (a === null || b === null) {
+          if (a === null && b === null) return left.dataset.order - right.dataset.order;
+          return a === null ? 1 : -1;
+        }
+        if (a < b) return -direction;
+        if (a > b) return direction;
+        return left.dataset.order - right.dataset.order;
+      }
+
+      function sortBy(slot, key) {
+        const direction = active && active.slot === slot && active.key === key && active.direction === 1 ? -1 : 1;
+        active = { slot, key, direction };
+        [...tbody.rows]
+          .sort((left, right) => compareRows(left, right, slot, key, direction))
+          .forEach(row => tbody.appendChild(row));
+        table.querySelectorAll(".sort-btn").forEach(button => {
+          const on = button.dataset.slot === String(slot) && button.dataset.key === key;
+          button.querySelector(".chevron").textContent = on ? (direction === 1 ? "▲" : "▼") : "";
+          button.closest("th").setAttribute("aria-sort", on ? (direction === 1 ? "ascending" : "descending") : "none");
+        });
+      }
+
+      [...tbody.rows].forEach((row, index) => { row.dataset.order = String(index); });
+      table.querySelectorAll(".sort-btn").forEach(button => {
+        button.addEventListener("click", () => sortBy(Number(button.dataset.slot), button.dataset.key));
+      });
+    }
+  </script>
 {% endblock %}
