@@ -1,12 +1,13 @@
-"""Apply Müller collection CSV litres to existing Collections weighbridge values.
+"""Apply Müller collection CSV litres to Collections weighbridge values.
 
-One CSV row is one tanker collection. Litres is written to litres_weighbridge on
-an existing NmlMilkResult. Farm-ticket litres are left alone. Unmatched rows are
-not inserted.
+One CSV row is one tanker collection. Litres is written to litres_weighbridge.
+A sample number with no ticket is added as a new line. Farm-ticket litres are
+left alone. A row with no sample number is not inserted.
 """
 
 from __future__ import annotations
 
+import calendar
 import csv
 import datetime as dt
 import io
@@ -19,7 +20,7 @@ from sqlalchemy import select
 
 from services.database import NmlMilkResult, get_session
 from services.farms import FARMS
-from services.nml_pdf import normalize_sample_id
+from services.nml_pdf import FARM_PRODUCER_REF, normalize_sample_id
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,50 @@ def _row_brief(record: dict[str, Any], rows: list[NmlMilkResult] | None = None) 
     return brief
 
 
+def _placeholder_date(record: dict[str, Any]) -> dt.date | None:
+    return record.get("actual_date") or record.get("payment_date")
+
+
+def _insert_weighbridge_row(
+    session: Any,
+    farm: str,
+    record: dict[str, Any],
+    existing: list[NmlMilkResult],
+    *,
+    source_file: str,
+    fill_temp: bool,
+) -> NmlMilkResult | None:
+    """Add a collection that has Müller litres and a sample number, but no farm ticket yet."""
+    sample_id = record.get("sample_id") or ""
+    sample_date = _placeholder_date(record)
+    producer_ref = FARM_PRODUCER_REF.get(farm)
+    if not sample_id or sample_date is None or not producer_ref:
+        return None
+    taken = [
+        row.load_number
+        for row in existing
+        if row.sample_date == sample_date and row.load_number is not None
+    ]
+    row = NmlMilkResult(
+        farm=farm,
+        producer_ref=producer_ref,
+        sample_date=sample_date,
+        sample_id=sample_id,
+        load_number=(max(taken) if taken else 0) + 1,
+        litres_weighbridge=record["litres"],
+        report_month=f"{calendar.month_name[sample_date.month]} {sample_date.year}",
+        sample_missing=False,
+        nml_matched=False,
+        source="muller",
+        source_file=source_file,
+    )
+    if fill_temp and record.get("temp_c") is not None:
+        row.temp_c = record["temp_c"]
+    session.add(row)
+    session.flush()
+    return row
+
+
 def apply_muller_records(
     farm: str,
     records: list[dict[str, Any]],
@@ -232,8 +277,9 @@ def apply_muller_records(
     repair_conflicts: bool = False,
     apply: bool = True,
 ) -> dict[str, Any]:
-    """Write Müller litres onto existing tickets. Does not insert rows."""
+    """Write Müller litres onto tickets. A sample with no ticket is added as a new line."""
     updated_ids: set[int] = set()
+    inserted = 0
     temp_filled = 0
     unmatched: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
@@ -258,7 +304,20 @@ def apply_muller_records(
                 candidates, record["actual_date"], record["payment_date"]
             )
             if status == "unmatched":
-                unmatched.append(_row_brief(record))
+                created = _insert_weighbridge_row(
+                    session,
+                    farm,
+                    record,
+                    list(rows),
+                    source_file=source_file,
+                    fill_temp=fill_temp,
+                )
+                if created is None:
+                    unmatched.append(_row_brief(record))
+                    continue
+                rows.append(created)
+                index.setdefault(record["sample_id"], []).append(created)
+                inserted += 1
                 continue
             if status == "ambiguous" or chosen is None:
                 ambiguous.append(_row_brief(record, candidates))
@@ -312,6 +371,7 @@ def apply_muller_records(
         "farm": farm,
         "rows_parsed": len(records),
         "rows_updated": len(updated_ids),
+        "rows_inserted": inserted,
         "temps_filled": temp_filled,
         "rows_unmatched": len(unmatched),
         "rows_ambiguous": len(ambiguous),

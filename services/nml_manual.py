@@ -156,8 +156,9 @@ def save_collection_day(
         for item in cleaned:
             sample_missing = not bool(item["sample_id"])
             sample_id = item["sample_id"] or f"L{item['load_number']}"
+            placeholder = _awaiting_ticket(session, farm_key, sample_date, item["sample_id"])
             key = (producer_ref, sample_date, sample_id)
-            if key in used_ids and (
+            if placeholder is None and key in used_ids and (
                 by_load.get(item["load_number"]) is None
                 or by_load[item["load_number"]].sample_id != sample_id
             ):
@@ -165,7 +166,7 @@ def save_collection_day(
                 sample_missing = True
             used_ids.add((producer_ref, sample_date, sample_id))
 
-            row = by_load.get(item["load_number"])
+            row = placeholder or by_load.get(item["load_number"])
             if row is None or row.source == MANUAL_SOURCE:
                 if row is None:
                     row = NmlMilkResult(
@@ -226,6 +227,43 @@ _QUALITY_FIELDS = (
     "antibiotic_pass",
     "urea_pct",
 )
+
+
+def _awaiting_ticket(session: Any, farm: str, sample_date: dt.date, sample_id: str) -> NmlMilkResult | None:
+    """A Müller line with this sample number, still waiting for the farm litres."""
+    target = normalize_sample_id(sample_id)
+    if not target or not target.isdigit():
+        return None
+    hits: list[NmlMilkResult] = []
+    rows = session.scalars(select(NmlMilkResult).where(NmlMilkResult.farm == farm)).all()
+    for row in rows:
+        if normalize_sample_id(row.sample_id) != target:
+            continue
+        if row.sample_date is None or abs((row.sample_date - sample_date).days) > 1:
+            continue
+        if row.litres_load is not None and float(row.litres_load) > 0:
+            continue
+        if row.litres_weighbridge is None:
+            continue
+        hits.append(row)
+    exact = [row for row in hits if row.sample_date == sample_date]
+    chosen = exact or hits
+    if len(chosen) != 1:
+        return None
+    row = chosen[0]
+    if row.sample_date != sample_date:
+        taken = any(
+            other is not row
+            and other.producer_ref == row.producer_ref
+            and other.sample_date == sample_date
+            and normalize_sample_id(other.sample_id) == target
+            for other in rows
+        )
+        if taken:
+            return None
+        row.sample_date = sample_date
+        row.report_month = f"{calendar.month_name[sample_date.month]} {sample_date.year}"
+    return row
 
 
 def _has_volume(row: NmlMilkResult) -> bool:

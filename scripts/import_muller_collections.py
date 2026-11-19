@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"{result['farm']}: {result['source_file']} ({mode}) "
             f"parsed {result['rows_parsed']}, updated {result['rows_updated']}, "
+            f"added {result.get('rows_inserted', 0)}, "
             f"temps filled {result['temps_filled']}, "
             f"unmatched {result['rows_unmatched']}, ambiguous {result['rows_ambiguous']}, "
             f"date gap {result.get('rows_date_gap', 0)}"

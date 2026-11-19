@@ -255,16 +255,17 @@
           average of the other loads that day, or the nearest day for that farm that has
           results. The cross stays, and a later NML file replaces the estimate.
           Import Müller writes the tanker litres from a Müller CSV onto the weighbridge
-          column of tickets already on this page. It does not add new rows, and it leaves
-          the farm litres unchanged. When two loads on the same farm and day are crossed,
+          column. A load with a sample number and no ticket is added as a new line.
+          When that ticket is entered, its litres fill the same line. The farm litres
+          already on a ticket are left unchanged. When two loads on the same farm and day are crossed,
           so each weighbridge equals the other load’s litres, those litres are swapped
           and both show a green tick. A load that already matches is left as it is, and
           a day with more than one possible pairing is left crossed. Name each file with the farm code and an underscore,
           for example ALH_MULLER_collection_details_for_2026-10.csv. Accepted codes are
           ALH, BNK, COF, SFR, and PRK. A row matches a ticket by sample number and
           collection date (or the day either side). If the sample number is blank, it
-          matches the date and the ticket litres instead. Rows with no ticket, or more
-          than one possible ticket, are left unchanged. Download the files from the
+          matches the date and the ticket litres instead. A blank sample with no ticket,
+          or more than one possible ticket, is left unchanged. Download the files from the
           Müller portal by going to COLLECTIONS, then click the magnifying glass beside
           the month you want. From Actions, select Download and save it as a CSV. Save
           it with the farm code at the start, for example ALH_. The portal accounts are
