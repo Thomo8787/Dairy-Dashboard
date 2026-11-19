@@ -92,7 +92,8 @@
           <p>
             The same ear tag on the current inventory of two DairyComps.
             ALH and BNK share one DairyComp, so an animal on only those two is not listed.
-            Birth date is shown once. Each farm she is on shows her cow number, pen, and entry date.
+            Birth date is shown once. Farm 1 is the earlier entry date.
+            The list opens sorted by Farm 2, then by that farm's entry date.
             Click Farm, Pen, or EDAT to sort.
           </p>
         </div>
@@ -175,15 +176,31 @@
         return edat || null;
       }
 
-      function compareRows(left, right, slot, key, direction) {
-        const a = cellValue(left, slot, key);
-        const b = cellValue(right, slot, key);
+      function compareValue(a, b, direction) {
         if (a === null || b === null) {
-          if (a === null && b === null) return left.dataset.order - right.dataset.order;
+          if (a === null && b === null) return 0;
           return a === null ? 1 : -1;
         }
         if (a < b) return -direction;
         if (a > b) return direction;
+        return 0;
+      }
+
+      function compareRows(left, right, slot, key, direction) {
+        const primary = compareValue(
+          cellValue(left, slot, key),
+          cellValue(right, slot, key),
+          direction
+        );
+        if (primary !== 0) return primary;
+        if (key === "farm") {
+          const byEntry = compareValue(
+            cellValue(left, slot, "edat"),
+            cellValue(right, slot, "edat"),
+            1
+          );
+          if (byEntry !== 0) return byEntry;
+        }
         return left.dataset.order - right.dataset.order;
       }
 
@@ -204,6 +221,12 @@
       table.querySelectorAll(".sort-btn").forEach(button => {
         button.addEventListener("click", () => sortBy(Number(button.dataset.slot), button.dataset.key));
       });
+      const opening = table.querySelector('.sort-btn[data-slot="1"][data-key="farm"]');
+      if (opening) {
+        active = { slot: 1, key: "farm", direction: 1 };
+        opening.querySelector(".chevron").textContent = "▲";
+        opening.closest("th").setAttribute("aria-sort", "ascending");
+      }
     }
   </script>
 {% endblock %}

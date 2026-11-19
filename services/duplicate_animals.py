@@ -61,8 +61,9 @@ def duplicate_animals_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
     """Return animals present on two or more DairyComps.
 
     ALH and BNK share one DairyComp, so an ear tag on only those two farms is
-    not a duplicate. Locations are ordered ALH, BNK, SFR, PRK, COF and become
-    Farm 1, Farm 2, and so on.
+    not a duplicate. Farm 1 is the earliest entry date. Farm 2 is the next,
+    and a missing entry date comes after a dated one. The list opens sorted
+    by Farm 2, then by that farm's entry date.
     """
     by_tag: dict[str, dict[str, dict[str, str]]] = {}
     birth_by_tag: dict[str, dt.date] = {}
@@ -82,7 +83,14 @@ def duplicate_animals_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
         groups = {FARMS_BY_CODE[farm].dairy_data_group for farm in farms}
         if len(groups) < 2:
             continue
-        locations = [farms[farm] for farm in HERD_FARM_OPTIONS if farm in farms]
+        locations = sorted(
+            farms.values(),
+            key=lambda loc: (
+                loc["edat_iso"] == "",
+                loc["edat_iso"],
+                HERD_FARM_OPTIONS.index(loc["farm"]),
+            ),
+        )
         birth = birth_by_tag.get(tag)
         animals.append(
             {
@@ -91,7 +99,20 @@ def duplicate_animals_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
                 "locations": locations,
             }
         )
-    animals.sort(key=lambda animal: animal["etag"])
+
+    def opening_order(animal: dict[str, Any]) -> tuple:
+        farm2 = animal["locations"][1] if len(animal["locations"]) > 1 else None
+        if farm2 is None:
+            return (True, "", True, "", animal["etag"])
+        return (
+            False,
+            farm2["farm"],
+            farm2["edat_iso"] == "",
+            farm2["edat_iso"],
+            animal["etag"],
+        )
+
+    animals.sort(key=opening_order)
     return animals
 
 
