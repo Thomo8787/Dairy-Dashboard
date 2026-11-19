@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import math
 from typing import Any
 
 from openpyxl import Workbook
@@ -81,6 +82,80 @@ def _is_nml_matched(row: NmlMilkResult) -> bool:
 
 def _nml_status(row: NmlMilkResult, *, today: dt.date | None = None) -> str:
     return "matched" if _is_nml_matched(row) else "unmatched"
+
+
+def _volume_key(value: Any) -> int | None:
+    """Nearest litre, matching the Collections weighbridge tick."""
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return int(math.floor(number + 0.5))
+
+
+def _crossed_litre_pairs(rows: list[Any]) -> list[tuple[Any, Any]]:
+    """Pairs on one farm and day whose litres are written against each other's weighbridge.
+
+    A row already matching its weighbridge is left out. A row with more than one
+    possible partner is left crossed, so an ambiguous day is not rearranged.
+    """
+    groups: dict[tuple[str, dt.date], list[Any]] = {}
+    for row in rows:
+        day = getattr(row, "sample_date", None)
+        farm = (getattr(row, "farm", None) or "").strip().upper()
+        if day is None or not farm:
+            continue
+        groups.setdefault((farm, day), []).append(row)
+
+    pairs: list[tuple[Any, Any]] = []
+    for group in groups.values():
+        mismatches: list[Any] = []
+        for row in group:
+            litres = _volume_key(getattr(row, "litres_load", None))
+            bridge = _volume_key(getattr(row, "litres_weighbridge", None))
+            if litres is None or bridge is None or litres == bridge:
+                continue
+            mismatches.append(row)
+
+        partners: dict[int, list[Any]] = {}
+        for row in mismatches:
+            litres = _volume_key(row.litres_load)
+            bridge = _volume_key(row.litres_weighbridge)
+            partners[id(row)] = [
+                other
+                for other in mismatches
+                if other is not row
+                and _volume_key(other.litres_weighbridge) == litres
+                and _volume_key(other.litres_load) == bridge
+            ]
+
+        seen: set[tuple[int, int]] = set()
+        for row in mismatches:
+            options = partners[id(row)]
+            if len(options) != 1:
+                continue
+            other = options[0]
+            if len(partners[id(other)]) != 1 or partners[id(other)][0] is not row:
+                continue
+            key = tuple(sorted((id(row), id(other))))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((row, other))
+    return pairs
+
+
+def swap_crossed_ticket_litres(rows: list[Any]) -> int:
+    """Exchange litres_load on each unique crossed pair. Returns rows changed."""
+    swapped = 0
+    for left, right in _crossed_litre_pairs(rows):
+        left.litres_load, right.litres_load = right.litres_load, left.litres_load
+        swapped += 2
+    return swapped
 
 
 def _backfill_nml_matched_flags(session: Any) -> int:
@@ -301,7 +376,9 @@ def list_nml_results(
             NmlMilkResult.load_number.asc(),
             NmlMilkResult.sample_id.desc(),
         )
-        rows = [_row_to_dict(row, today=dt.date.today()) for row in session.scalars(query).all()]
+        stored = list(session.scalars(query).all())
+        swap_crossed_ticket_litres(stored)
+        rows = [_row_to_dict(row, today=dt.date.today()) for row in stored]
         _attach_cows_in_milk(session, rows)
     return {
         "rows": rows,

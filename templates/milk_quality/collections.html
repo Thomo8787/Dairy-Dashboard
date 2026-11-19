@@ -253,7 +253,10 @@
           highest volume. A green tick means linked; a red cross means not yet linked.
           Import Müller writes the tanker litres from a Müller CSV onto the weighbridge
           column of tickets already on this page. It does not add new rows, and it leaves
-          the farm litres unchanged. Name each file with the farm code and an underscore,
+          the farm litres unchanged. When two loads on the same farm and day are crossed,
+          so each weighbridge equals the other load’s litres, those litres are swapped
+          and both show a green tick. A load that already matches is left as it is, and
+          a day with more than one possible pairing is left crossed. Name each file with the farm code and an underscore,
           for example ALH_MULLER_collection_details_for_2026-10.csv. Accepted codes are
           ALH, BNK, COF, SFR, and PRK. A row matches a ticket by sample number and
           collection date (or the day either side). If the sample number is blank, it
