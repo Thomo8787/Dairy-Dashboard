@@ -13,6 +13,11 @@ STOCK_PAGES: dict[str, dict[str, Any]] = {
         "nav": "stock_accruals",
         "template": "stock_inventory/stock_accruals.html",
     },
+    "duplicate-animals": {
+        "heading": "Duplicate Animals",
+        "nav": "stock_duplicate_animals",
+        "template": "stock_inventory/duplicate_animals.html",
+    },
     "heifer-inventory": {
         "heading": "Heifer Inventory",
         "nav": "stock_heifer_inventory",

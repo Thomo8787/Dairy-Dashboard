@@ -90,6 +90,7 @@ from services.beef_inventory import (
 )
 from services.calves_due import get_calves_due_report
 from services.heifers_due import get_heifers_due_report
+from services.duplicate_animals import get_duplicate_animals_report
 from services.stock_inventory_export import PDF_CONTENT_TYPE
 from services.ahdb_bulls import (
     AhdbBullsError,
@@ -1335,7 +1336,7 @@ def _stock_json_user():
     return user, None
 
 
-def _render_stock_page(slug: str):
+def _render_stock_page(slug: str, **extra):
     status = get_herd_import_status()
     if not status.get("running"):
         finished = consume_herd_import_result()
@@ -1349,6 +1350,7 @@ def _render_stock_page(slug: str):
         page["template"],
         **_page_context(active_nav=page["nav"]),
         **stock_template_extras(),
+        **extra,
     )
 
 
@@ -1356,6 +1358,14 @@ def _render_stock_page(slug: str):
 @permission_required("perm_stock")
 def stock_accruals():
     return _render_stock_page("stock-accruals")
+
+
+@app.route("/stock-inventory/duplicate-animals")
+@permission_required("perm_stock")
+def stock_duplicate_animals():
+    with get_session() as session:
+        report = get_duplicate_animals_report(session)
+    return _render_stock_page("duplicate-animals", duplicate_report=report)
 
 
 @app.route("/stock-inventory/heifer-inventory")
