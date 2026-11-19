@@ -133,6 +133,10 @@ html, body {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.nav-chevron {
+  display: none;
+}
+
 .sidebar-foot {
   padding: 0.75rem;
   color: var(--sidebar-muted);
@@ -1280,6 +1284,28 @@ body.me-trend-open {
 
   .menu-toggle {
     display: inline-flex;
+  }
+
+  .nav-group:has(.nav-sub) > .nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .nav-chevron {
+    display: block;
+    width: 0.45rem;
+    height: 0.45rem;
+    margin-right: 0.15rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    flex: 0 0 auto;
+  }
+
+  .nav-group:has(.nav-sub.is-open) > .nav-link .nav-chevron {
+    transform: rotate(45deg);
   }
 
   .me-layout {

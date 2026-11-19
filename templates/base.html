@@ -28,15 +28,18 @@
 
       <nav class="side-nav" aria-label="Main">
         {% for item in nav_items %}
+          {% set section_open = active_nav == item.id or active_parent_nav == item.id %}
           <div class="nav-group">
             <a
-              class="nav-link {% if active_nav == item.id or active_parent_nav == item.id %}is-active{% endif %}"
+              class="nav-link {% if section_open %}is-active{% endif %}"
               href="{{ url_for(item.endpoint) }}"
+              {% if item.children %}aria-expanded="{{ 'true' if section_open else 'false' }}"{% endif %}
             >
               {{ item.label }}
+              {% if item.children %}<span class="nav-chevron" aria-hidden="true"></span>{% endif %}
             </a>
             {% if item.children %}
-              <div class="nav-sub {% if active_nav == item.id or active_parent_nav == item.id %}is-open{% endif %}">
+              <div class="nav-sub {% if section_open %}is-open{% endif %}">
                 {% for child in item.children %}
                   <a
                     class="nav-sub-link {% if active_nav == child.id %}is-active{% endif %}"
@@ -121,6 +124,29 @@
     const sidebar = document.getElementById("sidebar");
     if (toggle && sidebar) {
       toggle.addEventListener("click", () => sidebar.classList.toggle("is-open"));
+    }
+
+    const mobileNavQuery = window.matchMedia("(max-width: 900px)");
+    if (sidebar) {
+      sidebar.querySelectorAll(".nav-group").forEach((group) => {
+        const link = group.querySelector(":scope > .nav-link");
+        const sub = group.querySelector(":scope > .nav-sub");
+        if (!link || !sub) return;
+        link.addEventListener("click", (event) => {
+          if (!mobileNavQuery.matches) return;
+          event.preventDefault();
+          const willOpen = !sub.classList.contains("is-open");
+          sidebar.querySelectorAll(".nav-sub.is-open").forEach((openSub) => {
+            if (openSub === sub) return;
+            openSub.classList.remove("is-open");
+            const openLink = openSub.parentElement?.querySelector(":scope > .nav-link");
+            if (openLink) openLink.setAttribute("aria-expanded", "false");
+          });
+          sub.classList.toggle("is-open", willOpen);
+          link.setAttribute("aria-expanded", willOpen ? "true" : "false");
+          if (willOpen) sub.scrollIntoView({ block: "nearest" });
+        });
+      });
     }
 
     const SYNC_POLL_KEY = "dairyDashboard.syncPollUrl";
