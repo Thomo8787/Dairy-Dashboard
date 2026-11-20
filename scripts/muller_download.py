@@ -77,7 +77,9 @@ def _return_home(page: Page) -> None:
 
 
 def _headless() -> bool:
-    """This PC opens a window. Render sets MULLER_HEADLESS so there is no screen."""
+    """No window with --headless or MULLER_HEADLESS. Müller refuses the HeadlessChrome label."""
+    if "--headless" in sys.argv[1:]:
+        return True
     flag = os.environ.get("MULLER_HEADLESS", "").strip().lower()
     return flag in {"1", "true", "yes"}
 
