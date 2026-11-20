@@ -47,16 +47,15 @@
       border-color: var(--accent);
       color: #fff;
     }
-    .view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .content-panel { min-width: 0; }
+    .view-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
     .view-tab {
-      flex: 1;
-      min-height: 2.75rem;
       padding: 0.45rem 0.9rem;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--panel);
       color: var(--ink);
-      font-size: 0.95rem;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
     }
@@ -103,16 +102,44 @@
       color: var(--muted);
       text-align: center;
     }
-    #fallen-table { width: 100%; border-collapse: collapse; }
-    #fallen-table th, #fallen-table td {
-      padding: 0.55rem 0.65rem;
-      text-align: left;
-      border-bottom: 1px solid var(--line);
-      white-space: nowrap;
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 16rem);
+      border: 1px solid var(--line);
+      border-radius: 8px;
     }
-    #fallen-table th.tick-cell, #fallen-table td.tick-cell,
+    #fallen-table { width: 100%; table-layout: auto; border-collapse: collapse; }
+    #fallen-table th, #fallen-table td {
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    #fallen-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      border-bottom: none;
+    }
+    #fallen-table th.tick-cell, #fallen-table td.tick-cell { padding: 0; }
+    #fallen-table .tick-hit {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2.6rem;
+      min-height: 2.4rem;
+      padding: 0.5rem 0.65rem;
+      cursor: pointer;
+    }
+    #fallen-table .tick-hit input { margin: 0; }
+    #fallen-table tbody tr.row-selected { background: #dcfce7; }
+    #fallen-table tbody tr:hover { background: #f8fafc; }
+    #fallen-table tbody tr.row-selected:hover { background: #bbf7d0; }
     .death-card .tick-cell { padding: 0; }
-    .tick-hit {
+    .death-card .tick-hit {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -120,8 +147,7 @@
       min-height: 2.75rem;
       cursor: pointer;
     }
-    .tick-hit input { width: 1.15rem; height: 1.15rem; margin: 0; }
-    tr.row-selected { background: var(--accent-soft); }
+    .death-card .tick-hit input { width: 1.15rem; height: 1.15rem; margin: 0; }
     .death-cards { display: none; }
     .death-card {
       display: flex;
@@ -176,7 +202,7 @@
         </div>
       </aside>
     </div>
-    <section>
+    <section class="content-panel">
       <div class="view-tabs" role="tablist" aria-label="Fallen stock list">
         <button type="button" class="view-tab active" data-status="active" role="tab" aria-selected="true">Active</button>
         <button type="button" class="view-tab" data-status="archived" role="tab" aria-selected="false">Archive</button>
@@ -194,7 +220,7 @@
           <table id="fallen-table">
             <thead>
               <tr>
-                <th class="tick-cell"></th>
+                <th class="tick-cell"><label class="tick-hit"><input type="checkbox" id="select-all" aria-label="Select all visible rows"></label></th>
                 <th>Farm</th>
                 <th>ID</th>
                 <th>Eartag</th>
@@ -265,6 +291,8 @@
         node.classList.toggle("row-selected", on);
         node.querySelectorAll(".row-select").forEach(box => { box.checked = on; });
       });
+      const selectAll = document.getElementById("select-all");
+      if (selectAll) selectAll.checked = rows.length > 0 && selectedKeys.size === rows.length;
       updateActionBar();
     }
 
@@ -401,6 +429,17 @@
       if (input.checked) selectedKeys.add(key);
       else selectedKeys.delete(key);
       lastSelectIndex = index;
+      paintSelection();
+    });
+
+    document.getElementById("select-all").addEventListener("change", event => {
+      const checked = event.target.checked;
+      rows.forEach(row => {
+        const key = rowKey(row);
+        if (checked) selectedKeys.add(key);
+        else selectedKeys.delete(key);
+      });
+      lastSelectIndex = null;
       paintSelection();
     });
 
