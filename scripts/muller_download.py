@@ -17,7 +17,8 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 FOLDER = ROOT / "data" / "Muller_Milk_Collections_Monthly"
-LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/ords/f?p=200:LOGIN:23691107305355:::::&tz=0:00"
+# A fresh Oracle session. The old recorded session number expires and shows no login box.
+LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/ords/f?p=200:LOGIN::::::"
 
 # Account number on the Müller home page, then the farm code used in the file name.
 FARMS = (
@@ -81,6 +82,30 @@ def _headless() -> bool:
     return flag in {"1", "true", "yes"}
 
 
+def _note_page(page: Page, reason: str) -> None:
+    """Print the page Render actually opened, and keep a picture when run on this PC."""
+    shot = FOLDER / "muller-login-page.png"
+    try:
+        page.screenshot(path=str(shot), full_page=True)
+        print(f"Saved login screenshot to {shot}", flush=True)
+    except Exception as exc:
+        print(f"Could not save login screenshot: {exc}", flush=True)
+    title = ""
+    body = ""
+    try:
+        title = page.title()
+    except Exception:
+        title = ""
+    try:
+        body = " ".join(page.locator("body").inner_text(timeout=5000).split())
+    except Exception as exc:
+        body = f"(page text unavailable: {exc})"
+    print(reason, flush=True)
+    print(f"Page URL: {page.url}", flush=True)
+    print(f"Page title: {title}", flush=True)
+    print(f"Page text: {body[:1500]}", flush=True)
+
+
 def run(playwright: Playwright) -> list[Path]:
     today = dt.date.today()
     period = f"{today.year}{today.month:02d}"
@@ -92,13 +117,25 @@ def run(playwright: Playwright) -> list[Path]:
         headless=headless,
         args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"] if headless else [],
     )
-    context = browser.new_context()
+    context_options = {}
+    if headless:
+        context_options["user_agent"] = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+    context = browser.new_context(**context_options)
     page = context.new_page()
     page.set_default_timeout(90_000)
     saved: list[Path] = []
     try:
-        page.goto(LOGIN_URL)
-        page.get_by_role("textbox", name="Email Address").fill(os.environ["MULLER_USERNAME"])
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        email = page.get_by_role("textbox", name="Email Address")
+        try:
+            email.wait_for()
+        except Exception:
+            _note_page(page, "Email Address box did not appear.")
+            raise
+        email.fill(os.environ["MULLER_USERNAME"])
         page.get_by_role("textbox", name="Password").fill(os.environ["MULLER_PASSWORD"])
         page.get_by_role("button", name="Log In").click()
         page.get_by_text("Daily Milk Collection Comparison").first.wait_for()
