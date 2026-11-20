@@ -121,7 +121,8 @@ services:
       - key: OUTLOOK_MAILBOX
         sync: false
 
-  # Every 3 hours: NML milk-quality PDFs from @nationalmilklabs.com.
+  # Twice a day: NML milk-quality PDFs from @nationalmilklabs.com.
+  # Render cron is UTC: 7am and 7pm in winter, 8am and 8pm in summer.
   # Skips emails already imported (by Outlook message ID).
   # Cattle remittances run on sales_data_cron so OCR has the whole 512MB.
   - type: cron
@@ -129,7 +130,7 @@ services:
     runtime: python
     plan: starter
     branch: main
-    schedule: "0 */3 * * *"
+    schedule: "0 7,19 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/sync_nml_emails.py --days 3
     envVars:
@@ -283,15 +284,9 @@ services:
           name: dairy-dashboard
           envVarKey: ONEDRIVE_USER
       - key: ONEDRIVE_SHARE_URL
-        fromService:
-          type: web
-          name: dairy-dashboard
-          envVarKey: ONEDRIVE_SHARE_URL
+        sync: false
       - key: ONEDRIVE_FOLDER_PATH
-        fromService:
-          type: web
-          name: dairy-dashboard
-          envVarKey: ONEDRIVE_FOLDER_PATH
+        value: ""
 
   # SenseHub young-stock health: hourly live reading, locked at 0/6/12/18 UK.
   - type: cron
