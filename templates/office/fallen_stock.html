@@ -279,8 +279,10 @@
     let selectedKeys = new Set();
     let lastSelectIndex = null;
     let shiftRangeClick = false;
-    let sortKey = "event_date";
-    let sortDir = -1;
+    let sortKeys = [
+      { key: "farm", dir: 1 },
+      { key: "cow_id", dir: 1 },
+    ];
 
     function rowKey(row) {
       return JSON.stringify([row.farm, row.cow_id || "", row.etag || "", row.event_date || ""]);
@@ -339,27 +341,36 @@
       paintSelection();
     }
 
-    function sortValue(row) {
-      const value = row[sortKey];
-      if (value == null || value === "") return null;
-      if (sortKey === "age_months") return Number(value);
-      return typeof value === "string" ? value.toLowerCase() : value;
+    function compareValues(a, b, key) {
+      const av = a[key];
+      const bv = b[key];
+      if ((av == null || av === "") && (bv == null || bv === "")) return 0;
+      if (av == null || av === "") return 1;
+      if (bv == null || bv === "") return -1;
+      if (key === "age_months" || key === "cow_id") {
+        const an = Number(av);
+        const bn = Number(bv);
+        if (!Number.isNaN(an) && !Number.isNaN(bn) && an !== bn) return an < bn ? -1 : 1;
+      }
+      const as = String(av).toLowerCase();
+      const bs = String(bv).toLowerCase();
+      if (as < bs) return -1;
+      if (as > bs) return 1;
+      return 0;
     }
 
     function applySort() {
       rows.sort((a, b) => {
-        const av = sortValue(a);
-        const bv = sortValue(b);
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1;
-        if (bv == null) return -1;
-        if (av < bv) return -sortDir;
-        if (av > bv) return sortDir;
+        for (const { key, dir } of sortKeys) {
+          const cmp = compareValues(a, b, key);
+          if (cmp !== 0) return cmp * dir;
+        }
         return 0;
       });
+      const active = new Map(sortKeys.map(item => [item.key, item.dir]));
       document.querySelectorAll("#fallen-table thead th[data-sort]").forEach(th => {
-        const active = th.dataset.sort === sortKey;
-        th.setAttribute("aria-sort", active ? (sortDir < 0 ? "descending" : "ascending") : "none");
+        const dir = active.get(th.dataset.sort);
+        th.setAttribute("aria-sort", dir == null ? "none" : (dir < 0 ? "descending" : "ascending"));
       });
     }
 
@@ -492,8 +503,8 @@
     document.querySelectorAll("#fallen-table thead th[data-sort]").forEach(th => {
       th.addEventListener("click", () => {
         const key = th.dataset.sort;
-        if (sortKey === key) sortDir *= -1;
-        else { sortKey = key; sortDir = 1; }
+        if (sortKeys[0].key === key) sortKeys = [{ key, dir: sortKeys[0].dir * -1 }];
+        else sortKeys = [{ key, dir: 1 }];
         lastSelectIndex = null;
         render();
       });
