@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ implant.recipient_id }} · {{ app_name }}{% endblock %}
+{% block page_title %}Edit implanted embryo{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <form class="embryo-form two" method="post">
+        <input type="hidden" name="status" value="{{ status }}">
+        <input type="hidden" name="q" value="{{ query }}">
+        <label class="embryo-field">
+          <span>Recipient</span>
+          <input name="recipient_id" required value="{{ implant.recipient_id }}" autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Dam</span>
+          <input name="dam" required value="{{ implant.dam }}" autocomplete="off">
+        </label>
+        <label class="embryo-field sire-pick">
+          <span>Sire</span>
+          <input name="sire_1" required value="{{ implant.sire_1 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_1_hbn" value="{{ implant.sire_1_hbn }}">
+          <div class="sire-matches" hidden></div>
+        </label>
+        <label class="embryo-field sire-pick">
+          <span>Second sire, if used</span>
+          <input name="sire_2" value="{{ implant.sire_2 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_2_hbn" value="{{ implant.sire_2_hbn }}">
+          <div class="sire-matches" hidden></div>
+        </label>
+        <label class="embryo-field">
+          <span>Type</span>
+          <select name="implant_type">
+            <option value="fresh" {% if implant.is_fresh %}selected{% endif %}>Fresh</option>
+            <option value="frozen" {% if not implant.is_fresh %}selected{% endif %}>Frozen</option>
+          </select>
+        </label>
+        <label class="embryo-field">
+          <span>Grade</span>
+          <input name="grade" inputmode="numeric" value="{{ implant.grade if implant.grade is not none else '' }}">
+        </label>
+        <label class="embryo-field">
+          <span>Implanted</span>
+          <input name="implant_date" type="date" required value="{{ implant.implant_date }}">
+        </label>
+        <label class="embryo-field">
+          <span>Due</span>
+          <input name="due_date" type="date" value="{{ implant.due_date }}">
+        </label>
+        <label class="embryo-field">
+          <span>PD</span>
+          <select name="pd_result">
+            {% for key, label in pd_choices %}
+              <option value="{{ key }}" {% if implant.pd_result == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="embryo-field">
+          <span>Outcome</span>
+          <select name="outcome">
+            {% for key, label in outcome_choices %}
+              <option value="{{ key }}" {% if implant.outcome == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="embryo-field">
+          <span>Calf</span>
+          <input name="calf_id" value="{{ implant.calf_id }}" autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Calf sex</span>
+          <select name="calf_sex">
+            {% for key, label in sex_choices %}
+              <option value="{{ key }}" {% if implant.calf_sex == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="embryo-field">
+          <span>Date of birth</span>
+          <input name="calf_dob" type="date" value="{{ implant.calf_dob }}">
+        </label>
+        <label class="embryo-field">
+          <span>Sire, once known</span>
+          <input name="resolved_sire" value="{{ implant.resolved_sire }}" placeholder="{{ implant.sire_label }}">
+        </label>
+        <p class="embryo-note wide embryo-field">Dam and sire belong to the flush, so a change here shows on every embryo from that flush. A PD or calving already in the herd events fills this row, and a later calving, abortion, or death replaces an earlier pregnancy result.</p>
+        <div class="embryo-actions wide embryo-field">
+          <button class="btn" type="submit">Save</button>
+          <a class="btn ghost" href="{{ url_for('genetics_recipients', status=status, q=query) }}">Back</a>
+        </div>
+      </form>
+    </section>
+  </div>
+  <script src="{{ url_for('static', filename='js/embryo_sire_picker.js') }}" data-bulls-url="{{ url_for('genetics_api_bull_search') }}"></script>
+{% endblock %}

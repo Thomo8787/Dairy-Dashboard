@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Recipients · {{ app_name }}{% endblock %}
-{% block page_title %}Recipients{% endblock %}
+{% block title %}Implanted Embryos · {{ app_name }}{% endblock %}
+{% block page_title %}Implanted Embryos{% endblock %}
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
 {% endblock %}
@@ -56,51 +56,7 @@
                     {% if row.calf_dob_label %}<br>{{ row.calf_dob_label }}{% endif %}
                   </td>
                   <td>
-                    <details class="edit-details">
-                      <summary>Update</summary>
-                      <form class="edit-grid" method="post">
-                        <input type="hidden" name="implant_id" value="{{ row.id }}">
-                        <input type="hidden" name="status" value="{{ status }}">
-                        <input type="hidden" name="q" value="{{ query }}">
-                        <label class="embryo-field">
-                          <span>PD</span>
-                          <select name="pd_result">
-                            {% for key, label in pd_choices %}
-                              <option value="{{ key }}" {% if row.pd_result == key %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                          </select>
-                        </label>
-                        <label class="embryo-field">
-                          <span>Outcome</span>
-                          <select name="outcome">
-                            {% for key, label in outcome_choices %}
-                              <option value="{{ key }}" {% if row.outcome == key %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                          </select>
-                        </label>
-                        <label class="embryo-field">
-                          <span>Calf ID</span>
-                          <input name="calf_id" value="{{ row.calf_id }}">
-                        </label>
-                        <label class="embryo-field">
-                          <span>Calf sex</span>
-                          <select name="calf_sex">
-                            {% for key, label in sex_choices %}
-                              <option value="{{ key }}" {% if row.calf_sex == key %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                          </select>
-                        </label>
-                        <label class="embryo-field">
-                          <span>Date of birth</span>
-                          <input name="calf_dob" type="date" value="{{ row.calf_dob }}">
-                        </label>
-                        <label class="embryo-field">
-                          <span>Sire, once known</span>
-                          <input name="resolved_sire" value="{{ row.resolved_sire }}" placeholder="{{ row.sire_label }}">
-                        </label>
-                        <button class="btn" type="submit">Save</button>
-                      </form>
-                    </details>
+                    <a href="{{ url_for('genetics_implant_edit', implant_id=row.id, status=status, q=query) }}">Edit</a>
                   </td>
                 </tr>
               {% endfor %}
@@ -108,7 +64,7 @@
           </table>
         </div>
       {% else %}
-        <p class="empty">No recipients match this list.</p>
+        <p class="empty">No implanted embryos match this list.</p>
       {% endif %}
     </section>
   </div>

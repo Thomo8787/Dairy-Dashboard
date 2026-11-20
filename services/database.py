@@ -810,6 +810,7 @@ class EmbryoImplant(Base):
     calf_sex = Column(String(8))
     calf_dob = Column(Date)
     resolved_sire = Column(String(128))
+    outcome_edited_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     batch = relationship("EmbryoBatch", back_populates="implants")
 
@@ -1104,6 +1105,18 @@ def _ensure_nml_milk_result_columns(engine) -> None:
                 conn.execute(text(ddl))
 
 
+def _ensure_embryo_implant_columns(engine) -> None:
+    """create_all will not add the manual-edit time to an existing implant table."""
+    inspector = inspect(engine)
+    if "embryo_implants" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("embryo_implants")}
+    if "outcome_edited_at" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE embryo_implants ADD COLUMN outcome_edited_at TIMESTAMP"))
+
+
 def _ensure_embryo_batch_columns(engine) -> None:
     """create_all will not add sire herd-book numbers to an existing flush table."""
     inspector = inspect(engine)
@@ -1177,6 +1190,7 @@ def init_db():
     _ensure_user_permission_columns(engine)
     _ensure_genomic_result_columns(engine)
     _ensure_embryo_batch_columns(engine)
+    _ensure_embryo_implant_columns(engine)
     _ensure_herd_inventory_columns(engine)
     _ensure_nml_milk_result_columns(engine)
     _ensure_sales_payment_columns(engine)

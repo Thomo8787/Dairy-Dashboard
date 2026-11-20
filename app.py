@@ -125,6 +125,7 @@ from services.embryos import (
     delete_implant,
     donor_results,
     get_flush,
+    get_implant,
     list_flushes,
     list_implants,
     list_stock,
@@ -1859,28 +1860,50 @@ def genetics_frozen_stock():
     )
 
 
-@app.route("/genetics/recipients", methods=["GET", "POST"])
+@app.route("/genetics/recipients", methods=["GET"])
 @permission_required("perm_genetics")
 def genetics_recipients():
     status = (request.values.get("status") or "all").strip().lower()
     query = (request.values.get("q") or "").strip()
-    if request.method == "POST":
-        implant_id = int(request.form.get("implant_id") or 0)
-        message = _embryo_action(
-            lambda session: update_implant(session, implant_id, request.form),
-            "Recipient updated.",
-        )
-        if message:
-            flash(message, "success")
-        return redirect(url_for("genetics_recipients", status=status, q=query))
     if status not in {"all", "awaiting", "in_calf", "calved", "loss"}:
         status = "all"
     with get_session() as session:
         implants = list_implants(session, status=status, query=query)
     return render_template(
         "genetics/recipients.html",
-        **_page_context(active_nav="genetics_recipients", page_heading="Recipients"),
+        **_page_context(active_nav="genetics_recipients", page_heading="Implanted Embryos"),
         implants=implants,
+        status=status,
+        query=query,
+    )
+
+
+@app.route("/genetics/recipients/<int:implant_id>/edit", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_implant_edit(implant_id: int):
+    status = (request.values.get("status") or "all").strip().lower()
+    query = (request.values.get("q") or "").strip()
+    if status not in {"all", "awaiting", "in_calf", "calved", "loss"}:
+        status = "all"
+    if request.method == "POST":
+        message = _embryo_action(
+            lambda session: update_implant(session, implant_id, request.form),
+            "Implanted embryo updated.",
+        )
+        if message:
+            flash(message, "success")
+            return redirect(url_for("genetics_recipients", status=status, q=query))
+        return redirect(url_for("genetics_implant_edit", implant_id=implant_id, status=status, q=query))
+    try:
+        with get_session() as session:
+            implant = get_implant(session, implant_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("genetics_recipients", status=status, q=query))
+    return render_template(
+        "genetics/implant_edit.html",
+        **_page_context(active_nav="genetics_recipients", page_heading="Edit implanted embryo"),
+        implant=implant,
         status=status,
         query=query,
         pd_choices=PD_CHOICES,

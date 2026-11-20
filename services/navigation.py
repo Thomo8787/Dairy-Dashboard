@@ -217,7 +217,7 @@ NAV_ITEMS = [
             },
             {
                 "id": "genetics_recipients",
-                "label": "Recipients",
+                "label": "Implanted Embryos",
                 "endpoint": "genetics_recipients",
                 "permission": "perm_genetics",
             },

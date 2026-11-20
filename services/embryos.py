@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from services.database import AhdbBull, EmbryoBatch, EmbryoImplant, GenomicResult, _clean_bull_name
+from services.database import (
+    AhdbBull,
+    CowEvent,
+    EmbryoBatch,
+    EmbryoImplant,
+    GenomicResult,
+    _clean_bull_name,
+)
+
+_UK = ZoneInfo("Europe/London")
 
 GESTATION_DAYS = 269
 
@@ -23,6 +34,7 @@ OUTCOME_CHOICES: tuple[tuple[str, str], ...] = (
     ("empty", "Empty"),
     ("live_heifer", "Live heifer"),
     ("bull", "Bull calf"),
+    ("calved", "Calved"),
     ("abort", "Aborted"),
     ("stillbirth", "Stillbirth"),
     ("born_early", "Born early"),
@@ -46,6 +58,7 @@ _TERMINAL_OUTCOMES = {
     "empty",
     "live_heifer",
     "bull",
+    "calved",
     "abort",
     "stillbirth",
     "born_early",
@@ -207,11 +220,13 @@ def _recipient_is_open(row: EmbryoImplant) -> bool:
     return (row.outcome or "") not in _TERMINAL_OUTCOMES
 
 
-def _assert_recipient_free(session: Session, recipient_id: str) -> None:
+def _assert_recipient_free(session: Session, recipient_id: str, *, ignore_id: int | None = None) -> None:
     rows = session.scalars(
         select(EmbryoImplant).where(func.lower(EmbryoImplant.recipient_id) == recipient_id.lower())
     ).all()
     for row in rows:
+        if ignore_id is not None and row.id == ignore_id:
+            continue
         if _recipient_is_open(row):
             raise ValueError(f"Recipient {recipient_id} already has an implant that is still open.")
 
@@ -447,8 +462,55 @@ def delete_batch(session: Session, batch_id: int) -> None:
 
 def update_implant(session: Session, implant_id: int, form: Any) -> None:
     row = session.get(EmbryoImplant, implant_id)
-    if row is None:
-        raise ValueError("That recipient could not be found.")
+    if row is None or row.batch is None:
+        raise ValueError("That implanted embryo could not be found.")
+    recipient_id = _clean(form.get("recipient_id"))
+    if not recipient_id:
+        raise ValueError("Enter the recipient.")
+    dam = _clean(form.get("dam"))
+    if not dam:
+        raise ValueError("Enter the dam.")
+    _assert_recipient_free(session, recipient_id, ignore_id=row.id)
+    implant_date = _parse_date(form.get("implant_date"), "the implant date")
+    due_text = _clean(form.get("due_date"))
+    if due_text:
+        due_date = _parse_date(due_text, "the due date")
+        if implant_date != row.implant_date and due_date == row.due_date:
+            due_date = _due_date(implant_date)
+    else:
+        due_date = _due_date(implant_date)
+    fresh = _clean(form.get("implant_type")).casefold()
+    if fresh not in {"fresh", "frozen"}:
+        raise ValueError("Choose fresh or frozen.")
+    grade_text = _clean(form.get("grade"))
+    grade = None
+    if grade_text:
+        grade = _parse_count(grade_text, "the grade")
+        if grade not in {1, 2}:
+            raise ValueError("Grade must be 1 or 2.")
+    pd_result, outcome, sex = _normalise_result(form)
+    sire_1, sire_1_hbn, sire_2, sire_2_hbn = _resolve_sires(session, form)
+    batch = row.batch
+    batch.dam = dam
+    batch.sire_1 = sire_1
+    batch.sire_2 = sire_2
+    batch.sire_1_hbn = sire_1_hbn
+    batch.sire_2_hbn = sire_2_hbn
+    row.recipient_id = recipient_id
+    row.implant_date = implant_date
+    row.due_date = due_date
+    row.is_fresh = fresh == "fresh"
+    row.grade = grade
+    row.pd_result = pd_result or None
+    row.outcome = outcome or None
+    row.calf_id = _clean(form.get("calf_id")) or None
+    row.calf_sex = sex or None
+    row.calf_dob = _parse_optional_date(form.get("calf_dob"))
+    row.resolved_sire = _clean(form.get("resolved_sire")) or None
+    row.outcome_edited_at = dt.datetime.now(dt.timezone.utc)
+
+
+def _normalise_result(form: Any) -> tuple[str, str, str]:
     pd_result = _clean(form.get("pd_result"))
     outcome = _clean(form.get("outcome"))
     if pd_result not in {key for key, _label in PD_CHOICES}:
@@ -466,12 +528,7 @@ def update_implant(session: Session, implant_id: int, form: Any) -> None:
         pd_result = "positive"
     if pd_result == "positive" and not outcome:
         outcome = "in_calf"
-    row.pd_result = pd_result or None
-    row.outcome = outcome or None
-    row.calf_id = _clean(form.get("calf_id")) or None
-    row.calf_sex = sex or None
-    row.calf_dob = _parse_optional_date(form.get("calf_dob"))
-    row.resolved_sire = _clean(form.get("resolved_sire")) or None
+    return pd_result, outcome, sex
 
 
 def _implant_dict(row: EmbryoImplant, batch: EmbryoBatch) -> dict[str, Any]:
@@ -484,6 +541,7 @@ def _implant_dict(row: EmbryoImplant, batch: EmbryoBatch) -> dict[str, Any]:
         "is_fresh": bool(row.is_fresh),
         "fresh_label": "Fresh" if row.is_fresh else "Frozen",
         "grade": row.grade,
+        "due_date": row.due_date.isoformat() if row.due_date else "",
         "due_date_label": format_date(row.due_date),
         "pd_result": row.pd_result or "",
         "pd_label": _PD_LABELS.get(row.pd_result or "", "Not scanned"),
@@ -711,7 +769,159 @@ def list_stock(session: Session) -> list[dict[str, Any]]:
     return rows
 
 
+_EVENT_NAMES = ("PREG", "PD", "OPEN", "FRESH", "ABORT", "DIED", "SOLD")
+_NEGATIVE_PREG = ("OPEN", "EMPTY", "NEGATIVE", "NOT PREG", "NOT IN CALF")
+_CALF_ID = re.compile(r"\d{3,}")
+
+
+def _edited_day(value: dt.datetime | None) -> dt.date | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(_UK).date()
+
+
+def _preg_is_positive(event: CowEvent) -> bool | None:
+    name = (event.event or "").strip().upper()
+    text = " ".join(part for part in (event.remark, event.r, name) if part).upper()
+    if name == "OPEN" or any(word in text for word in _NEGATIVE_PREG):
+        return False
+    if name in {"PREG", "PD"} or "PREG" in text or "POSITIVE" in text or text.strip() in {"OK", "P", "+", "YES"}:
+        return True
+    return None
+
+
+def _calf_from_fresh(event: CowEvent) -> tuple[str | None, str | None]:
+    remark = (event.remark or "").strip()
+    upper = remark.upper()
+    sex = None
+    if re.search(r"\b(HEIFER|HFR|FEMALE)\b", upper) or re.match(r"^[HF](\s|-|$)", upper):
+        sex = "F"
+    elif re.search(r"\b(BULL|MALE)\b", upper) or re.match(r"^[BM](\s|-|$)", upper):
+        sex = "M"
+    if upper in {"H", "F", "HEIFER", "HFR"}:
+        sex = "F"
+    elif upper in {"B", "M", "BULL"}:
+        sex = "M"
+    numbers = _CALF_ID.findall(remark)
+    return sex, (numbers[-1] if numbers else None)
+
+
+def _events_by_recipient(session: Session, recipient_ids: set[str]) -> dict[str, list[CowEvent]]:
+    grouped: dict[str, list[CowEvent]] = {}
+    ids = [item for item in recipient_ids if item]
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        rows = session.scalars(
+            select(CowEvent).where(
+                or_(CowEvent.cow_id.in_(chunk), CowEvent.etag.in_(chunk)),
+                func.upper(CowEvent.event).in_(_EVENT_NAMES),
+            )
+        ).all()
+        for event in rows:
+            for key in (event.cow_id, event.etag):
+                text = (key or "").strip().casefold()
+                if text:
+                    grouped.setdefault(text, []).append(event)
+    return grouped
+
+
+def _result_from_events(row: EmbryoImplant, events: list[CowEvent]) -> dict[str, Any] | None:
+    """The latest herd event for this implant, after a manual edit when there is one."""
+    if row.implant_date is None:
+        return None
+    edited = _edited_day(row.outcome_edited_at)
+    fresh = []
+    other = []
+    preg = []
+    for event in events:
+        if event.event_date is None:
+            continue
+        if event.event_date < row.implant_date:
+            continue
+        if edited is not None and event.event_date <= edited:
+            continue
+        name = (event.event or "").strip().upper()
+        if name == "FRESH":
+            fresh.append(event)
+        elif name in {"ABORT", "DIED", "SOLD"}:
+            other.append(event)
+        elif name in {"PREG", "PD", "OPEN"}:
+            preg.append(event)
+    if fresh:
+        event = max(fresh, key=lambda item: item.event_date)
+        sex, calf_id = _calf_from_fresh(event)
+        outcome = {"F": "live_heifer", "M": "bull"}.get(sex or "", "calved")
+        result: dict[str, Any] = {
+            "pd_result": "positive",
+            "outcome": outcome,
+            "calf_dob": event.event_date,
+        }
+        if sex:
+            result["calf_sex"] = sex
+        if calf_id:
+            result["calf_id"] = calf_id
+        return result
+    if other:
+        event = max(other, key=lambda item: item.event_date)
+        name = (event.event or "").strip().upper()
+        if name == "ABORT":
+            return {"pd_result": "positive", "outcome": "abort"}
+        if name == "DIED":
+            return {"pd_result": row.pd_result, "outcome": "recipient_died"}
+        return {"pd_result": row.pd_result, "outcome": "died_sold"}
+    if preg:
+        event = max(preg, key=lambda item: item.event_date)
+        positive = _preg_is_positive(event)
+        if positive is True:
+            return {"pd_result": "positive", "outcome": "in_calf"}
+        if positive is False:
+            return {"pd_result": "negative", "outcome": "empty"}
+    return None
+
+
+def _apply_event_result(row: EmbryoImplant, result: dict[str, Any]) -> bool:
+    changed = False
+    for key, value in result.items():
+        if getattr(row, key) != value:
+            setattr(row, key, value)
+            changed = True
+    return changed
+
+
+def sync_implants_from_events(session: Session) -> int:
+    """Fill PD and calving from DairyComp events. A saved edit stands until a later event."""
+    rows = list(session.scalars(select(EmbryoImplant)).all())
+    if not rows:
+        return 0
+    grouped = _events_by_recipient(session, {row.recipient_id.strip() for row in rows if row.recipient_id})
+    changed = 0
+    for row in rows:
+        result = _result_from_events(row, grouped.get((row.recipient_id or "").strip().casefold(), []))
+        if result and _apply_event_result(row, result):
+            changed += 1
+    return changed
+
+
+def get_implant(session: Session, implant_id: int) -> dict[str, Any]:
+    row = session.get(EmbryoImplant, implant_id)
+    if row is None or row.batch is None:
+        raise ValueError("That implanted embryo could not be found.")
+    item = _implant_dict(row, row.batch)
+    item.update(
+        {
+            "sire_1": row.batch.sire_1 or "",
+            "sire_2": row.batch.sire_2 or "",
+            "sire_1_hbn": row.batch.sire_1_hbn or "",
+            "sire_2_hbn": row.batch.sire_2_hbn or "",
+        }
+    )
+    return item
+
+
 def list_implants(session: Session, *, status: str = "all", query: str = "") -> list[dict[str, Any]]:
+    sync_implants_from_events(session)
     wanted = (status or "all").strip().lower()
     needle = _clean(query).casefold()
     rows: list[dict[str, Any]] = []
@@ -726,7 +936,7 @@ def list_implants(session: Session, *, status: str = "all", query: str = "") -> 
                 continue
             if wanted == "in_calf" and not (item["pd_result"] == "positive" and item["open"]):
                 continue
-            if wanted == "calved" and item["outcome"] not in {"live_heifer", "bull"}:
+            if wanted == "calved" and item["outcome"] not in {"live_heifer", "bull", "calved"}:
                 continue
             if wanted == "loss" and item["outcome"] not in {"abort", "stillbirth", "born_early", "recipient_died", "died_sold", "empty"}:
                 continue
@@ -736,6 +946,7 @@ def list_implants(session: Session, *, status: str = "all", query: str = "") -> 
 
 
 def donor_results(session: Session) -> list[dict[str, Any]]:
+    sync_implants_from_events(session)
     grouped: dict[str, dict[str, Any]] = {}
     for batch in _load_batches(session):
         key = batch.dam.casefold()
