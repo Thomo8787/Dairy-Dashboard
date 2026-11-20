@@ -30,22 +30,40 @@
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .slicer-btn {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 3rem;
-      padding: 0.5rem;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
       border: 2px solid var(--line);
       border-radius: 8px;
       background: #f3f4f6;
       color: var(--muted);
-      font-size: 0.9rem;
-      font-weight: 700;
+      font-size: 0.8125rem;
+      font-weight: 600;
       cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
     }
     .farm-slicer .slicer-btn.selected {
       background: var(--accent);
       border-color: var(--accent);
       color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
     }
     .content-panel { min-width: 0; }
     .view-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
@@ -197,7 +215,10 @@
         <span class="section-label">Farm</span>
         <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
           {% for farm in farm_options %}
-          <button type="button" class="slicer-btn selected" data-farm="{{ farm }}" aria-pressed="true">{{ farm }}</button>
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
           {% endfor %}
         </div>
       </aside>
@@ -239,16 +260,14 @@
     </section>
   </div>
   <script>
-    const farmButtons = Array.from(document.querySelectorAll(".farm-slicer .slicer-btn"));
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")].map(btn => btn.dataset.value);
+    }
     let status = "active";
     let rows = [];
     let selectedKeys = new Set();
     let lastSelectIndex = null;
     let shiftRangeClick = false;
-
-    function selectedFarms() {
-      return farmButtons.filter(btn => btn.classList.contains("selected")).map(btn => btn.dataset.farm);
-    }
 
     function rowKey(row) {
       return JSON.stringify([row.farm, row.cow_id || "", row.etag || "", row.event_date || ""]);
@@ -443,8 +462,11 @@
       paintSelection();
     });
 
-    farmButtons.forEach(btn => {
+    document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
       btn.addEventListener("click", () => {
+        const selected = btn.classList.contains("selected");
+        const count = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+        if (selected && count <= 1) return;
         btn.classList.toggle("selected");
         btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
         loadRows();
@@ -502,6 +524,6 @@
       postItems("/office/api/fallen-stock/unarchive", "Returning…", event.currentTarget);
     });
 
-    loadRows();
+    setTimeout(loadRows, 0);
   </script>
 {% endblock %}
