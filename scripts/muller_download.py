@@ -75,15 +75,26 @@ def _return_home(page: Page) -> None:
     page.get_by_text("Daily Milk Collection Comparison").first.wait_for()
 
 
+def _headless() -> bool:
+    """This PC opens a window. Render sets MULLER_HEADLESS so there is no screen."""
+    flag = os.environ.get("MULLER_HEADLESS", "").strip().lower()
+    return flag in {"1", "true", "yes"}
+
+
 def run(playwright: Playwright) -> list[Path]:
     today = dt.date.today()
     period = f"{today.year}{today.month:02d}"
     month = f"{today.year}-{today.month:02d}"
     FOLDER.mkdir(parents=True, exist_ok=True)
 
-    browser = playwright.chromium.launch(headless=False)
+    headless = _headless()
+    browser = playwright.chromium.launch(
+        headless=headless,
+        args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"] if headless else [],
+    )
     context = browser.new_context()
     page = context.new_page()
+    page.set_default_timeout(90_000)
     saved: list[Path] = []
     try:
         page.goto(LOGIN_URL)

@@ -1,0 +1,11 @@
+# Chromium and its system libraries are already in this image.
+# The Playwright package version must match the image tag.
+FROM mcr.microsoft.com/playwright/python:v1.65.2-noble
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt playwright==1.65.2
+COPY . .
+
+ENV MULLER_HEADLESS=true
+CMD ["python", "scripts/muller_download.py"]

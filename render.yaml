@@ -58,6 +58,40 @@ services:
         sync: false
       - key: SENSEHUB_FARM_ID
         sync: false
+      - key: MULLER_USERNAME
+        sync: false
+      - key: MULLER_PASSWORD
+        sync: false
+
+  # Daily Müller weighbridge download. Render cron is UTC:
+  # 06:00 UTC is 6am GMT and 7am BST. Chromium lives in Dockerfile.muller.
+  - type: cron
+    name: fetch-muller-collections
+    runtime: docker
+    plan: starter
+    branch: main
+    dockerfilePath: ./Dockerfile.muller
+    schedule: "0 6 * * *"
+    dockerCommand: python scripts/muller_download.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: MULLER_HEADLESS
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: MULLER_USERNAME
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: MULLER_USERNAME
+      - key: MULLER_PASSWORD
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: MULLER_PASSWORD
 
   # Hourly DataFlow Milk Flow + Rotary Entry ID import (UTC).
   # Uses the same Azure + mailbox secrets as the web service.
