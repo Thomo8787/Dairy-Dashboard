@@ -1128,6 +1128,7 @@ def list_sales_payments(
                 CowEvent.cbrd,
                 SalesPaymentRecord.paid_at,
                 SalesPaymentRecord.archived_at,
+                CowEvent.dest,
             )
             .select_from(CowEvent)
             .join(SalesPaymentRecord, _payment_match_conditions())
@@ -1144,6 +1145,7 @@ def list_sales_payments(
             CowEvent.cbrd,
             literal(None).label("paid_at"),
             literal(None).label("archived_at"),
+            CowEvent.dest,
         )
 
     query = _apply_sold_event_filters(
@@ -1218,6 +1220,7 @@ def list_sales_payments(
         cbrd,
         paid_at,
         archived_at,
+        event_dest,
     ) in result_rows:
         if hasattr(event_date, "date"):
             event_date = event_date.date()
@@ -1240,8 +1243,11 @@ def list_sales_payments(
             bonus_gbp = sale_match.get("bonus_gbp")
             sale_rejected = sale_match["sale_rejected"]
             has_sale_amount = sale_match["has_sale_amount"]
-            remittance_dest = sale_match["buyer"]
+            remittance_dest = (sale_match.get("buyer") or "").strip()
             warrendale_split = bool(sale_match.get("warrendale_split"))
+        # A scanned remittance names the buyer. Until that arrives, use the
+        # destination already recorded on the sold event.
+        display_dest = remittance_dest or (event_dest or "").strip()
         record = payment_flags.get(
             _payment_record_key(farm, event_cow_id, etag, event_date)
         )
@@ -1258,7 +1264,7 @@ def list_sales_payments(
             continue
         if has_amount is False and has_sale_amount:
             continue
-        if not _dests_match(remittance_dest, dest):
+        if not _dests_match(display_dest, dest):
             continue
         weight = sale_match.get("cold_weight_kg") if sale_match else None
         price_base = calf_amount if warrendale_split else amount_gbp
@@ -1267,7 +1273,7 @@ def list_sales_payments(
                 farm,
                 event_cow_id,
                 etag,
-                remittance_dest,
+                display_dest,
                 event_date,
                 sales_reason,
                 gndr,
@@ -1401,7 +1407,15 @@ def list_dest_filter_options(
         )
     ).all()
     dest_options_by_key: dict[str, str] = {}
-    for name in [*buyers, *saved_destinations]:
+    event_dests = db.scalars(
+        select(func.distinct(CowEvent.dest)).where(
+            cattle_sales_exit_event_clause(),
+            CowEvent.farm.in_(selected_farms),
+            CowEvent.dest.isnot(None),
+            func.trim(CowEvent.dest) != "",
+        )
+    ).all()
+    for name in [*buyers, *saved_destinations, *event_dests]:
         text = _clean_dest_name(name)
         if text:
             dest_options_by_key.setdefault(text.casefold(), text)
