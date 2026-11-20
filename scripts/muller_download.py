@@ -17,8 +17,8 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 FOLDER = ROOT / "data" / "Muller_Milk_Collections_Monthly"
-# The address a person types. Oracle then redirects to a new login session.
-LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/"
+# Login page with a new Oracle session. The site root returns 404.
+LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/ords/f?p=200:LOGIN::::::"
 
 # Account number on the Müller home page, then the farm code used in the file name.
 FARMS = (
