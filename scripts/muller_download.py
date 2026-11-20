@@ -17,8 +17,8 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 FOLDER = ROOT / "data" / "Muller_Milk_Collections_Monthly"
-# A fresh Oracle session. The old recorded session number expires and shows no login box.
-LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/ords/f?p=200:LOGIN::::::"
+# The address a person types. Oracle then redirects to a new login session.
+LOGIN_URL = "https://farmerappprd.mulleragroscloud.com/"
 
 # Account number on the Müller home page, then the farm code used in the file name.
 FARMS = (
@@ -82,8 +82,8 @@ def _headless() -> bool:
     return flag in {"1", "true", "yes"}
 
 
-def _note_page(page: Page, reason: str) -> None:
-    """Print the page Render actually opened, and keep a picture when run on this PC."""
+def _note_page(page: Page, reason: str, status: int | None) -> None:
+    """Print the reply and HTML Render actually received."""
     shot = FOLDER / "muller-login-page.png"
     try:
         page.screenshot(path=str(shot), full_page=True)
@@ -92,6 +92,7 @@ def _note_page(page: Page, reason: str) -> None:
         print(f"Could not save login screenshot: {exc}", flush=True)
     title = ""
     body = ""
+    html = ""
     try:
         title = page.title()
     except Exception:
@@ -100,10 +101,16 @@ def _note_page(page: Page, reason: str) -> None:
         body = " ".join(page.locator("body").inner_text(timeout=5000).split())
     except Exception as exc:
         body = f"(page text unavailable: {exc})"
+    try:
+        html = page.content()
+    except Exception as exc:
+        html = f"(page html unavailable: {exc})"
     print(reason, flush=True)
+    print(f"HTTP status: {status if status is not None else 'unknown'}", flush=True)
     print(f"Page URL: {page.url}", flush=True)
     print(f"Page title: {title}", flush=True)
     print(f"Page text: {body[:1500]}", flush=True)
+    print(f"Page HTML: {html[:2000]}", flush=True)
 
 
 def run(playwright: Playwright) -> list[Path]:
@@ -128,12 +135,18 @@ def run(playwright: Playwright) -> list[Path]:
     page.set_default_timeout(90_000)
     saved: list[Path] = []
     try:
-        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        try:
+            response = page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        except Exception:
+            _note_page(page, "Müller login page did not open.", None)
+            raise
+        status = response.status if response is not None else None
+        print(f"Opened {page.url} (HTTP {status})", flush=True)
         email = page.get_by_role("textbox", name="Email Address")
         try:
             email.wait_for()
         except Exception:
-            _note_page(page, "Email Address box did not appear.")
+            _note_page(page, "Email Address box did not appear.", status)
             raise
         email.fill(os.environ["MULLER_USERNAME"])
         page.get_by_role("textbox", name="Password").fill(os.environ["MULLER_PASSWORD"])
