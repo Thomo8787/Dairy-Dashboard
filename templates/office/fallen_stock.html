@@ -142,6 +142,17 @@
       z-index: 1;
       border-bottom: none;
     }
+    #fallen-table thead th[data-sort] {
+      cursor: pointer;
+      user-select: none;
+    }
+    #fallen-table thead th[data-sort]::after {
+      content: "";
+      display: inline-block;
+      width: 0.9em;
+    }
+    #fallen-table thead th[aria-sort="ascending"]::after { content: " ↑"; }
+    #fallen-table thead th[aria-sort="descending"]::after { content: " ↓"; }
     #fallen-table th.tick-cell, #fallen-table td.tick-cell { padding: 0; }
     #fallen-table .tick-hit {
       display: flex;
@@ -242,14 +253,14 @@
             <thead>
               <tr>
                 <th class="tick-cell"><label class="tick-hit"><input type="checkbox" id="select-all" aria-label="Select all visible rows"></label></th>
-                <th>Farm</th>
-                <th>ID</th>
-                <th>Eartag</th>
-                <th>Died</th>
-                <th>DEST</th>
-                <th>Remark</th>
-                <th>Age</th>
-                <th class="checked-col" hidden>Checked</th>
+                <th data-sort="farm">Farm</th>
+                <th data-sort="cow_id">ID</th>
+                <th data-sort="etag">Eartag</th>
+                <th data-sort="age_months">Age</th>
+                <th data-sort="event_date">Died</th>
+                <th data-sort="dest">DEST</th>
+                <th data-sort="remark">Remark</th>
+                <th class="checked-col" data-sort="checked_on" hidden>Checked</th>
               </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -268,6 +279,8 @@
     let selectedKeys = new Set();
     let lastSelectIndex = null;
     let shiftRangeClick = false;
+    let sortKey = "event_date";
+    let sortDir = -1;
 
     function rowKey(row) {
       return JSON.stringify([row.farm, row.cow_id || "", row.etag || "", row.event_date || ""]);
@@ -326,7 +339,32 @@
       paintSelection();
     }
 
+    function sortValue(row) {
+      const value = row[sortKey];
+      if (value == null || value === "") return null;
+      if (sortKey === "age_months") return Number(value);
+      return typeof value === "string" ? value.toLowerCase() : value;
+    }
+
+    function applySort() {
+      rows.sort((a, b) => {
+        const av = sortValue(a);
+        const bv = sortValue(b);
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (av < bv) return -sortDir;
+        if (av > bv) return sortDir;
+        return 0;
+      });
+      document.querySelectorAll("#fallen-table thead th[data-sort]").forEach(th => {
+        const active = th.dataset.sort === sortKey;
+        th.setAttribute("aria-sort", active ? (sortDir < 0 ? "descending" : "ascending") : "none");
+      });
+    }
+
     function render() {
+      applySort();
       const archived = status === "archived";
       const body = document.getElementById("table-body");
       const cards = document.getElementById("card-list");
@@ -345,10 +383,10 @@
           <td>${escapeHtml(row.farm)}</td>
           <td>${escapeHtml(row.cow_id || "—")}</td>
           <td>${escapeHtml(row.etag || "—")}</td>
+          <td>${ageText(row)}</td>
           <td>${fmtDate(row.event_date)}</td>
           <td>${escapeHtml(row.dest || "—")}</td>
           <td>${escapeHtml(row.remark || "—")}</td>
-          <td>${ageText(row)}</td>
           <td class="checked-col"${archived ? "" : " hidden"}>${fmtDate(row.checked_on)}</td>
         </tr>`;
       }).join("");
@@ -362,8 +400,8 @@
         return `<article class="death-card ${selected}" data-key="${escapeHtml(key)}">
           <label class="tick-hit tick-cell"><input type="checkbox" class="row-select" ${checked} aria-label="Select ${escapeHtml(row.cow_id || row.etag || "animal")}"></label>
           <button type="button" class="death-card-main">
-            <div class="death-card-top"><strong>${escapeHtml(row.cow_id || "—")}</strong><span>${escapeHtml(row.farm)} · ${ageText(row)}</span></div>
-            <div class="death-card-line"><span>${escapeHtml(row.etag || "—")}</span><span>${fmtDate(row.event_date)}</span></div>
+            <div class="death-card-top"><strong>${escapeHtml(row.cow_id || "—")}</strong><span>${escapeHtml(row.farm)}</span></div>
+            <div class="death-card-line"><span>${escapeHtml(row.etag || "—")}</span><span>${ageText(row)}</span><span>${fmtDate(row.event_date)}</span></div>
             <div class="death-card-line"><span>${escapeHtml(row.dest || "—")}</span><span>${escapeHtml(row.remark || "—")}</span></div>
             ${checkedLine}
           </button>
@@ -449,6 +487,16 @@
       else selectedKeys.delete(key);
       lastSelectIndex = index;
       paintSelection();
+    });
+
+    document.querySelectorAll("#fallen-table thead th[data-sort]").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = 1; }
+        lastSelectIndex = null;
+        render();
+      });
     });
 
     document.getElementById("select-all").addEventListener("change", event => {
