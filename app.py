@@ -44,6 +44,11 @@ from services.cattle_sales_import import (
     import_cattle_sale_sources,
     sync_outlook_cattle_sales,
 )
+from services.fallen_stock import (
+    check_off_fallen_stock,
+    list_fallen_stock,
+    unarchive_fallen_stock,
+)
 from services.sales_payments import (
     confirm_payments,
     list_dest_filter_options as list_sales_dest_filter_options,
@@ -545,7 +550,56 @@ def office_sales_payments():
 @app.route("/office/fallen-stock")
 @permission_required("perm_office")
 def office_fallen_stock():
-    return _render_office_placeholder("office_fallen_stock", "Fallen Stock")
+    return render_template(
+        "office/fallen_stock.html",
+        page_heading="Fallen Stock",
+        farm_options=list(HERD_FARM_OPTIONS),
+        **_page_context(active_nav="office_fallen_stock"),
+    )
+
+
+@app.route("/office/api/fallen-stock")
+def office_api_fallen_stock():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    status = (request.args.get("status") or "active").strip().lower()
+    if status not in {"active", "archived"}:
+        status = "active"
+    with get_session() as session:
+        return jsonify(
+            list_fallen_stock(
+                session,
+                status=status,
+                farms=request.args.getlist("farm") or None,
+            )
+        )
+
+
+@app.route("/office/api/fallen-stock/check", methods=["POST"])
+def office_api_check_fallen_stock():
+    user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return jsonify({"error": "items must be a list."}), 400
+    with get_session() as session:
+        return jsonify(check_off_fallen_stock(session, items, user))
+
+
+@app.route("/office/api/fallen-stock/unarchive", methods=["POST"])
+def office_api_unarchive_fallen_stock():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return jsonify({"error": "items must be a list."}), 400
+    with get_session() as session:
+        return jsonify(unarchive_fallen_stock(session, items))
 
 
 @app.route("/office/stock-valuations")

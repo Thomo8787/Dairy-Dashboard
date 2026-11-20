@@ -289,6 +289,29 @@ class SalesPaymentDestination(Base):
     name = Column(String(128), unique=True, nullable=False, index=True)
 
 
+class FallenStockCheck(Base):
+    """Passport checked off for an on-farm death. Survives herd event reimports."""
+
+    __tablename__ = "fallen_stock_checks"
+    __table_args__ = (
+        UniqueConstraint(
+            "farm",
+            "cow_id",
+            "etag",
+            "event_date",
+            name="uq_fallen_stock_check",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    cow_id = Column(String(64), nullable=False, default="", index=True)
+    etag = Column(String(64), nullable=False, default="", index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    checked_on = Column(Date, nullable=False)
+    checked_by_user_id = Column(Integer, ForeignKey("users.id"))
+
+
 class CattleSaleLine(Base):
     """Per-animal line from a cattle remittance PDF (Pickstock FPF, etc.)."""
 

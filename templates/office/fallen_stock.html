@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_heading }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .sidebar-column { min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 3rem;
+      padding: 0.5rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .view-tab {
+      flex: 1;
+      min-height: 2.75rem;
+      padding: 0.45rem 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .view-tab.active { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
+    .action-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .selection-count { color: var(--muted); font-size: 0.875rem; }
+    .hint { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.8rem; }
+    .meta-line { margin: 0 0 0.75rem; color: var(--muted); }
+    button.primary {
+      appearance: none;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      padding: 0.55rem 0.85rem;
+      min-height: 2.75rem;
+      cursor: pointer;
+    }
+    button.secondary {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 600;
+      padding: 0.55rem 0.85rem;
+      min-height: 2.75rem;
+      cursor: pointer;
+    }
+    button.primary:disabled, button.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .empty-state {
+      padding: 1.5rem 1rem;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      text-align: center;
+    }
+    #fallen-table { width: 100%; border-collapse: collapse; }
+    #fallen-table th, #fallen-table td {
+      padding: 0.55rem 0.65rem;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    #fallen-table th.tick-cell, #fallen-table td.tick-cell,
+    .death-card .tick-cell { padding: 0; }
+    .tick-hit {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+      cursor: pointer;
+    }
+    .tick-hit input { width: 1.15rem; height: 1.15rem; margin: 0; }
+    tr.row-selected { background: var(--accent-soft); }
+    .death-cards { display: none; }
+    .death-card {
+      display: flex;
+      align-items: stretch;
+      gap: 0.25rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .death-card.row-selected { background: var(--accent-soft); border-color: var(--accent); }
+    .death-card-main {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      padding: 0.7rem 0.8rem 0.7rem 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .death-card-top, .death-card-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .death-card-top strong { font-size: 1.05rem; }
+    .death-card-line { margin-top: 0.2rem; color: var(--muted); font-size: 0.9rem; }
+    .death-card-line span { min-width: 0; overflow-wrap: anywhere; }
+    .checked-date { color: var(--ink); font-weight: 600; }
+    @media (max-width: 800px) {
+      .page-layout { grid-template-columns: 1fr; gap: 1rem; }
+      .table-wrap { display: none; }
+      .death-cards { display: flex; flex-direction: column; gap: 0.55rem; }
+      .action-bar .primary, .action-bar .secondary { flex: 1; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <span class="section-label">Farm</span>
+        <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+          {% for farm in farm_options %}
+          <button type="button" class="slicer-btn selected" data-farm="{{ farm }}" aria-pressed="true">{{ farm }}</button>
+          {% endfor %}
+        </div>
+      </aside>
+    </div>
+    <section>
+      <div class="view-tabs" role="tablist" aria-label="Fallen stock list">
+        <button type="button" class="view-tab active" data-status="active" role="tab" aria-selected="true">Active</button>
+        <button type="button" class="view-tab" data-status="archived" role="tab" aria-selected="false">Archive</button>
+      </div>
+      <div class="action-bar">
+        <span class="selection-count" id="selection-count">0 selected</span>
+        <button type="button" class="primary" id="check-btn" disabled>Check off</button>
+        <button type="button" class="secondary" id="unarchive-btn" disabled hidden>Unarchive</button>
+      </div>
+      <p class="hint">Tick a row to choose it. Hold Shift and tick another to select the rows between them. On a phone, tick one row, then tap another row to select everything between.</p>
+      <p class="meta-line" id="meta-line"></p>
+      <div id="empty-state" class="empty-state" hidden>No deaths to check off.</div>
+      <div id="death-list">
+        <div class="table-wrap">
+          <table id="fallen-table">
+            <thead>
+              <tr>
+                <th class="tick-cell"></th>
+                <th>Farm</th>
+                <th>ID</th>
+                <th>Eartag</th>
+                <th>Died</th>
+                <th>DEST</th>
+                <th>Remark</th>
+                <th>Age</th>
+                <th class="checked-col" hidden>Checked</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+        <div class="death-cards" id="card-list"></div>
+      </div>
+    </section>
+  </div>
+  <script>
+    const farmButtons = Array.from(document.querySelectorAll(".farm-slicer .slicer-btn"));
+    let status = "active";
+    let rows = [];
+    let selectedKeys = new Set();
+    let lastSelectIndex = null;
+    let shiftRangeClick = false;
+
+    function selectedFarms() {
+      return farmButtons.filter(btn => btn.classList.contains("selected")).map(btn => btn.dataset.farm);
+    }
+
+    function rowKey(row) {
+      return JSON.stringify([row.farm, row.cow_id || "", row.etag || "", row.event_date || ""]);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[char]);
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const [y, m, d] = String(iso).split("-").map(Number);
+      if (!y || !m || !d) return iso;
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB");
+    }
+
+    function ageText(row) {
+      return row.age_months == null ? "—" : `${row.age_months} mo`;
+    }
+
+    function updateActionBar() {
+      const count = selectedKeys.size;
+      document.getElementById("selection-count").textContent = `${count} selected`;
+      const archived = status === "archived";
+      const checkBtn = document.getElementById("check-btn");
+      const unarchiveBtn = document.getElementById("unarchive-btn");
+      checkBtn.hidden = archived;
+      checkBtn.disabled = archived || count === 0;
+      unarchiveBtn.hidden = !archived;
+      unarchiveBtn.disabled = !archived || count === 0;
+      document.querySelector(".checked-col").hidden = !archived;
+    }
+
+    function paintSelection() {
+      document.querySelectorAll("[data-key]").forEach(node => {
+        const key = node.dataset.key;
+        const on = selectedKeys.has(key);
+        node.classList.toggle("row-selected", on);
+        node.querySelectorAll(".row-select").forEach(box => { box.checked = on; });
+      });
+      updateActionBar();
+    }
+
+    function setRange(from, to, checked) {
+      const start = Math.min(from, to);
+      const end = Math.max(from, to);
+      for (let i = start; i <= end; i += 1) {
+        const key = rowKey(rows[i]);
+        if (checked) selectedKeys.add(key);
+        else selectedKeys.delete(key);
+      }
+      paintSelection();
+    }
+
+    function render() {
+      const archived = status === "archived";
+      const body = document.getElementById("table-body");
+      const cards = document.getElementById("card-list");
+      const empty = document.getElementById("empty-state");
+      empty.hidden = rows.length > 0;
+      document.getElementById("death-list").hidden = rows.length === 0;
+      empty.textContent = selectedFarms().length
+        ? (archived ? "Nothing in the archive." : "No deaths to check off.")
+        : "Choose a farm.";
+      body.innerHTML = rows.map(row => {
+        const key = rowKey(row);
+        const checked = selectedKeys.has(key) ? "checked" : "";
+        const selected = selectedKeys.has(key) ? "row-selected" : "";
+        return `<tr class="${selected}" data-key="${escapeHtml(key)}">
+          <td class="tick-cell"><label class="tick-hit"><input type="checkbox" class="row-select" ${checked} aria-label="Select ${escapeHtml(row.cow_id || row.etag || "animal")}"></label></td>
+          <td>${escapeHtml(row.farm)}</td>
+          <td>${escapeHtml(row.cow_id || "—")}</td>
+          <td>${escapeHtml(row.etag || "—")}</td>
+          <td>${fmtDate(row.event_date)}</td>
+          <td>${escapeHtml(row.dest || "—")}</td>
+          <td>${escapeHtml(row.remark || "—")}</td>
+          <td>${ageText(row)}</td>
+          <td class="checked-col"${archived ? "" : " hidden"}>${fmtDate(row.checked_on)}</td>
+        </tr>`;
+      }).join("");
+      cards.innerHTML = rows.map(row => {
+        const key = rowKey(row);
+        const checked = selectedKeys.has(key) ? "checked" : "";
+        const selected = selectedKeys.has(key) ? "row-selected" : "";
+        const checkedLine = archived
+          ? `<div class="death-card-line"><span>Checked</span><span class="checked-date">${fmtDate(row.checked_on)}</span></div>`
+          : "";
+        return `<article class="death-card ${selected}" data-key="${escapeHtml(key)}">
+          <label class="tick-hit tick-cell"><input type="checkbox" class="row-select" ${checked} aria-label="Select ${escapeHtml(row.cow_id || row.etag || "animal")}"></label>
+          <button type="button" class="death-card-main">
+            <div class="death-card-top"><strong>${escapeHtml(row.cow_id || "—")}</strong><span>${escapeHtml(row.farm)} · ${ageText(row)}</span></div>
+            <div class="death-card-line"><span>${escapeHtml(row.etag || "—")}</span><span>${fmtDate(row.event_date)}</span></div>
+            <div class="death-card-line"><span>${escapeHtml(row.dest || "—")}</span><span>${escapeHtml(row.remark || "—")}</span></div>
+            ${checkedLine}
+          </button>
+        </article>`;
+      }).join("");
+      updateActionBar();
+    }
+
+    async function loadRows() {
+      const meta = document.getElementById("meta-line");
+      const farms = selectedFarms();
+      if (!farms.length) {
+        rows = [];
+        selectedKeys.clear();
+        lastSelectIndex = null;
+        render();
+        meta.textContent = "";
+        return;
+      }
+      meta.textContent = "Loading…";
+      const params = new URLSearchParams({ status });
+      farms.forEach(farm => params.append("farm", farm));
+      const res = await fetch(`/office/api/fallen-stock?${params}`);
+      if (!res.ok) {
+        meta.textContent = "Could not load deaths.";
+        return;
+      }
+      const payload = await res.json();
+      rows = payload.rows || [];
+      selectedKeys.clear();
+      lastSelectIndex = null;
+      render();
+      const label = status === "archived" ? "checked off" : "to check off";
+      meta.textContent = `${rows.length} ${label}. On-farm deaths only. OFS is left off this list.`;
+    }
+
+    function indexFromNode(node) {
+      const holder = node.closest("[data-key]");
+      if (!holder) return -1;
+      return rows.findIndex(row => rowKey(row) === holder.dataset.key);
+    }
+
+    document.getElementById("death-list").addEventListener("mousedown", event => {
+      const input = event.target.closest?.(".tick-hit")?.querySelector("input");
+      if (!event.shiftKey || event.button !== 0 || !input) return;
+      const index = indexFromNode(input);
+      if (index < 0 || lastSelectIndex == null || lastSelectIndex === index) return;
+      event.preventDefault();
+      shiftRangeClick = true;
+      setRange(lastSelectIndex, index, !input.checked);
+      lastSelectIndex = index;
+    });
+
+    document.getElementById("death-list").addEventListener("click", event => {
+      const input = event.target.closest?.(".tick-hit")?.querySelector("input");
+      if (event.shiftKey && input) {
+        event.preventDefault();
+        setTimeout(() => { shiftRangeClick = false; }, 0);
+        return;
+      }
+      const cardMain = event.target.closest?.(".death-card-main");
+      if (!cardMain) return;
+      const index = indexFromNode(cardMain);
+      if (index < 0) return;
+      if (lastSelectIndex != null && lastSelectIndex !== index) {
+        setRange(lastSelectIndex, index, true);
+      } else {
+        const key = rowKey(rows[index]);
+        if (selectedKeys.has(key)) selectedKeys.delete(key);
+        else selectedKeys.add(key);
+        paintSelection();
+      }
+      lastSelectIndex = index;
+    });
+
+    document.getElementById("death-list").addEventListener("change", event => {
+      const input = event.target;
+      if (shiftRangeClick || !input.matches?.(".row-select")) return;
+      const index = indexFromNode(input);
+      if (index < 0) return;
+      const key = rowKey(rows[index]);
+      if (input.checked) selectedKeys.add(key);
+      else selectedKeys.delete(key);
+      lastSelectIndex = index;
+      paintSelection();
+    });
+
+    farmButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        btn.classList.toggle("selected");
+        btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+        loadRows();
+      });
+    });
+
+    document.querySelectorAll(".view-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        status = tab.dataset.status;
+        document.querySelectorAll(".view-tab").forEach(other => {
+          const on = other === tab;
+          other.classList.toggle("active", on);
+          other.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        loadRows();
+      });
+    });
+
+    function selectedItems() {
+      return rows.filter(row => selectedKeys.has(rowKey(row))).map(row => ({
+        farm: row.farm,
+        cow_id: row.cow_id,
+        etag: row.etag,
+        event_date: row.event_date,
+      }));
+    }
+
+    async function postItems(url, workingLabel, button) {
+      const items = selectedItems();
+      if (!items.length) return;
+      const previous = button.textContent;
+      button.disabled = true;
+      button.textContent = workingLabel;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        if (!res.ok) {
+          alert("Could not update the list.");
+          return;
+        }
+        await loadRows();
+      } finally {
+        button.textContent = previous;
+        updateActionBar();
+      }
+    }
+
+    document.getElementById("check-btn").addEventListener("click", event => {
+      postItems("/office/api/fallen-stock/check", "Checking…", event.currentTarget);
+    });
+    document.getElementById("unarchive-btn").addEventListener("click", event => {
+      postItems("/office/api/fallen-stock/unarchive", "Returning…", event.currentTarget);
+    });
+
+    loadRows();
+  </script>
+{% endblock %}
