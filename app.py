@@ -1725,6 +1725,40 @@ def genetics_flush_day(batch_id: int):
     )
 
 
+@app.route("/genetics/flushes/<int:batch_id>/edit", methods=["GET", "POST"])
+@permission_required("perm_genetics")
+def genetics_flush_edit(batch_id: int):
+    action = (request.form.get("action") or "plan").strip()
+    if request.method == "POST":
+        if action == "plan":
+            message = _embryo_action(
+                lambda session: update_flush_plan(session, batch_id, request.form),
+                "Flush updated.",
+            )
+            if message:
+                flash(message, "success")
+                return redirect(url_for("genetics_flushes"))
+        elif action == "delete":
+            message = _embryo_action(lambda session: delete_batch(session, batch_id), "Flush removed.")
+            if message:
+                flash(message, "success")
+                return redirect(url_for("genetics_flushes"))
+        else:
+            flash("That action is not available.", "error")
+        return redirect(url_for("genetics_flush_edit", batch_id=batch_id))
+    try:
+        with get_session() as session:
+            flush = get_flush(session, batch_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("genetics_flushes"))
+    return render_template(
+        "genetics/flush_edit.html",
+        **_page_context(active_nav="genetics_flushes", page_heading="Edit flush"),
+        flush=flush,
+    )
+
+
 @app.route("/genetics/frozen-stock", methods=["GET", "POST"])
 @permission_required("perm_genetics")
 def genetics_frozen_stock():

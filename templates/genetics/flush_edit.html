@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ flush.dam }} · {{ app_name }}{% endblock %}
+{% block page_title %}Edit flush{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/embryos.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="embryo-page">
+    <section class="embryo-panel">
+      <form class="embryo-form two" method="post" style="margin-top: 0.2rem;">
+        <input type="hidden" name="action" value="plan">
+        <label class="embryo-field">
+          <span>Dam</span>
+          <input name="dam" required value="{{ flush.dam }}" autocomplete="off">
+        </label>
+        <label class="embryo-field">
+          <span>Flush date</span>
+          <input name="flush_date" type="date" required value="{{ flush.event_date }}">
+        </label>
+        <label class="embryo-field sire-pick">
+          <span>Sire</span>
+          <input name="sire_1" required value="{{ flush.sire_1 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_1_hbn" value="{{ flush.sire_1_hbn }}">
+          <div class="sire-matches" hidden></div>
+        </label>
+        <label class="embryo-field sire-pick">
+          <span>Second sire, if used</span>
+          <input name="sire_2" value="{{ flush.sire_2 }}" autocomplete="off" data-sire-input placeholder="Type a name or search the bull list">
+          <input type="hidden" name="sire_2_hbn" value="{{ flush.sire_2_hbn }}">
+          <div class="sire-matches" hidden></div>
+        </label>
+        <p class="embryo-note wide embryo-field">Pick a bull to link his figures. If he is not on the list yet, type his name and save.</p>
+        <div class="embryo-actions wide embryo-field">
+          <button class="btn" type="submit">Save</button>
+          <button class="btn ghost" type="button" id="openDelete">Delete</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <dialog class="embryo-dialog" id="deleteDialog">
+    <h2>Delete this flush?</h2>
+    <p class="embryo-note">Are you sure you want to delete this flush?</p>
+    <form method="post">
+      <input type="hidden" name="action" value="delete">
+      <div class="embryo-actions">
+        <button class="btn" type="submit">Yes</button>
+        <button class="btn ghost" type="button" data-close>No</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    const dialog = document.getElementById("deleteDialog");
+    const opener = document.getElementById("openDelete");
+    if (opener && dialog.showModal) {
+      opener.addEventListener("click", () => dialog.showModal());
+    }
+    const closer = dialog.querySelector("[data-close]");
+    if (closer) closer.addEventListener("click", () => dialog.close());
+  </script>
+  <script src="{{ url_for('static', filename='js/embryo_sire_picker.js') }}" data-bulls-url="{{ url_for('genetics_api_bull_search') }}"></script>
+{% endblock %}

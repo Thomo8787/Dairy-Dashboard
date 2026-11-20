@@ -51,7 +51,7 @@
               {% endif %}
               <div class="embryo-card-actions">
                 <a class="btn" href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open flush day</a>
-                <a class="btn secondary" href="{{ url_for('genetics_flush_day', batch_id=flush.id, edit=1) }}">Edit</a>
+                <a class="btn secondary" href="{{ url_for('genetics_flush_edit', batch_id=flush.id) }}">Edit</a>
               </div>
             </article>
           {% endfor %}
@@ -136,7 +136,7 @@
                   <td>{{ flush.frozen_grade_1 }} grade 1, {{ flush.frozen_grade_2 }} grade 2</td>
                   <td>
                     <a href="{{ url_for('genetics_flush_day', batch_id=flush.id) }}">Open</a>
-                    <a href="{{ url_for('genetics_flush_day', batch_id=flush.id, edit=1) }}">Edit</a>
+                    <a href="{{ url_for('genetics_flush_edit', batch_id=flush.id) }}">Edit</a>
                   </td>
                 </tr>
               {% endfor %}
