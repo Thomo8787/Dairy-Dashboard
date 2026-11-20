@@ -209,6 +209,7 @@
     .death-card-top strong { font-size: 1.05rem; white-space: nowrap; }
     .death-card-top span { white-space: nowrap; }
     .death-card-line { margin-top: 0.2rem; color: var(--muted); font-size: 0.9rem; }
+    .death-card-line span { white-space: nowrap; }
     .death-card-meta {
       display: flex;
       flex-wrap: wrap;
@@ -422,9 +423,9 @@
         return `<article class="death-card ${selected}" data-key="${escapeHtml(key)}">
           <label class="tick-hit tick-cell"><input type="checkbox" class="row-select" ${checked} aria-label="Select ${escapeHtml(row.cow_id || row.etag || "animal")}"></label>
           <button type="button" class="death-card-main">
-            <div class="death-card-top"><strong>${escapeHtml(row.etag || "—")}</strong><span>${fmtDate(row.event_date)}</span></div>
+            <div class="death-card-top"><strong>${escapeHtml(row.cow_id || "—")}</strong><span>${escapeHtml(row.farm)}</span></div>
+            <div class="death-card-line"><span>${escapeHtml(row.etag || "—")}</span><span>${fmtDate(row.event_date)}</span></div>
             <div class="death-card-meta"><span>${ageText(row)}</span><span>${escapeHtml(row.dest || "—")}</span><span class="remark">${escapeHtml(row.remark || "—")}</span></div>
-            <div class="death-card-line"><span>${escapeHtml(row.cow_id || "—")} · ${escapeHtml(row.farm)}</span></div>
             ${checkedLine}
           </button>
         </article>`;
