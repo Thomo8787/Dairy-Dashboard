@@ -41,16 +41,13 @@
     .farm-slicer .slicer-btn.selected {
       background: var(--accent); border-color: var(--accent); color: #fff;
     }
-    .date-row { display: grid; gap: 0.5rem; }
-    .date-row label {
-      display: flex; flex-direction: column; gap: 0.25rem;
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .date-inputs label {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
       font-size: 0.8125rem; color: var(--muted);
     }
-    .date-row select {
-      width: 100%; padding: 0.45rem 0.5rem;
-      border: 1px solid var(--line); border-radius: 6px; background: #fff;
-      color: var(--text); font-size: 0.875rem;
-    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; color: var(--text); }
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
     .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
@@ -79,24 +76,26 @@
             {% for farm in farms %}
             <button
               type="button"
-              class="slicer-btn{% if farm.code == 'ALH' %} selected{% endif %}"
+              class="slicer-btn selected"
               data-value="{{ farm.code }}"
-              aria-pressed="{{ 'true' if farm.code == 'ALH' else 'false' }}"
+              aria-pressed="true"
             >{{ farm.code }}</button>
             {% endfor %}
           </div>
         </div>
         <div class="filter-section">
-          <span class="section-label">Month</span>
-          <div class="date-row">
-            <label>From <select id="date-from" aria-label="From month"></select></label>
-            <label>To <select id="date-to" aria-label="To month"></select></label>
+          <span class="section-label">Month range</span>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="min-date-label">—</span></label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0" aria-label="From month">
+            <label>To <span class="month-label" id="max-date-label">—</span></label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0" aria-label="To month">
           </div>
         </div>
         <p class="help-text">
           One row per farm and day. Total milk is the ticket litres for that day.
           Fat %, protein %, and SCC are litre-weighted when there is more than one collection.
-          Milk per cow is total milk divided by cows in milk.
+          Milk per cow is total milk divided by cows in milk. Double-click a farm to show only that one.
         </p>
       </aside>
     </div>
@@ -130,10 +129,12 @@
 <script>
 (function () {
   const farmSlicer = document.getElementById("farm-slicer");
-  const dateFrom = document.getElementById("date-from");
-  const dateTo = document.getElementById("date-to");
+  const minRange = document.getElementById("min-date-range");
+  const maxRange = document.getElementById("max-date-range");
   const meta = document.getElementById("meta-line");
   const tbody = document.getElementById("table-body");
+  const MONTH_COUNT = 36;
+  let monthList = [];
 
   function monthKey(d) {
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -154,22 +155,34 @@
     return key + "-" + String(last).padStart(2, "0");
   }
 
-  function fillMonthSelects() {
-    const months = [];
+  function fillMonthSliders() {
+    monthList = [];
     const now = new Date();
-    for (let i = 0; i < 36; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(monthKey(d));
+    for (let i = MONTH_COUNT - 1; i >= 0; i--) {
+      monthList.push(monthKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
     }
-    const opts = months.map((key) =>
-      `<option value="${key}">${monthLabel(key)}</option>`
-    ).join("");
-    dateFrom.innerHTML = opts;
-    dateTo.innerHTML = opts;
-    const thisMonth = months[0];
-    const lastMonth = months[1] || thisMonth;
-    dateFrom.value = lastMonth;
-    dateTo.value = thisMonth;
+    const maxIdx = monthList.length - 1;
+    minRange.min = 0;
+    minRange.max = maxIdx;
+    maxRange.min = 0;
+    maxRange.max = maxIdx;
+    minRange.value = Math.max(0, maxIdx - 1);
+    maxRange.value = maxIdx;
+    updateDateLabels();
+  }
+
+  function updateDateLabels() {
+    let lo = parseInt(minRange.value, 10) || 0;
+    let hi = parseInt(maxRange.value, 10) || 0;
+    if (lo > hi) {
+      const swap = lo;
+      lo = hi;
+      hi = swap;
+      minRange.value = lo;
+      maxRange.value = hi;
+    }
+    document.getElementById("min-date-label").textContent = monthList[lo] ? monthLabel(monthList[lo]) : "—";
+    document.getElementById("max-date-label").textContent = monthList[hi] ? monthLabel(monthList[hi]) : "—";
   }
 
   function selectedFarms() {
@@ -215,19 +228,18 @@
 
   async function load() {
     meta.textContent = "Loading…";
+    updateDateLabels();
     const params = new URLSearchParams();
     selectedFarms().forEach((f) => params.append("farm", f));
-    let from = dateFrom.value;
-    let to = dateTo.value;
-    if (from && to && from > to) {
-      const swap = from;
-      from = to;
-      to = swap;
-      dateFrom.value = from;
-      dateTo.value = to;
+    let lo = parseInt(minRange.value, 10) || 0;
+    let hi = parseInt(maxRange.value, 10) || 0;
+    if (lo > hi) {
+      const swap = lo;
+      lo = hi;
+      hi = swap;
     }
-    if (from) params.set("date_from", monthToDateFrom(from));
-    if (to) params.set("date_to", monthToDateTo(to));
+    if (monthList[lo]) params.set("date_from", monthToDateFrom(monthList[lo]));
+    if (monthList[hi]) params.set("date_to", monthToDateTo(monthList[hi]));
     try {
       const res = await fetch("/milk-quality/api/milk-per-cow?" + params.toString());
       const data = await res.json().catch(() => ({}));
@@ -241,7 +253,7 @@
 
   farmSlicer.addEventListener("click", (e) => {
     const btn = e.target.closest(".slicer-btn");
-    if (!btn) return;
+    if (!btn || btn.classList.contains("farm-select-all")) return;
     const selected = btn.classList.contains("selected");
     const count = farmSlicer.querySelectorAll(".slicer-btn.selected").length;
     if (selected && count <= 1) return;
@@ -249,10 +261,12 @@
     btn.setAttribute("aria-pressed", btn.classList.contains("selected"));
     load();
   });
-  dateFrom.addEventListener("change", load);
-  dateTo.addEventListener("change", load);
+  minRange.addEventListener("input", updateDateLabels);
+  maxRange.addEventListener("input", updateDateLabels);
+  minRange.addEventListener("change", load);
+  maxRange.addEventListener("change", load);
 
-  fillMonthSelects();
+  fillMonthSliders();
   load();
 })();
 </script>
