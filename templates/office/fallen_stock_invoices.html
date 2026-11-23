@@ -62,7 +62,17 @@
       color: #fff;
     }
     .farm-slicer .slicer-btn.selected .slicer-icon { background: #fff; color: var(--accent); }
-    .month-field { width: 100%; margin: 0 0 0.75rem; }
+    .date-inputs { display: grid; gap: 0.35rem; margin-bottom: 0.85rem; }
+    .date-inputs label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+    .date-inputs input[type="range"] { width: 100%; margin: 0; }
+    .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; }
     .content-panel { min-width: 0; }
     .action-bar {
       display: flex;
@@ -79,6 +89,7 @@
     }
     .action-bar .primary { background: #1e3a5f; border: 1px solid #1e3a5f; color: #fff; }
     .action-bar .secondary { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+    .action-bar label.upload-btn { display: inline-flex; font: inherit; }
     .action-bar button:disabled { opacity: 0.55; cursor: default; }
     .archive-chip {
       border: 1px solid var(--line);
@@ -111,6 +122,9 @@
       vertical-align: middle;
     }
     #invoice-table th.band, #invoice-table td.band { text-align: left; }
+    #invoice-table th.farm-name { text-align: center; }
+    #invoice-table thead th.farm-start { border-left: 2px solid rgba(255, 255, 255, 0.7); }
+    #invoice-table tbody td.farm-start { border-left: 2px solid #1e3a5f; }
     #invoice-table thead th {
       background: #1e3a5f;
       color: #fff;
@@ -180,8 +194,10 @@
     <div class="sidebar-column">
       <aside class="filter-panel">
         <h2>Filters</h2>
-        <label class="section-label" for="month">Month</label>
-        <input class="month-field" type="month" id="month">
+        <div class="date-inputs">
+          <label>Month <span class="month-label" id="month-label">—</span></label>
+          <input type="range" id="month-range" min="0" max="0" value="0" aria-label="Month">
+        </div>
         <span class="section-label">Farm</span>
         <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
           {% for farm in farm_options %}
@@ -197,10 +213,14 @@
       <div class="action-bar">
         <button type="button" class="primary" id="archive-btn">Archive month</button>
         <button type="button" class="secondary" id="unarchive-btn" hidden>Unarchive</button>
+        <label class="secondary upload-btn">
+          Upload invoice
+          <input type="file" id="invoice-upload" accept="application/pdf,.pdf" multiple hidden>
+        </label>
         <span id="archive-list"></span>
       </div>
       <p class="banner" id="archive-banner" hidden></p>
-      <p class="hint">On-farm deaths for the month, excluding OFS. Died includes stillborn calves added below. Difference is the invoice quantity minus our count.</p>
+      <p class="hint">On-farm deaths for the month, excluding OFS. Died includes stillborn calves added below. Difference is the invoice quantity minus our count. Upload a Brassington invoice to fill the quantities from the collection lines. Uploading it again replaces those figures. An archived month is left as it is.</p>
       <p class="meta-line" id="meta-line"></p>
       <div class="table-wrap">
         <table id="invoice-table">
@@ -233,6 +253,7 @@
   </div>
   <script>
     let payload = null;
+    const monthList = [];
 
     function selectedFarms() {
       return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")].map(btn => btn.dataset.value);
@@ -244,14 +265,56 @@
       })[char]);
     }
 
+    function monthKey(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function formatMonthLabel(date) {
+      const mon = date.toLocaleDateString("en-GB", { month: "short" });
+      return `${mon}-${String(date.getFullYear()).slice(-2)}`;
+    }
+
+    function ensureMonth(yyyyMm) {
+      const [year, mon] = yyyyMm.split("-").map(Number);
+      const target = new Date(year, mon - 1, 1);
+      if (!monthList.length) {
+        const end = new Date();
+        const start = new Date(end.getFullYear(), end.getMonth() - 35, 1);
+        for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
+          monthList.push(new Date(cursor));
+        }
+      }
+      while (monthList[0] > target) {
+        const prev = monthList[0];
+        monthList.unshift(new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+      }
+      let cursor = monthList[monthList.length - 1];
+      while (cursor < target) {
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+        monthList.push(cursor);
+      }
+      return monthList.findIndex(month => monthKey(month) === yyyyMm);
+    }
+
     function monthValue() {
-      return document.getElementById("month").value;
+      const index = parseInt(document.getElementById("month-range").value, 10);
+      const month = monthList[index];
+      return month ? monthKey(month) : "";
+    }
+
+    function setMonth(yyyyMm) {
+      const index = ensureMonth(yyyyMm);
+      const range = document.getElementById("month-range");
+      range.min = "0";
+      range.max = String(monthList.length - 1);
+      range.value = String(Math.max(0, index));
+      const chosen = monthList[parseInt(range.value, 10)];
+      document.getElementById("month-label").textContent = chosen ? formatMonthLabel(chosen) : "—";
     }
 
     function previousMonth() {
       const now = new Date();
-      const day = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}`;
+      return monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
     }
 
     function monthLabel(month) {
@@ -290,14 +353,14 @@
         body.innerHTML = "";
         return;
       }
-      head.innerHTML = `<tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th colspan="3">${farm}</th>`).join("")}</tr>`
-        + `<tr>${farms.map(() => "<th>Died</th><th>Invoice</th><th>Diff</th>").join("")}</tr>`;
+      head.innerHTML = `<tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th class="farm-name farm-start" colspan="3">${farm}</th>`).join("")}</tr>`
+        + `<tr>${farms.map(() => `<th class="farm-start">Died</th><th>Invoice</th><th>Diff</th>`).join("")}</tr>`;
       body.innerHTML = payload.bands.map(band => {
         const cells = farms.map(farm => {
           const died = payload.counts[band.id][farm] || 0;
           const invoice = payload.invoice[band.id][farm];
           const value = invoice == null ? "" : invoice;
-          return `<td>${died}</td><td><input type="number" min="0" step="1" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
+          return `<td class="farm-start">${died}</td><td><input type="number" min="0" step="1" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
         }).join("");
         return `<tr><td class="band">${escapeHtml(band.label)}</td>${cells}</tr>`;
       }).join("");
@@ -316,9 +379,9 @@
     async function load(month) {
       const meta = document.getElementById("meta-line");
       const chosen = month || monthValue();
-      if (chosen) document.getElementById("month").value = chosen;
+      if (chosen) setMonth(chosen);
       meta.textContent = "Loading…";
-      const res = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(document.getElementById("month").value)}`);
+      const res = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(monthValue())}`);
       if (!res.ok) {
         meta.textContent = "Could not load the month.";
         return;
@@ -339,7 +402,11 @@
       });
     });
 
-    document.getElementById("month").addEventListener("change", () => load());
+    document.getElementById("month-range").addEventListener("input", () => {
+      const chosen = monthList[parseInt(document.getElementById("month-range").value, 10)];
+      document.getElementById("month-label").textContent = chosen ? formatMonthLabel(chosen) : "—";
+    });
+    document.getElementById("month-range").addEventListener("change", () => load());
 
     document.getElementById("table-body").addEventListener("change", async event => {
       const input = event.target;
@@ -439,13 +506,32 @@
       await load();
     });
 
+    document.getElementById("invoice-upload").addEventListener("change", async event => {
+      const files = [...event.target.files];
+      event.target.value = "";
+      if (!files.length) return;
+      const meta = document.getElementById("meta-line");
+      meta.textContent = "Reading the invoice…";
+      const body = new FormData();
+      files.forEach(file => body.append("files", file));
+      const res = await fetch("/office/api/fallen-stock-invoices/upload", { method: "POST", body });
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        meta.textContent = saved.message || saved.error || "Could not read the invoice.";
+        return;
+      }
+      const filled = (saved.results || []).flatMap(result => (result.filled || []).map(row => row.month));
+      const showing = monthValue();
+      await load(filled.includes(showing) ? showing : filled[filled.length - 1]);
+      meta.textContent = saved.message || "Invoice quantities updated.";
+    });
+
     document.getElementById("archive-list").addEventListener("click", event => {
       const button = event.target.closest?.("[data-month]");
       if (!button) return;
       load(button.dataset.month);
     });
 
-    document.getElementById("month").value = previousMonth();
-    setTimeout(() => load(), 0);
+    setTimeout(() => load(previousMonth()), 0);
   </script>
 {% endblock %}

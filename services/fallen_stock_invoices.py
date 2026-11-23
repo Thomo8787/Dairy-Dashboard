@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from services.brassington_invoice_pdf import parse_brassington_invoice
 from services.database import (
     FallenStockInvoiceArchive,
     FallenStockInvoiceQty,
@@ -257,3 +258,32 @@ def unarchive_invoice_month(db: Session, month: dt.date) -> None:
     if row is None:
         raise ValueError("That month is not archived.")
     db.delete(row)
+
+
+def apply_brassington_invoice(db: Session, content: bytes) -> dict[str, Any]:
+    """Replace the invoice quantities for the collections on this PDF.
+
+    A band that is not on the PDF is left as it was. An archived month is
+    left unchanged and reported back.
+    """
+    parsed = parse_brassington_invoice(content)
+    filled: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for item in parsed["totals"]:
+        month = parse_month(item["month"])
+        if month is None:
+            continue
+        if _archive_row(db, month) is not None:
+            skipped.append(item["month"])
+            continue
+        set_invoice_quantity(
+            db,
+            month=month,
+            farm=parsed["farm"],
+            band=item["band"],
+            quantity=int(item["quantity"]),
+        )
+        filled.append(item)
+    parsed["filled"] = filled
+    parsed["skipped_months"] = sorted(set(skipped))
+    return parsed

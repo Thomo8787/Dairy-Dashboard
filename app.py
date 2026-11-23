@@ -49,7 +49,9 @@ from services.fallen_stock import (
     unarchive_fallen_stock,
 )
 from services.fallen_stock_invoices import (
+    AGE_BANDS,
     add_stillborn,
+    apply_brassington_invoice,
     archive_invoice_month,
     archived_months,
     delete_stillborn,
@@ -735,6 +737,61 @@ def office_api_archive_fallen_stock_invoice():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(saved)
+
+
+def _invoice_upload_message(results: list[dict]) -> str:
+    band_labels = {band_id: label for band_id, label, *_rest in AGE_BANDS}
+    parts: list[str] = []
+    for result in results:
+        if result.get("error"):
+            parts.append(f"{result['filename']}: {result['error']}")
+            continue
+        by_month: dict[str, list[str]] = {}
+        for row in result["filled"]:
+            label = band_labels.get(row["band"], row["band"])
+            by_month.setdefault(row["month"], []).append(f"{label} {row['quantity']}")
+        detail = ", ".join(
+            f"{month} ({', '.join(bands)})" for month, bands in by_month.items()
+        )
+        number = f" {result['invoice_no']}" if result.get("invoice_no") else ""
+        text = f"{result['farm']} invoice{number}"
+        text += f": {detail}." if detail else ": nothing written."
+        if result["skipped_months"]:
+            text += " Left archived: " + ", ".join(result["skipped_months"]) + "."
+        if result["unknown_bands"]:
+            text += " Unrecognised ages: " + ", ".join(result["unknown_bands"]) + "."
+        parts.append(text)
+    return " ".join(parts)
+
+
+@app.route("/office/api/fallen-stock-invoices/upload", methods=["POST"])
+def office_api_upload_fallen_stock_invoice():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    uploads = request.files.getlist("files")
+    if not uploads:
+        return jsonify({"message": "Choose an invoice PDF."}), 400
+    results: list[dict] = []
+    with get_session() as session:
+        for upload in uploads:
+            filename = upload.filename or "invoice.pdf"
+            content = upload.read()
+            if not content:
+                continue
+            if len(content) > 8 * 1024 * 1024:
+                results.append({"filename": filename, "error": "larger than 8 MB."})
+                continue
+            try:
+                parsed = apply_brassington_invoice(session, content)
+            except ValueError as exc:
+                results.append({"filename": filename, "error": str(exc)})
+                continue
+            parsed["filename"] = filename
+            results.append(parsed)
+    if not results:
+        return jsonify({"message": "Choose an invoice PDF."}), 400
+    return jsonify({"results": results, "message": _invoice_upload_message(results)})
 
 
 @app.route("/office/api/fallen-stock-invoices/unarchive", methods=["POST"])
