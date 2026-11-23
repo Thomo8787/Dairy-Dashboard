@@ -187,6 +187,7 @@ from services.nml_results import (
 )
 from services.nml_statements import list_nml_statements
 from services.nml_sync import get_nml_import_status, start_nml_import_job
+from services.milk_per_cow import list_milk_per_cow
 from services.muller_collections_import import import_muller_uploads
 from services.nml_manual import (
     delete_collection_load,
@@ -1160,6 +1161,15 @@ def milk_quality_collections():
     )
 
 
+@app.route("/milk-quality/milk-per-cow")
+@permission_required("perm_milk_quality")
+def milk_quality_milk_per_cow():
+    return render_template(
+        "milk_quality/milk_per_cow.html",
+        **_page_context(active_nav="milk_quality_milk_per_cow"),
+    )
+
+
 @app.route("/milk-quality/statements")
 @permission_required("perm_milk_quality")
 def milk_quality_statements():
@@ -1258,6 +1268,24 @@ def milk_quality_api_statements():
         except ValueError:
             return jsonify({"error": "Invalid fiscal_year."}), 400
     return jsonify(list_nml_statements(fiscal_year=fiscal_year, farms=_milk_quality_farms_arg()))
+
+
+@app.route("/milk-quality/api/milk-per-cow")
+def milk_quality_api_milk_per_cow():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    return jsonify(
+        list_milk_per_cow(
+            farms=_milk_quality_farms_arg(),
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )
 
 
 @app.route("/milk-quality/api/import/status")

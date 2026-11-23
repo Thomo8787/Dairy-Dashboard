@@ -128,6 +128,12 @@ NAV_ITEMS = [
                 "permission": "perm_milk_quality",
             },
             {
+                "id": "milk_quality_milk_per_cow",
+                "label": "Milk per Cow",
+                "endpoint": "milk_quality_milk_per_cow",
+                "permission": "perm_milk_quality",
+            },
+            {
                 "id": "milk_quality_statements",
                 "label": "Statements",
                 "endpoint": "milk_quality_statements",
