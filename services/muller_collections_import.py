@@ -324,6 +324,14 @@ def _volume_match_ticket(
     return pool[0]
 
 
+def _same_sample(row: NmlMilkResult, sample_id: str) -> bool:
+    target = normalize_sample_id(sample_id)
+    raw = str(row.sample_id or "").strip()
+    return bool(target) and (
+        normalize_sample_id(raw) == target or raw == str(sample_id).strip()
+    )
+
+
 def _sample_taken(
     rows: list[NmlMilkResult],
     *,
@@ -332,19 +340,13 @@ def _sample_taken(
     sample_id: str,
     except_id: int | None,
 ) -> bool:
-    """True when another real ticket already owns this sample that day.
-
-    Weighbridge-only orphans are ignored — they are merged into the ticket.
-    """
-    target = normalize_sample_id(sample_id)
+    """True when any other row that day already holds this sample (incl. orphans)."""
     for row in rows:
         if row.id == except_id:
             continue
         if row.farm != farm or row.sample_date != day:
             continue
-        if _is_orphan_bridge_row(row):
-            continue
-        if normalize_sample_id(row.sample_id) == target and not row.sample_missing:
+        if _same_sample(row, sample_id):
             return True
     return False
 
@@ -384,26 +386,25 @@ def _clear_sample_holders(
     sample_id: str,
     except_id: int | None,
 ) -> int:
-    """Remove or displace every row holding this sample that day. Returns removals."""
-    target = normalize_sample_id(sample_id)
-    removed = 0
+    """Remove or displace every row holding this sample that day. Always flushes."""
+    changed = 0
     for other in list(rows):
         if other.id == except_id:
             continue
         if other.sample_date != day:
             continue
-        if normalize_sample_id(other.sample_id) != target:
+        if not _same_sample(other, sample_id):
             continue
         if _is_orphan_bridge_row(other):
             session.delete(other)
             if other in rows:
                 rows.remove(other)
-            removed += 1
         else:
             _displace_sample(other)
-    if removed:
+        changed += 1
+    if changed:
         session.flush()
-    return removed
+    return changed
 
 
 def _claim_blank_by_size(
@@ -678,12 +679,13 @@ def _claim_sampled_records(
         if sample_key is not None and sample_key in samples_owned:
             unmatched.append(_row_brief(record))
             continue
-        if day is not None and _sample_taken(
-            rows,
-            farm=farm,
-            day=day,
-            sample_id=record["sample_id"],
-            except_id=None,
+        # A real ticket already has this sample — don't invent a second line.
+        if day is not None and any(
+            other.farm == farm
+            and other.sample_date == day
+            and not _is_orphan_bridge_row(other)
+            and _same_sample(other, record["sample_id"])
+            for other in rows
         ):
             unmatched.append(_row_brief(record))
             continue
@@ -883,7 +885,6 @@ def apply_muller_records(
                 # Fold Müller-only duplicates into this ticket before adopting the sample.
                 day = row.sample_date
                 if day is not None and record["sample_id"]:
-                    target = normalize_sample_id(record["sample_id"])
                     orphans = [
                         other
                         for other in list(rows)
@@ -891,7 +892,7 @@ def apply_muller_records(
                         and other.sample_date == day
                         and _is_orphan_bridge_row(other)
                         and (
-                            normalize_sample_id(other.sample_id) == target
+                            _same_sample(other, record["sample_id"])
                             or _within_tolerance(row.litres_load, other.litres_weighbridge)
                         )
                     ]
@@ -900,24 +901,21 @@ def apply_muller_records(
                         if orphan in rows:
                             rows.remove(orphan)
                         merged_orphans += 1
-
-                if override and record["sample_id"]:
-                    target = normalize_sample_id(record["sample_id"])
-                    # Free the sample on any other ticket so the unique key allows the override.
-                    displaced = False
-                    for other in list(rows):
-                        if (
-                            other.id != row.id
-                            and other.sample_date == row.sample_date
-                            and not _is_orphan_bridge_row(other)
-                            and normalize_sample_id(other.sample_id) == target
-                        ):
-                            _displace_sample(other)
-                            displaced = True
-                    if displaced:
+                    if orphans:
                         session.flush()
+
+                if override and record["sample_id"] and day is not None:
+                    # Free every other holder (tickets + stragglers) then adopt Müller sample.
+                    _clear_sample_holders(
+                        session,
+                        rows,
+                        day=day,
+                        sample_id=record["sample_id"],
+                        except_id=row.id,
+                    )
                     row.sample_id = record["sample_id"]
                     row.sample_missing = False
+                    session.flush()
 
                 row.litres_weighbridge = record["litres"]
                 row.weighbridge_confirmed = confirmed
@@ -1005,21 +1003,31 @@ def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
             continue
         try:
             text = content.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"{name} is not a text CSV.") from exc
-        records = parse_muller_csv_text(name, text)
+        except UnicodeDecodeError:
+            errors.append(
+                {
+                    "source_file": name or filename,
+                    "error": f"{name} is not a text CSV.",
+                }
+            )
+            continue
         farm = farm_from_filename(name)
         assert farm is not None
-        results.append(
-            apply_muller_records(
-                farm,
-                records,
-                source_file=name,
-                fill_temp=False,
-                repair_conflicts=False,
-                apply=True,
+        try:
+            records = parse_muller_csv_text(name, text)
+            results.append(
+                apply_muller_records(
+                    farm,
+                    records,
+                    source_file=name,
+                    fill_temp=False,
+                    repair_conflicts=False,
+                    apply=True,
+                )
             )
-        )
+        except (ValueError, SQLAlchemyError) as exc:
+            logger.exception("Müller import failed for %s", name)
+            errors.append({"source_file": name or filename, "error": str(exc)})
 
     if not results:
         detail = errors[0]["error"] if errors else "No Müller files were imported."

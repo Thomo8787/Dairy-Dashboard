@@ -1187,11 +1187,13 @@
       if (data.rows_ambiguous) {
         message += " " + data.rows_ambiguous + " could not be matched to a single ticket.";
       }
-      const rejected = (data.errors || []).map((item) => item.source_file).filter(Boolean);
-      if (rejected.length) {
-        message += " Skipped " + rejected.join(", ") + ".";
+      const fileErrors = (data.errors || []).filter((item) => item && item.error);
+      if (fileErrors.length) {
+        message += " " + fileErrors.map((item) =>
+          (item.source_file ? item.source_file + ": " : "") + item.error
+        ).join(" ");
       }
-      showMessage(message);
+      showMessage(message, fileErrors.length > 0 && !(data.rows_updated > 0));
       loadResults();
     } catch (err) {
       showMessage(err.message || String(err), true);
