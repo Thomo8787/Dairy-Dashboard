@@ -304,6 +304,18 @@ def _cows_in_milk_by_farm(today: dt.date) -> dict[str, dict[str, int | None]]:
     return summary
 
 
+def get_home_cows_in_milk(*, as_of: dt.date | None = None) -> dict[str, Any]:
+    """Today's cows in milk and the 30-day average, separate from milk figures."""
+    today = as_of or _uk_today()
+    return {
+        "as_of": today.isoformat(),
+        "farms": [
+            {"farm": farm, **counts}
+            for farm, counts in _cows_in_milk_by_farm(today).items()
+        ],
+    }
+
+
 def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     """Return per-farm 7-day / 30-day production averages ending yesterday."""
     today = as_of or _uk_today()
@@ -316,7 +328,6 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     )
     trend = payload.get("trend") or {}
     _annotate_volume_and_cows(trend)
-    cows_in_milk = _cows_in_milk_by_farm(today)
 
     farms_out: list[dict[str, Any]] = []
     for farm in HERD_FARM_OPTIONS:
@@ -345,7 +356,6 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
                 "window_end": completed_through.isoformat(),
                 "d7": d7,
                 "d30": d30,
-                "cows_in_milk": cows_in_milk.get(farm) or {"today": None, "d30": None},
             }
         )
 

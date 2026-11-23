@@ -447,9 +447,31 @@ html, body {
 }
 
 .home-widget.status-unknown .widget-title,
-.home-widget.status-loading .widget-title,
 .home-widget.status-error .widget-title {
   color: var(--muted);
+}
+
+.home-widget.status-loading .widget-title {
+  color: transparent;
+  position: relative;
+}
+
+.home-widget.status-loading .widget-title::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: -0.475rem 0 0 -0.475rem;
+  border: 2px solid rgba(31, 59, 90, 0.25);
+  border-top-color: #1f3b5a;
+  border-radius: 50%;
+  animation: sync-spin 0.7s linear infinite;
+}
+
+.home-widget.status-loading .widget-sub {
+  visibility: hidden;
 }
 
 .home-section {

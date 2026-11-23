@@ -177,7 +177,7 @@ from services.parlour_efficiency import (
     rotation_date_bounds,
 )
 from services.nml_email import NML_LOOKBACK_DAYS
-from services.production_summary import get_production_summary
+from services.production_summary import get_home_cows_in_milk, get_production_summary
 from services.nml_results import (
     XLSX_CONTENT_TYPE,
     build_nml_results_csv,
@@ -1235,6 +1235,14 @@ def milk_quality_api_production_summary():
     if error:
         return error
     return jsonify(get_production_summary())
+
+
+@app.route("/milk-quality/api/cows-in-milk")
+def milk_quality_api_cows_in_milk():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    return jsonify(get_home_cows_in_milk())
 
 
 @app.route("/milk-quality/api/statements")

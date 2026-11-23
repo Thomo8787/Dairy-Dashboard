@@ -468,7 +468,7 @@
 
   function markError() {
     farmBlocks.forEach((block) => {
-      block.querySelectorAll(".home-widget").forEach((widget) => {
+      block.querySelectorAll(".home-widget:not([data-metric='cows_in_milk'])").forEach((widget) => {
         setStatus(widget, "error");
       });
     });
@@ -561,20 +561,7 @@
         const farmHref = `${href}${href.includes("?") ? "&" : "?"}farm=${encodeURIComponent(farm)}`;
         block.querySelectorAll(".home-widget[data-metric]").forEach((widget) => {
           const metric = widget.dataset.metric;
-          if (metric === "cows_in_milk") {
-            const cows = row.cows_in_milk || {};
-            setWidget(
-              widget,
-              formatMetric(metric, cows.today),
-              formatMetric(metric, cows.d30),
-              farmHref,
-              {
-                main: "Cows in milk today",
-                sub: "Average cows in milk for the last 30 days",
-              }
-            );
-            return;
-          }
+          if (metric === "cows_in_milk") return;
           setWidget(
             widget,
             formatMetric(metric, d7[metric]),
@@ -605,6 +592,48 @@
   }
 
   loadProduction();
+  loadCowsInMilk();
+
+  function markCowsError() {
+    root.querySelectorAll(".home-widget[data-metric='cows_in_milk']").forEach((widget) => {
+      setStatus(widget, "error");
+    });
+  }
+
+  async function loadCowsInMilk() {
+    const tiles = root.querySelectorAll(".home-widget[data-metric='cows_in_milk']");
+    if (!tiles.length) return;
+    try {
+      const res = await fetch("/milk-quality/api/cows-in-milk");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        markCowsError();
+        return;
+      }
+      const href = "/milk-quality/collections";
+      const byFarm = Object.fromEntries(
+        (data.farms || []).map((row) => [String(row.farm || "").toUpperCase(), row])
+      );
+      tiles.forEach((widget) => {
+        const block = widget.closest("[data-production-farm]");
+        const farm = ((block && block.dataset.productionFarm) || "").toUpperCase();
+        const row = byFarm[farm] || {};
+        const farmHref = `${href}?farm=${encodeURIComponent(farm)}`;
+        setWidget(
+          widget,
+          formatMetric("cows_in_milk", row.today),
+          formatMetric("cows_in_milk", row.d30),
+          farmHref,
+          {
+            main: "Cows in milk today",
+            sub: "Average cows in milk for the last 30 days",
+          }
+        );
+      });
+    } catch (_err) {
+      markCowsError();
+    }
+  }
 })();
 </script>
 {% endif %}
