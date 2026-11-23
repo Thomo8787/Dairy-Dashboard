@@ -249,15 +249,15 @@ services:
           name: dairy-dashboard
           envVarKey: OUTLOOK_MAILBOX
 
-  # Daily DairyComp DCEXPORT import at 05:00 UK time.
-  # Render cron is UTC: 04:00 UTC = 05:00 BST (05:00 GMT in winter would need 05:00 UTC).
-  # ALHEVENTS.CSV is ~50MB and lands ~03:57 UTC; the importer retries Graph 404/timeouts.
+  # Daily DairyComp DCEXPORT import. Files land around 04:00-04:30 UK,
+  # so the job is 05:00 UTC (05:00 UK in winter, 06:00 UK in summer).
+  # ALHEVENTS.CSV is ~50MB; the importer retries Graph 404/timeouts.
   - type: cron
     name: fetch-one-drive-data
     runtime: python
     plan: starter
     branch: main
-    schedule: "0 4 * * *"
+    schedule: "0 5 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/import_herd_exports.py
     envVars:
@@ -293,6 +293,24 @@ services:
         sync: false
       - key: ONEDRIVE_FOLDER_PATH
         value: ""
+
+  # Home tiles after the morning imports (herd file, Müller, morning NML).
+  # 08:00 UTC is 8am UK in winter and 9am UK in summer.
+  - type: cron
+    name: refresh-home-tiles
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "0 8 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/refresh_home_tiles.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
 
   # SenseHub young-stock health: hourly live reading, locked at 0/6/12/18 UK.
   - type: cron

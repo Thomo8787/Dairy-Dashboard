@@ -30,9 +30,7 @@ from services.auth import (
     PermissionContext,
 )
 from services.events_common import (
-    build_dairy_semen_30d,
     build_events_page_report,
-    build_home_herd_summary,
 )
 from services.events_pages import EVENT_PAGES, _parse_date_arg, _parse_int_arg, events_template_extras
 from services.cattle_sales import list_cattle_sales
@@ -178,7 +176,12 @@ from services.parlour_efficiency import (
     rotation_date_bounds,
 )
 from services.nml_email import NML_LOOKBACK_DAYS
-from services.production_summary import get_home_cows_in_milk, get_production_summary
+from services.home_tiles import (
+    stored_cows_in_milk,
+    stored_dairy_semen,
+    stored_herd_summary,
+    stored_production_summary,
+)
 from services.nml_results import (
     XLSX_CONTENT_TYPE,
     build_nml_results_csv,
@@ -1247,7 +1250,8 @@ def milk_quality_api_production_summary():
     user, error = _milk_quality_json_user()
     if error:
         return error
-    return jsonify(get_production_summary())
+    with get_session() as session:
+        return jsonify(stored_production_summary(session))
 
 
 @app.route("/milk-quality/api/cows-in-milk")
@@ -1255,7 +1259,8 @@ def milk_quality_api_cows_in_milk():
     user, error = _milk_quality_json_user()
     if error:
         return error
-    return jsonify(get_home_cows_in_milk())
+    with get_session() as session:
+        return jsonify(stored_cows_in_milk(session))
 
 
 @app.route("/milk-quality/api/statements")
@@ -2394,7 +2399,7 @@ def events_api_dairy_semen_30d():
     if error:
         return error
     with get_session() as session:
-        return jsonify(build_dairy_semen_30d(session))
+        return jsonify(stored_dairy_semen(session))
 
 
 @app.route("/api/events/home-herd-summary")
@@ -2403,7 +2408,7 @@ def events_api_home_herd_summary():
     if error:
         return error
     with get_session() as session:
-        return jsonify(build_home_herd_summary(session))
+        return jsonify(stored_herd_summary(session))
 
 
 @app.route("/events/api/<slug>")

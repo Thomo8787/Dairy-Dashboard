@@ -42,6 +42,13 @@ def main(argv: list[str] | None = None) -> int:
         result = import_herd_exports(session, force=args.force)
     print(format_herd_import_summary(result))
     failures = herd_import_failures(result)
+    try:
+        from services.home_tiles import refresh_home_tiles
+
+        with get_session() as session:
+            refresh_home_tiles(session, parts="herd")
+    except Exception:
+        logging.exception("Could not save Home herd tiles after the herd import")
     if failures:
         logging.error("Herd import failed: %s", "; ".join(failures))
         return 1

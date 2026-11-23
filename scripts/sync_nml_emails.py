@@ -55,6 +55,15 @@ def main(argv: list[str] | None = None) -> int:
     days = None if args.full_history or since else max(1, args.days)
     result = import_nml_results(full_history=args.full_history, days=days, since=since)
     print(format_nml_summary(result))
+    try:
+        from services.database import get_session, init_db
+        from services.home_tiles import refresh_home_tiles
+
+        init_db()
+        with get_session() as session:
+            refresh_home_tiles(session, parts="milk")
+    except Exception:
+        logging.exception("Could not save Home milk tiles after the NML import")
     for warning in result.get("warnings") or []:
         print(f"warning: {warning}")
     return 0
