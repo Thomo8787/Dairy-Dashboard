@@ -16,6 +16,8 @@ import datetime as dt
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from services.cows_in_milk import cows_in_milk_for_dates
+from services.database import get_session
 from services.farms import HERD_FARM_OPTIONS
 from services.nml_results import list_nml_results
 
@@ -24,6 +26,7 @@ _UK = ZoneInfo("Europe/London")
 _LOOKBACK_PAD_DAYS = 45
 _SHORT_WINDOW_DAYS = 7
 _LONG_WINDOW_DAYS = 30
+_COWS_IN_MILK_DAYS = 30
 # These farms normally collect twice a day. A single load counts only when its
 # volume is close to the recent daily average (a full once-a-day collection).
 _TWO_COLLECTION_FARMS = frozenset({"COF", "BNK"})
@@ -282,6 +285,25 @@ def _build_quality_chart(
     }
 
 
+def _cows_in_milk_by_farm(today: dt.date) -> dict[str, dict[str, int | None]]:
+    """Today's cows in milk, plus the average of today and the previous 29 days."""
+    dates = [
+        today - dt.timedelta(days=offset)
+        for offset in range(_COWS_IN_MILK_DAYS - 1, -1, -1)
+    ]
+    with get_session() as session:
+        counts = cows_in_milk_for_dates(session, HERD_FARM_OPTIONS, dates)
+    summary: dict[str, dict[str, int | None]] = {}
+    for farm in HERD_FARM_OPTIONS:
+        values = [counts[(farm, day)] for day in dates if (farm, day) in counts]
+        average = round(sum(values) / len(values)) if values else None
+        summary[farm] = {
+            "today": counts.get((farm, today)),
+            "d30": average,
+        }
+    return summary
+
+
 def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     """Return per-farm 7-day / 30-day production averages ending yesterday."""
     today = as_of or _uk_today()
@@ -294,6 +316,7 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     )
     trend = payload.get("trend") or {}
     _annotate_volume_and_cows(trend)
+    cows_in_milk = _cows_in_milk_by_farm(today)
 
     farms_out: list[dict[str, Any]] = []
     for farm in HERD_FARM_OPTIONS:
@@ -322,6 +345,7 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
                 "window_end": completed_through.isoformat(),
                 "d7": d7,
                 "d30": d30,
+                "cows_in_milk": cows_in_milk.get(farm) or {"today": None, "d30": None},
             }
         )
 

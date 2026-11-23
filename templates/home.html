@@ -64,6 +64,23 @@
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
+        <a href="{{ url_for('milk_quality_collections') }}?farm={{ farm.code }}" class="home-widget status-loading" data-metric="cows_in_milk" aria-label="{{ farm.code }} cows in milk">
+          <span class="widget-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="currentColor">
+              <ellipse cx="17.2" cy="18.6" rx="9.2" ry="6.4"/>
+              <circle cx="8.2" cy="16.2" r="4.3"/>
+              <circle cx="6.6" cy="15.2" r="0.7" fill="#fff"/>
+              <path d="M5.2 12.4 L3.4 8.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M8.4 11.6 L8.2 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M23.4 20.2 v4.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M18.2 21.4 v4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M13.2 20.8 v4.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <p class="widget-kicker">Cows in milk</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub">—</p>
+        </a>
         <a href="{{ url_for('milk_quality_collections') }}?farm={{ farm.code }}" class="home-widget status-loading" data-metric="milk_per_day" aria-label="{{ farm.code }} milk per day">
           <span class="widget-icon" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
@@ -349,7 +366,7 @@
 
   function formatMetric(metric, value) {
     if (value === null || value === undefined || value === "") return "—";
-    if (metric === "milk_per_day" || metric === "bactoscan" || metric === "scc") {
+    if (metric === "milk_per_day" || metric === "bactoscan" || metric === "scc" || metric === "cows_in_milk") {
       return fmtInt(value);
     }
     if (metric === "milk_per_cow" || metric === "milk_temp") return fmtFixed(value, 1);
@@ -423,16 +440,17 @@
     return rising && temps[temps.length - 1] >= 4 ? "red" : "unknown";
   }
 
-  function setWidget(widget, main, sub, href) {
+  function setWidget(widget, main, sub, href, hints) {
     const title = widget.querySelector(".widget-title");
     const subEl = widget.querySelector(".widget-sub");
+    const labels = hints || {};
     if (title) {
       title.textContent = main;
-      title.title = "7-day average (yesterday and the 6 days before)";
+      title.title = labels.main || "7-day average (yesterday and the 6 days before)";
     }
     if (subEl) {
       subEl.textContent = sub;
-      subEl.title = "30-day average (ending yesterday)";
+      subEl.title = labels.sub || "30-day average (ending yesterday)";
     }
     setStatus(widget, "unknown");
     if (href) widget.href = href;
@@ -533,6 +551,20 @@
         const farmHref = `${href}${href.includes("?") ? "&" : "?"}farm=${encodeURIComponent(farm)}`;
         block.querySelectorAll(".home-widget[data-metric]").forEach((widget) => {
           const metric = widget.dataset.metric;
+          if (metric === "cows_in_milk") {
+            const cows = row.cows_in_milk || {};
+            setWidget(
+              widget,
+              formatMetric(metric, cows.today),
+              formatMetric(metric, cows.d30),
+              farmHref,
+              {
+                main: "Cows in milk today",
+                sub: "Average cows in milk for the last 30 days",
+              }
+            );
+            return;
+          }
           setWidget(
             widget,
             formatMetric(metric, d7[metric]),
