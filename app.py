@@ -1,6 +1,7 @@
 """Thomasson Farms Dashboard web application."""
 
 import logging
+import mimetypes
 import os
 import secrets
 from datetime import datetime, timezone
@@ -209,6 +210,8 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
