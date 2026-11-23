@@ -191,6 +191,7 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
         "sample_missing": sample_missing,
         "litres_load": row.litres_load,
         "litres_weighbridge": row.litres_weighbridge,
+        "weighbridge_confirmed": bool(getattr(row, "weighbridge_confirmed", False)),
         "cows_in_milk": None,
         "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
         "butterfat_pct": row.butterfat_pct,

@@ -73,6 +73,7 @@ _UPSERT_FIELDS = (
     "load_number",
     "litres_load",
     "litres_weighbridge",
+    "weighbridge_confirmed",
     "butterfat_pct",
     "protein_pct",
     "scc",
@@ -290,6 +291,11 @@ def parse_eom_loads(
                         sample = f"{sample}-L{load_number}"
                         sample_missing = True
                     used_ids.add((producer_ref, sample_date, sample))
+                    weighbridge = (
+                        _as_float(_cell(ws, metric_rows["Milk"], weight_col))
+                        if weight_col
+                        else None
+                    )
 
                     records.append(
                         {
@@ -302,11 +308,8 @@ def parse_eom_loads(
                             "sample_id": sample,
                             "load_number": load_number,
                             "litres_load": litres,
-                            "litres_weighbridge": (
-                                _as_float(_cell(ws, metric_rows["Milk"], weight_col))
-                                if weight_col
-                                else None
-                            ),
+                            "litres_weighbridge": weighbridge,
+                            "weighbridge_confirmed": weighbridge is not None,
                             "butterfat_pct": _as_percent(
                                 _cell(ws, metric_rows["Fat"], load_col)
                             ),

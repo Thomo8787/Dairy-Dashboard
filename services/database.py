@@ -744,6 +744,8 @@ class NmlMilkResult(Base):
     load_number = Column(Integer)
     litres_load = Column(Float)
     litres_weighbridge = Column(Float)
+    # True when litres_weighbridge came from a Müller row that had a sample number.
+    weighbridge_confirmed = Column(Boolean, nullable=False, default=False)
     temp_c = Column(Float)
     butterfat_pct = Column(Float)
     protein_pct = Column(Float)
@@ -1084,6 +1086,10 @@ def _ensure_nml_milk_result_columns(engine) -> None:
         "load_number": "ALTER TABLE nml_milk_results ADD COLUMN load_number INTEGER",
         "litres_load": "ALTER TABLE nml_milk_results ADD COLUMN litres_load FLOAT",
         "litres_weighbridge": "ALTER TABLE nml_milk_results ADD COLUMN litres_weighbridge FLOAT",
+        "weighbridge_confirmed": (
+            "ALTER TABLE nml_milk_results ADD COLUMN weighbridge_confirmed BOOLEAN "
+            "NOT NULL DEFAULT FALSE"
+        ),
         "sample_missing": (
             "ALTER TABLE nml_milk_results ADD COLUMN sample_missing BOOLEAN "
             "NOT NULL DEFAULT FALSE"

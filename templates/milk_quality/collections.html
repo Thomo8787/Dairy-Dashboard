@@ -905,11 +905,16 @@
     return Math.round(n);
   }
 
+  const WEIGHBRIDGE_TOLERANCE_L = 1000;
+
   function weighbridgeMatch(row) {
     const litres = volumeKey(row.litres_load);
     const bridge = volumeKey(row.litres_weighbridge);
     if (litres == null && bridge == null) return "none";
-    if (litres != null && bridge != null && litres === bridge) return "match";
+    if (litres == null || bridge == null) return "mismatch";
+    const within = Math.abs(litres - bridge) <= WEIGHBRIDGE_TOLERANCE_L;
+    // Green only when Müller had a sample number and volume is within 1000 L.
+    if (row.weighbridge_confirmed && within) return "match";
     return "mismatch";
   }
 
@@ -918,8 +923,8 @@
     const status = weighbridgeMatch(row);
     if (status === "none") return text;
     const mark = status === "match"
-      ? '<span class="nml-mark ok" title="Weighbridge matches litres" aria-label="Weighbridge matches litres">✓</span>'
-      : '<span class="nml-mark bad" title="Weighbridge does not match litres" aria-label="Weighbridge does not match litres">✕</span>';
+      ? '<span class="nml-mark ok" title="Sample matched; weighbridge within 1000 L of litres" aria-label="Weighbridge confirmed">✓</span>'
+      : '<span class="nml-mark bad" title="Provisional or outside 1000 L — waiting for Müller sample match" aria-label="Weighbridge not confirmed">✕</span>';
     return `<span class="wb-cell">${text}${mark}</span>`;
   }
 
