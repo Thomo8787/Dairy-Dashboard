@@ -3,15 +3,9 @@
 One CSV row is one tanker collection. Litres is written to litres_weighbridge.
 Payment Date is the primary calendar day (Actual Collection is fallback).
 
-Matching order for rows with a sample number:
-1. Sample ID on the payment day, when ticket litres are within 1000 L
-2. Otherwise volume within 1000 L — adopt Müller's sample when free
-3. Duplicate portal samples that do not fit the ticket stay provisional on
-   another volume-matched load (sample not overwritten)
-4. Insert a weighbridge-only line only when litres are at least 1000 L
-
-Blank sample rows match provisionally (small then big, by payment time).
-Weighbridge-only orphans are merged into the matched ticket.
+ALH uses volume-tolerant matching (within 1000 L / 5%), sample override, and
+provisional blank-sample order matching. Other farms match by sample ID and
+exact ticket litres only.
 """
 
 from __future__ import annotations
@@ -382,6 +376,36 @@ def _displace_sample(row: NmlMilkResult) -> None:
     row.sample_missing = True
 
 
+def _clear_sample_holders(
+    session: Any,
+    rows: list[NmlMilkResult],
+    *,
+    day: dt.date,
+    sample_id: str,
+    except_id: int | None,
+) -> int:
+    """Remove or displace every row holding this sample that day. Returns removals."""
+    target = normalize_sample_id(sample_id)
+    removed = 0
+    for other in list(rows):
+        if other.id == except_id:
+            continue
+        if other.sample_date != day:
+            continue
+        if normalize_sample_id(other.sample_id) != target:
+            continue
+        if _is_orphan_bridge_row(other):
+            session.delete(other)
+            if other in rows:
+                rows.remove(other)
+            removed += 1
+        else:
+            _displace_sample(other)
+    if removed:
+        session.flush()
+    return removed
+
+
 def _claim_blank_by_size(
     blanks: list[dict[str, Any]],
     tickets: list[NmlMilkResult],
@@ -425,7 +449,7 @@ def _match_blank_records(
     claimed: dict[int, list[Claim]],
     unmatched: list[dict[str, Any]],
 ) -> None:
-    """Provisional match for Müller rows with no sample number."""
+    """ALH provisional match for Müller rows with no sample number."""
     by_day: dict[dt.date, list[dict[str, Any]]] = defaultdict(list)
     for record in blank:
         day = _primary_date(record)
@@ -448,6 +472,91 @@ def _match_blank_records(
         # Small first so Load 4 is taken before big rows fill Loads 1–3.
         _claim_blank_by_size(small_blanks, day_tickets, claimed, unmatched)
         _claim_blank_by_size(big_blanks, day_tickets, claimed, unmatched)
+
+
+def _match_blank_exact(
+    blank: list[dict[str, Any]],
+    rows: list[NmlMilkResult],
+    claimed: dict[int, list[Claim]],
+    unmatched: list[dict[str, Any]],
+) -> None:
+    """Non-ALH: blank portal rows match only on exact ticket litres."""
+    for record in blank:
+        target = _litres_key(record["litres"])
+        if target is None:
+            unmatched.append(_row_brief(record))
+            continue
+        close = _close_dates(record["actual_date"], record["payment_date"])
+        hits = [
+            row
+            for row in rows
+            if row.id is not None
+            and row.id not in claimed
+            and row.sample_date in close
+            and _litres_key(row.litres_load) == target
+        ]
+        if len(hits) == 1:
+            claimed[hits[0].id].append((record, hits[0], True, False))
+        elif len(hits) > 1:
+            unmatched.append(_row_brief(record, hits))
+        else:
+            unmatched.append(_row_brief(record))
+
+
+def _claim_sampled_simple(
+    sampled: list[dict[str, Any]],
+    rows: list[NmlMilkResult],
+    index: dict[str, list[NmlMilkResult]],
+    claimed: dict[int, list[Claim]],
+    *,
+    session: Any,
+    farm: str,
+    source_file: str,
+    fill_temp: bool,
+    unmatched: list[dict[str, Any]],
+    ambiguous: list[dict[str, Any]],
+) -> int:
+    """Non-ALH: match by sample ID only; insert when no ticket exists."""
+    inserted = 0
+    for record in sampled:
+        candidates = index.get(record["sample_id"], [])
+        chosen, status = _match_row(
+            candidates, record["actual_date"], record["payment_date"]
+        )
+        if status == "ambiguous":
+            ambiguous.append(_row_brief(record, candidates))
+            continue
+        if status == "matched" and chosen is not None and chosen.id is not None:
+            if _is_orphan_bridge_row(chosen):
+                status = "unmatched"
+            else:
+                claimed[chosen.id].append((record, chosen, True, False))
+                continue
+
+        day = _primary_date(record)
+        if day is not None:
+            _clear_sample_holders(
+                session,
+                rows,
+                day=day,
+                sample_id=record["sample_id"],
+                except_id=None,
+            )
+        created = _insert_weighbridge_row(
+            session,
+            farm,
+            record,
+            list(rows),
+            source_file=source_file,
+            fill_temp=fill_temp,
+        )
+        if created is None:
+            unmatched.append(_row_brief(record))
+            continue
+        rows.append(created)
+        index.setdefault(record["sample_id"], []).append(created)
+        inserted += 1
+    return inserted
 
 
 def _volume_distance(ticket_litres: Any, bridge_litres: Any) -> int | None:
@@ -566,19 +675,27 @@ def _claim_sampled_records(
             if day and record["sample_id"]
             else None
         )
-        if sample_key is not None and (
-            sample_key in samples_owned
-            or _sample_taken(
-                rows,
-                farm=farm,
-                day=day,
-                sample_id=record["sample_id"],
-                except_id=None,
-            )
+        if sample_key is not None and sample_key in samples_owned:
+            unmatched.append(_row_brief(record))
+            continue
+        if day is not None and _sample_taken(
+            rows,
+            farm=farm,
+            day=day,
+            sample_id=record["sample_id"],
+            except_id=None,
         ):
             unmatched.append(_row_brief(record))
             continue
 
+        if day is not None:
+            _clear_sample_holders(
+                session,
+                rows,
+                day=day,
+                sample_id=record["sample_id"],
+                except_id=None,
+            )
         created = _insert_weighbridge_row(
             session,
             farm,
@@ -692,19 +809,35 @@ def apply_muller_records(
             claimed: dict[int, list[Claim]] = defaultdict(list)
             sampled = [record for record in records if record["sample_id"]]
             blank = [record for record in records if not record["sample_id"]]
-            inserted = _claim_sampled_records(
-                sampled,
-                rows,
-                index,
-                claimed,
-                session=session,
-                farm=farm,
-                source_file=source_file,
-                fill_temp=fill_temp,
-                unmatched=unmatched,
-                ambiguous=ambiguous,
-            )
-            _match_blank_records(blank, rows, claimed, unmatched)
+            alh = farm.upper() == "ALH"
+            if alh:
+                inserted = _claim_sampled_records(
+                    sampled,
+                    rows,
+                    index,
+                    claimed,
+                    session=session,
+                    farm=farm,
+                    source_file=source_file,
+                    fill_temp=fill_temp,
+                    unmatched=unmatched,
+                    ambiguous=ambiguous,
+                )
+                _match_blank_records(blank, rows, claimed, unmatched)
+            else:
+                inserted = _claim_sampled_simple(
+                    sampled,
+                    rows,
+                    index,
+                    claimed,
+                    session=session,
+                    farm=farm,
+                    source_file=source_file,
+                    fill_temp=fill_temp,
+                    unmatched=unmatched,
+                    ambiguous=ambiguous,
+                )
+                _match_blank_exact(blank, rows, claimed, unmatched)
 
             for claims in claimed.values():
                 row = claims[0][1]
