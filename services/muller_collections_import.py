@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from services.database import NmlMilkResult, get_session
 from services.farms import FARMS
@@ -375,6 +376,12 @@ def _merge_orphan_into(session: Any, ticket: NmlMilkResult, orphan: NmlMilkResul
     session.delete(orphan)
 
 
+def _displace_sample(row: NmlMilkResult) -> None:
+    """Move a ticket off its sample ID with a unique placeholder (avoids uq clashes)."""
+    row.sample_id = f"L{row.load_number or 0}-{row.id}"
+    row.sample_missing = True
+
+
 def _claim_blank_by_size(
     blanks: list[dict[str, Any]],
     tickets: list[NmlMilkResult],
@@ -669,126 +676,145 @@ def apply_muller_records(
     ambiguous: list[dict[str, Any]] = []
     date_gaps: list[dict[str, Any]] = []
 
-    with get_session() as session:
-        rows = list(
-            session.scalars(select(NmlMilkResult).where(NmlMilkResult.farm == farm)).all()
-        )
-        index: dict[str, list[NmlMilkResult]] = {}
-        for row in rows:
-            if not _is_real_sample(row) or _is_orphan_bridge_row(row):
-                continue
-            index.setdefault(normalize_sample_id(row.sample_id), []).append(row)
-
-        claimed: dict[int, list[Claim]] = defaultdict(list)
-        sampled = [record for record in records if record["sample_id"]]
-        blank = [record for record in records if not record["sample_id"]]
-        inserted = _claim_sampled_records(
-            sampled,
-            rows,
-            index,
-            claimed,
-            session=session,
-            farm=farm,
-            source_file=source_file,
-            fill_temp=fill_temp,
-            unmatched=unmatched,
-            ambiguous=ambiguous,
-        )
-        _match_blank_records(blank, rows, claimed, unmatched)
-
-        for claims in claimed.values():
-            row = claims[0][1]
-            litres = {record["litres"] for record, _row, _ok, _ov in claims}
-            if len(litres) > 1:
-                # Prefer the claim that fits the ticket litres when Müller reused a sample.
-                fitting = [
-                    item
-                    for item in claims
-                    if row.litres_load is None
-                    or _within_tolerance(row.litres_load, item[0]["litres"])
-                ]
-                if len(fitting) == 1:
-                    claims = fitting
-                else:
-                    for record, _row, _ok, _ov in claims:
-                        ambiguous.append(_row_brief(record, [row]))
-                    if (
-                        repair_conflicts
-                        and row.litres_load is None
-                        and row.litres_weighbridge in litres
-                    ):
-                        row.litres_weighbridge = None
-                        row.weighbridge_confirmed = False
-                        if fill_temp:
-                            temps = {record["temp_c"] for record, _row, _ok, _ov in claims}
-                            if row.temp_c in temps:
-                                row.temp_c = None
-                    continue
-
-            # Confirmed sample claim wins over a provisional one on the same ticket.
-            confirmed_claims = [item for item in claims if item[2]]
-            record, _chosen, confirmed, override = (
-                confirmed_claims[-1] if confirmed_claims else claims[-1]
+    try:
+        with get_session() as session:
+            rows = list(
+                session.scalars(
+                    select(NmlMilkResult).where(NmlMilkResult.farm == farm)
+                ).all()
             )
-            if confirmed_claims:
-                confirmed = True
-                override = any(item[3] for item in confirmed_claims)
-                record = confirmed_claims[-1][0]
+            index: dict[str, list[NmlMilkResult]] = {}
+            for row in rows:
+                if not _is_real_sample(row) or _is_orphan_bridge_row(row):
+                    continue
+                index.setdefault(normalize_sample_id(row.sample_id), []).append(row)
 
-            # Fold Müller-only duplicates into this ticket before adopting the sample.
-            day = row.sample_date
-            if day is not None and record["sample_id"]:
-                target = normalize_sample_id(record["sample_id"])
-                orphans = [
-                    other
-                    for other in list(rows)
-                    if other.id != row.id
-                    and other.sample_date == day
-                    and _is_orphan_bridge_row(other)
-                    and (
-                        normalize_sample_id(other.sample_id) == target
-                        or _within_tolerance(row.litres_load, other.litres_weighbridge)
+            claimed: dict[int, list[Claim]] = defaultdict(list)
+            sampled = [record for record in records if record["sample_id"]]
+            blank = [record for record in records if not record["sample_id"]]
+            inserted = _claim_sampled_records(
+                sampled,
+                rows,
+                index,
+                claimed,
+                session=session,
+                farm=farm,
+                source_file=source_file,
+                fill_temp=fill_temp,
+                unmatched=unmatched,
+                ambiguous=ambiguous,
+            )
+            _match_blank_records(blank, rows, claimed, unmatched)
+
+            for claims in claimed.values():
+                row = claims[0][1]
+                litres = {record["litres"] for record, _row, _ok, _ov in claims}
+                if len(litres) > 1:
+                    # Prefer the claim that fits the ticket litres when Müller reused a sample.
+                    fitting = [
+                        item
+                        for item in claims
+                        if row.litres_load is None
+                        or _within_tolerance(row.litres_load, item[0]["litres"])
+                    ]
+                    if len(fitting) == 1:
+                        claims = fitting
+                    else:
+                        for record, _row, _ok, _ov in claims:
+                            ambiguous.append(_row_brief(record, [row]))
+                        if (
+                            repair_conflicts
+                            and row.litres_load is None
+                            and row.litres_weighbridge in litres
+                        ):
+                            row.litres_weighbridge = None
+                            row.weighbridge_confirmed = False
+                            if fill_temp:
+                                temps = {
+                                    record["temp_c"] for record, _row, _ok, _ov in claims
+                                }
+                                if row.temp_c in temps:
+                                    row.temp_c = None
+                        continue
+
+                # Confirmed sample claim wins over a provisional one on the same ticket.
+                confirmed_claims = [item for item in claims if item[2]]
+                record, _chosen, confirmed, override = (
+                    confirmed_claims[-1] if confirmed_claims else claims[-1]
+                )
+                if confirmed_claims:
+                    confirmed = True
+                    override = any(item[3] for item in confirmed_claims)
+                    record = confirmed_claims[-1][0]
+
+                # Fold Müller-only duplicates into this ticket before adopting the sample.
+                day = row.sample_date
+                if day is not None and record["sample_id"]:
+                    target = normalize_sample_id(record["sample_id"])
+                    orphans = [
+                        other
+                        for other in list(rows)
+                        if other.id != row.id
+                        and other.sample_date == day
+                        and _is_orphan_bridge_row(other)
+                        and (
+                            normalize_sample_id(other.sample_id) == target
+                            or _within_tolerance(row.litres_load, other.litres_weighbridge)
+                        )
+                    ]
+                    for orphan in orphans:
+                        _merge_orphan_into(session, row, orphan)
+                        if orphan in rows:
+                            rows.remove(orphan)
+                        merged_orphans += 1
+
+                if override and record["sample_id"]:
+                    target = normalize_sample_id(record["sample_id"])
+                    # Free the sample on any other ticket so the unique key allows the override.
+                    displaced = False
+                    for other in list(rows):
+                        if (
+                            other.id != row.id
+                            and other.sample_date == row.sample_date
+                            and not _is_orphan_bridge_row(other)
+                            and normalize_sample_id(other.sample_id) == target
+                        ):
+                            _displace_sample(other)
+                            displaced = True
+                    if displaced:
+                        session.flush()
+                    row.sample_id = record["sample_id"]
+                    row.sample_missing = False
+
+                row.litres_weighbridge = record["litres"]
+                row.weighbridge_confirmed = confirmed
+                updated_ids.add(row.id)
+                if (
+                    fill_temp
+                    and record["sample_id"]
+                    and row.temp_c is None
+                    and record["temp_c"] is not None
+                ):
+                    row.temp_c = record["temp_c"]
+                    temp_filled += 1
+                if _date_gap(
+                    row.sample_date, record["actual_date"], record["payment_date"]
+                ):
+                    gap = _row_brief(record)
+                    gap["row_date"] = (
+                        row.sample_date.isoformat() if row.sample_date else ""
                     )
-                ]
-                for orphan in orphans:
-                    _merge_orphan_into(session, row, orphan)
-                    if orphan in rows:
-                        rows.remove(orphan)
-                    merged_orphans += 1
+                    date_gaps.append(gap)
 
-            if override and record["sample_id"]:
-                target = normalize_sample_id(record["sample_id"])
-                # Free the sample on any other ticket so the unique key allows the override.
-                for other in list(rows):
-                    if (
-                        other.id != row.id
-                        and other.sample_date == row.sample_date
-                        and not _is_orphan_bridge_row(other)
-                        and normalize_sample_id(other.sample_id) == target
-                    ):
-                        other.sample_id = f"L{other.load_number or other.id}"
-                        other.sample_missing = True
-                row.sample_id = record["sample_id"]
-                row.sample_missing = False
-
-            row.litres_weighbridge = record["litres"]
-            row.weighbridge_confirmed = confirmed
-            updated_ids.add(row.id)
-            if (
-                fill_temp
-                and record["sample_id"]
-                and row.temp_c is None
-                and record["temp_c"] is not None
-            ):
-                row.temp_c = record["temp_c"]
-                temp_filled += 1
-            if _date_gap(row.sample_date, record["actual_date"], record["payment_date"]):
-                gap = _row_brief(record)
-                gap["row_date"] = row.sample_date.isoformat() if row.sample_date else ""
-                date_gaps.append(gap)
-
-        if not apply:
-            session.rollback()
+            if not apply:
+                session.rollback()
+    except IntegrityError as exc:
+        raise ValueError(
+            "Could not save Müller weighbridge values — a sample number clash on the same day. "
+            "Check duplicate samples on the portal or in Collections."
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise ValueError(f"Could not save Müller weighbridge values: {exc}") from exc
 
     return {
         "source_file": source_file,

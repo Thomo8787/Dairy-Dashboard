@@ -1350,6 +1350,9 @@ def milk_quality_api_muller_upload():
         return jsonify(import_muller_uploads(payloads))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Müller import failed")
+        return jsonify({"error": f"Müller import failed: {exc}"}), 500
 
 
 @app.route("/milk-quality/api/collections/manual")
