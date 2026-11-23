@@ -33,10 +33,24 @@ NAV_ITEMS = [
                 "permission": "perm_office",
             },
             {
-                "id": "office_fallen_stock",
+                "id": "office_fallen_stock_group",
                 "label": "Fallen Stock",
                 "endpoint": "office_fallen_stock",
                 "permission": "perm_office",
+                "children": [
+                    {
+                        "id": "office_fallen_stock",
+                        "label": "Passports",
+                        "endpoint": "office_fallen_stock",
+                        "permission": "perm_office",
+                    },
+                    {
+                        "id": "office_fallen_stock_invoices",
+                        "label": "Invoices",
+                        "endpoint": "office_fallen_stock_invoices",
+                        "permission": "perm_office",
+                    },
+                ],
             },
             {
                 "id": "office_stock_valuations",
@@ -239,13 +253,16 @@ NAV_ITEMS = [
 
 
 def parent_nav_id(active_nav: str) -> str | None:
-    """Return parent nav id when a submenu page is active."""
+    """Return the top menu id when a submenu page is active."""
     for item in NAV_ITEMS:
         if item["id"] == active_nav:
             return None
         for child in item.get("children") or []:
             if child["id"] == active_nav:
                 return item["id"]
+            for grandchild in child.get("children") or []:
+                if grandchild["id"] == active_nav:
+                    return item["id"]
     return None
 
 
@@ -271,7 +288,15 @@ def filter_nav_items(user) -> list[dict]:
             child_perm = child.get("permission") or perm
             if child_perm and not user_has_permission(user, child_perm):
                 continue
-            children.append(child)
+            grandchildren = []
+            for grandchild in child.get("children") or []:
+                if grandchild.get("admin_only") and not user.is_admin:
+                    continue
+                grand_perm = grandchild.get("permission") or child_perm
+                if grand_perm and not user_has_permission(user, grand_perm):
+                    continue
+                grandchildren.append(grandchild)
+            children.append({**child, "children": grandchildren})
 
         filtered.append({**item, "children": children})
     return filtered

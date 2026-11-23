@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_heading }} · {{ app_name }}{% endblock %}
+{% block page_title %}Fallen Stock · {{ page_heading }}{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .sidebar-column { min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon { background: #fff; color: var(--accent); }
+    .month-field { width: 100%; margin: 0 0 0.75rem; }
+    .content-panel { min-width: 0; }
+    .action-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.75rem;
+    }
+    .action-bar .primary, .action-bar .secondary {
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .action-bar .primary { background: #1e3a5f; border: 1px solid #1e3a5f; color: #fff; }
+    .action-bar .secondary { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+    .action-bar button:disabled { opacity: 0.55; cursor: default; }
+    .archive-chip {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.25rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+    .archive-chip.active { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
+    .hint, .meta-line { color: var(--muted); font-size: 0.9rem; }
+    .banner {
+      margin: 0 0 0.75rem;
+      padding: 0.7rem 0.85rem;
+      border-radius: 8px;
+      background: #eef4ea;
+      color: #1a2a1f;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 16rem);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    #invoice-table { width: 100%; border-collapse: collapse; }
+    #invoice-table th, #invoice-table td {
+      padding: 0.45rem 0.6rem;
+      text-align: right;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    #invoice-table th.band, #invoice-table td.band { text-align: left; }
+    #invoice-table thead th {
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      position: sticky;
+      z-index: 1;
+      border-bottom: none;
+    }
+    #invoice-table thead tr:first-child th { top: 0; }
+    #invoice-table thead tr:nth-child(2) th { top: 2.35rem; }
+    #invoice-table input[type="number"] {
+      width: 4.2rem;
+      margin: 0;
+      text-align: right;
+    }
+    .diff-ok { color: #15803d; font-weight: 700; }
+    .diff-off { color: #b45309; font-weight: 700; }
+    .stillborn-panel {
+      margin-top: 1.25rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .stillborn-panel h2 { margin: 0 0 0.35rem; font-size: 1rem; }
+    .stillborn-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: end;
+      margin: 0.75rem 0;
+    }
+    .stillborn-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; color: var(--muted); }
+    .stillborn-form input, .stillborn-form select { margin: 0; }
+    .stillborn-form .primary {
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid #1e3a5f;
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .stillborn-list { list-style: none; margin: 0; padding: 0; }
+    .stillborn-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .linkish {
+      border: 0;
+      background: transparent;
+      color: #b45309;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    @media (max-width: 800px) {
+      .page-layout { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <label class="section-label" for="month">Month</label>
+        <input class="month-field" type="month" id="month">
+        <span class="section-label">Farm</span>
+        <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
+          {% for farm in farm_options %}
+            <button type="button" class="slicer-btn selected" data-value="{{ farm }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm[0] }}</span>
+              {{ farm }}
+            </button>
+          {% endfor %}
+        </div>
+      </aside>
+    </div>
+    <section class="content-panel">
+      <div class="action-bar">
+        <button type="button" class="primary" id="archive-btn">Archive month</button>
+        <button type="button" class="secondary" id="unarchive-btn" hidden>Unarchive</button>
+        <span id="archive-list"></span>
+      </div>
+      <p class="banner" id="archive-banner" hidden></p>
+      <p class="hint">On-farm deaths for the month, excluding OFS. Died includes stillborn calves added below. Difference is the invoice quantity minus our count.</p>
+      <p class="meta-line" id="meta-line"></p>
+      <div class="table-wrap">
+        <table id="invoice-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <div class="stillborn-panel">
+        <h2>Stillborn calves</h2>
+        <p class="hint">Calves with no death in DairyComp. They are counted in 0-1 month.</p>
+        <form class="stillborn-form" id="stillborn-form">
+          <label>Farm
+            <select id="stillborn-farm">
+              {% for farm in farm_options %}
+                <option value="{{ farm }}">{{ farm }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Date
+            <input type="date" id="stillborn-date" required>
+          </label>
+          <label>Note
+            <input type="text" id="stillborn-note" maxlength="255" placeholder="Dam or ticket">
+          </label>
+          <button type="submit" class="primary" id="stillborn-add">Add</button>
+        </form>
+        <ul class="stillborn-list" id="stillborn-list"></ul>
+      </div>
+    </section>
+  </div>
+  <script>
+    let payload = null;
+
+    function selectedFarms() {
+      return [...document.querySelectorAll(".farm-slicer .slicer-btn.selected")].map(btn => btn.dataset.value);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[char]);
+    }
+
+    function monthValue() {
+      return document.getElementById("month").value;
+    }
+
+    function previousMonth() {
+      const now = new Date();
+      const day = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function monthLabel(month) {
+      const [year, mon] = month.split("-").map(Number);
+      return new Date(year, mon - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "";
+      const [year, mon, day] = iso.split("-").map(Number);
+      return new Date(year, mon - 1, day).toLocaleDateString("en-GB");
+    }
+
+    function diffCell(died, invoice) {
+      if (invoice == null || invoice === "") return "<td>—</td>";
+      const diff = Number(invoice) - died;
+      const cls = diff === 0 ? "diff-ok" : "diff-off";
+      return `<td class="${cls}">${diff > 0 ? "+" : ""}${diff}</td>`;
+    }
+
+    function render() {
+      const farms = selectedFarms();
+      const head = document.getElementById("table-head");
+      const body = document.getElementById("table-body");
+      const locked = Boolean(payload && payload.archived);
+      document.getElementById("archive-btn").hidden = locked;
+      document.getElementById("unarchive-btn").hidden = !locked;
+      document.getElementById("stillborn-form").hidden = locked;
+      const banner = document.getElementById("archive-banner");
+      banner.hidden = !locked;
+      if (locked) {
+        banner.textContent = `Archived ${fmtDate(payload.archived_on)}. The counts stay as they were.`;
+      }
+      if (!payload) {
+        head.innerHTML = "";
+        body.innerHTML = "";
+        return;
+      }
+      head.innerHTML = `<tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th colspan="3">${farm}</th>`).join("")}</tr>`
+        + `<tr>${farms.map(() => "<th>Died</th><th>Invoice</th><th>Diff</th>").join("")}</tr>`;
+      body.innerHTML = payload.bands.map(band => {
+        const cells = farms.map(farm => {
+          const died = payload.counts[band.id][farm] || 0;
+          const invoice = payload.invoice[band.id][farm];
+          const value = invoice == null ? "" : invoice;
+          return `<td>${died}</td><td><input type="number" min="0" step="1" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
+        }).join("");
+        return `<tr><td class="band">${escapeHtml(band.label)}</td>${cells}</tr>`;
+      }).join("");
+      const visible = new Set(farms);
+      const rows = (payload.stillborns || []).filter(row => visible.has(row.farm));
+      document.getElementById("stillborn-list").innerHTML = rows.length
+        ? rows.map(row => `<li><span>${fmtDate(row.born_on)} · ${escapeHtml(row.farm)}${row.note ? " · " + escapeHtml(row.note) : ""}</span>${locked ? "" : `<button type="button" class="linkish" data-remove="${row.id}">Remove</button>`}</li>`).join("")
+        : `<li><span>None added for the farms being shown.</span></li>`;
+      const list = document.getElementById("archive-list");
+      list.innerHTML = (payload.archived_months || []).map(item => {
+        const on = item.month === payload.month ? "active" : "";
+        return `<button type="button" class="archive-chip ${on}" data-month="${item.month}">${monthLabel(item.month)}</button>`;
+      }).join("");
+    }
+
+    async function load(month) {
+      const meta = document.getElementById("meta-line");
+      const chosen = month || monthValue();
+      if (chosen) document.getElementById("month").value = chosen;
+      meta.textContent = "Loading…";
+      const res = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(document.getElementById("month").value)}`);
+      if (!res.ok) {
+        meta.textContent = "Could not load the month.";
+        return;
+      }
+      payload = await res.json();
+      meta.textContent = monthLabel(payload.month);
+      render();
+    }
+
+    document.querySelectorAll(".farm-slicer .slicer-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const selected = btn.classList.contains("selected");
+        const count = document.querySelectorAll(".farm-slicer .slicer-btn.selected").length;
+        if (selected && count <= 1) return;
+        btn.classList.toggle("selected");
+        btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+        render();
+      });
+    });
+
+    document.getElementById("month").addEventListener("change", () => load());
+
+    document.getElementById("table-body").addEventListener("change", async event => {
+      const input = event.target;
+      if (!input.matches?.("input[data-band]")) return;
+      const meta = document.getElementById("meta-line");
+      const res = await fetch("/office/api/fallen-stock-invoices/qty", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: monthValue(),
+          farm: input.dataset.farm,
+          band: input.dataset.band,
+          quantity: input.value === "" ? null : Number(input.value),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        meta.textContent = body.error || "Could not save the invoice quantity.";
+        await load();
+        return;
+      }
+      payload.invoice[input.dataset.band][input.dataset.farm] = input.value === "" ? null : Number(input.value);
+      render();
+    });
+
+    document.getElementById("stillborn-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const meta = document.getElementById("meta-line");
+      const res = await fetch("/office/api/fallen-stock-invoices/stillborns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          farm: document.getElementById("stillborn-farm").value,
+          born_on: document.getElementById("stillborn-date").value,
+          note: document.getElementById("stillborn-note").value,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        meta.textContent = body.error || "Could not add the calf.";
+        return;
+      }
+      document.getElementById("stillborn-note").value = "";
+      const farm = document.getElementById("stillborn-farm").value;
+      const born = document.getElementById("stillborn-date").value.slice(0, 7);
+      await load(born);
+      if (!selectedFarms().includes(farm)) {
+        document.getElementById("meta-line").textContent = `Added on ${farm}. Turn that farm on to see it.`;
+      }
+    });
+
+    document.getElementById("stillborn-list").addEventListener("click", async event => {
+      const button = event.target.closest?.("[data-remove]");
+      if (!button) return;
+      const res = await fetch(`/office/api/fallen-stock-invoices/stillborns/${button.dataset.remove}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        document.getElementById("meta-line").textContent = body.error || "Could not remove the calf.";
+        return;
+      }
+      await load();
+    });
+
+    document.getElementById("archive-btn").addEventListener("click", async () => {
+      if (!confirm(`Archive ${monthLabel(monthValue())}? The counts will stay as they are now.`)) return;
+      const res = await fetch("/office/api/fallen-stock-invoices/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: monthValue(),
+          quantities: [...document.querySelectorAll("#table-body input[data-band]")].map(input => ({
+            farm: input.dataset.farm,
+            band: input.dataset.band,
+            quantity: input.value === "" ? null : Number(input.value),
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        document.getElementById("meta-line").textContent = body.error || "Could not archive the month.";
+        return;
+      }
+      await load();
+    });
+
+    document.getElementById("unarchive-btn").addEventListener("click", async () => {
+      const res = await fetch("/office/api/fallen-stock-invoices/unarchive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: monthValue() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        document.getElementById("meta-line").textContent = body.error || "Could not unarchive the month.";
+        return;
+      }
+      await load();
+    });
+
+    document.getElementById("archive-list").addEventListener("click", event => {
+      const button = event.target.closest?.("[data-month]");
+      if (!button) return;
+      load(button.dataset.month);
+    });
+
+    document.getElementById("month").value = previousMonth();
+    setTimeout(() => load(), 0);
+  </script>
+{% endblock %}

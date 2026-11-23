@@ -48,12 +48,26 @@
             {% if item.children %}
               <div class="nav-sub {% if section_open %}is-open{% endif %}">
                 {% for child in item.children %}
-                  <a
-                    class="nav-sub-link {% if active_nav == child.id %}is-active{% endif %}"
-                    href="{{ url_for(child.endpoint) }}"
-                  >
-                    {{ child.label }}
-                  </a>
+                  {% if child.children %}
+                    <div class="nav-sub-group">
+                      <span class="nav-sub-label">{{ child.label }}</span>
+                      {% for grandchild in child.children %}
+                        <a
+                          class="nav-sub-link nav-sub-nested {% if active_nav == grandchild.id %}is-active{% endif %}"
+                          href="{{ url_for(grandchild.endpoint) }}"
+                        >
+                          {{ grandchild.label }}
+                        </a>
+                      {% endfor %}
+                    </div>
+                  {% else %}
+                    <a
+                      class="nav-sub-link {% if active_nav == child.id %}is-active{% endif %}"
+                      href="{{ url_for(child.endpoint) }}"
+                    >
+                      {{ child.label }}
+                    </a>
+                  {% endif %}
                 {% endfor %}
               </div>
             {% endif %}

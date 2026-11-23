@@ -312,6 +312,44 @@ class FallenStockCheck(Base):
     checked_by_user_id = Column(Integer, ForeignKey("users.id"))
 
 
+class FallenStockStillborn(Base):
+    """A calf collected with no DairyComp death, added for the invoice check."""
+
+    __tablename__ = "fallen_stock_stillborns"
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    born_on = Column(Date, nullable=False, index=True)
+    note = Column(String(255), nullable=False, default="")
+
+
+class FallenStockInvoiceQty(Base):
+    """Invoice quantity typed for one farm, month, and age band."""
+
+    __tablename__ = "fallen_stock_invoice_qtys"
+    __table_args__ = (
+        UniqueConstraint("month", "farm", "band", name="uq_fallen_stock_invoice_qty"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    month = Column(Date, nullable=False, index=True)
+    farm = Column(String(8), nullable=False, index=True)
+    band = Column(String(16), nullable=False)
+    quantity = Column(Integer)
+
+
+class FallenStockInvoiceArchive(Base):
+    """A month whose invoice check has been agreed and frozen."""
+
+    __tablename__ = "fallen_stock_invoice_archives"
+
+    id = Column(Integer, primary_key=True)
+    month = Column(Date, nullable=False, unique=True, index=True)
+    archived_on = Column(Date, nullable=False)
+    archived_by_user_id = Column(Integer, ForeignKey("users.id"))
+    snapshot = Column(Text, nullable=False)
+
+
 class CattleSaleLine(Base):
     """Per-animal line from a cattle remittance PDF (Pickstock FPF, etc.)."""
 

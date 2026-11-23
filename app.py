@@ -4,7 +4,7 @@ import logging
 import mimetypes
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
@@ -47,6 +47,16 @@ from services.fallen_stock import (
     check_off_fallen_stock,
     list_fallen_stock,
     unarchive_fallen_stock,
+)
+from services.fallen_stock_invoices import (
+    add_stillborn,
+    archive_invoice_month,
+    archived_months,
+    delete_stillborn,
+    invoice_month,
+    parse_month,
+    set_invoice_quantity,
+    unarchive_invoice_month,
 )
 from services.sales_payments import (
     confirm_payments,
@@ -562,7 +572,7 @@ def office_sales_payments():
 def office_fallen_stock():
     return render_template(
         "office/fallen_stock.html",
-        page_heading="Fallen Stock",
+        page_heading="Passports",
         farm_options=list(HERD_FARM_OPTIONS),
         **_page_context(active_nav="office_fallen_stock"),
     )
@@ -610,6 +620,138 @@ def office_api_unarchive_fallen_stock():
         return jsonify({"error": "items must be a list."}), 400
     with get_session() as session:
         return jsonify(unarchive_fallen_stock(session, items))
+
+
+@app.route("/office/fallen-stock/invoices")
+@permission_required("perm_office")
+def office_fallen_stock_invoices():
+    return render_template(
+        "office/fallen_stock_invoices.html",
+        page_heading="Invoices",
+        farm_options=list(HERD_FARM_OPTIONS),
+        **_page_context(active_nav="office_fallen_stock_invoices"),
+    )
+
+
+@app.route("/office/api/fallen-stock-invoices")
+def office_api_fallen_stock_invoices():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    month = parse_month(request.args.get("month"))
+    if month is None:
+        return jsonify({"error": "Choose a month."}), 400
+    with get_session() as session:
+        payload = invoice_month(session, month)
+        payload["archived_months"] = archived_months(session)
+        return jsonify(payload)
+
+
+@app.route("/office/api/fallen-stock-invoices/qty", methods=["POST"])
+def office_api_fallen_stock_invoice_qty():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    month = parse_month(payload.get("month"))
+    if month is None:
+        return jsonify({"error": "Choose a month."}), 400
+    quantity = payload.get("quantity")
+    if quantity is None or quantity == "":
+        parsed_qty = None
+    else:
+        try:
+            parsed_qty = int(quantity)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Enter a whole number."}), 400
+    try:
+        with get_session() as session:
+            set_invoice_quantity(
+                session,
+                month=month,
+                farm=(payload.get("farm") or "").strip().upper(),
+                band=(payload.get("band") or "").strip(),
+                quantity=parsed_qty,
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/office/api/fallen-stock-invoices/stillborns", methods=["POST"])
+def office_api_add_stillborn():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    born_on = payload.get("born_on")
+    try:
+        parsed = date.fromisoformat(str(born_on))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Choose the date."}), 400
+    try:
+        with get_session() as session:
+            row = add_stillborn(
+                session,
+                farm=(payload.get("farm") or "").strip().upper(),
+                born_on=parsed,
+                note=payload.get("note") or "",
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(row)
+
+
+@app.route("/office/api/fallen-stock-invoices/stillborns/<int:stillborn_id>", methods=["DELETE"])
+def office_api_delete_stillborn(stillborn_id: int):
+    _user, error = _office_json_user()
+    if error:
+        return error
+    try:
+        with get_session() as session:
+            delete_stillborn(session, stillborn_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/office/api/fallen-stock-invoices/archive", methods=["POST"])
+def office_api_archive_fallen_stock_invoice():
+    user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    month = parse_month(payload.get("month"))
+    if month is None:
+        return jsonify({"error": "Choose a month."}), 400
+    try:
+        with get_session() as session:
+            saved = archive_invoice_month(
+                session,
+                month,
+                user.id,
+                payload.get("quantities") if isinstance(payload.get("quantities"), list) else None,
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(saved)
+
+
+@app.route("/office/api/fallen-stock-invoices/unarchive", methods=["POST"])
+def office_api_unarchive_fallen_stock_invoice():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    month = parse_month(payload.get("month"))
+    if month is None:
+        return jsonify({"error": "Choose a month."}), 400
+    try:
+        with get_session() as session:
+            unarchive_invoice_month(session, month)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
 
 
 @app.route("/office/stock-valuations")
