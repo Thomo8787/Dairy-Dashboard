@@ -56,8 +56,10 @@ from services.fallen_stock_invoices import (
     archived_months,
     delete_stillborn,
     invoice_month,
+    invoice_range,
     parse_month,
     set_invoice_quantity,
+    set_stillbirth_count,
     unarchive_invoice_month,
 )
 from services.sales_payments import (
@@ -640,10 +642,14 @@ def office_api_fallen_stock_invoices():
     _user, error = _office_json_user()
     if error:
         return error
+    start = parse_month(request.args.get("from"))
+    end = parse_month(request.args.get("to"))
     month = parse_month(request.args.get("month"))
-    if month is None:
-        return jsonify({"error": "Choose a month."}), 400
     with get_session() as session:
+        if start is not None and end is not None:
+            return jsonify(invoice_range(session, start, end))
+        if month is None:
+            return jsonify({"error": "Choose a month."}), 400
         payload = invoice_month(session, month)
         payload["archived_months"] = archived_months(session)
         return jsonify(payload)
@@ -675,6 +681,33 @@ def office_api_fallen_stock_invoice_qty():
                 band=(payload.get("band") or "").strip(),
                 quantity=parsed_qty,
             )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/office/api/fallen-stock-invoices/stillbirths", methods=["POST"])
+def office_api_set_stillbirths():
+    _user, error = _office_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    month = parse_month(payload.get("month"))
+    counts = payload.get("counts")
+    if month is None:
+        return jsonify({"error": "Choose a month."}), 400
+    if not isinstance(counts, dict) or not counts:
+        return jsonify({"error": "Enter the still births for each farm."}), 400
+    try:
+        parsed_counts = {
+            str(farm).strip().upper(): int(quantity) for farm, quantity in counts.items()
+        }
+    except (TypeError, ValueError):
+        return jsonify({"error": "Enter a whole number."}), 400
+    try:
+        with get_session() as session:
+            for farm, quantity in parsed_counts.items():
+                set_stillbirth_count(session, month=month, farm=farm, quantity=quantity)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"ok": True})

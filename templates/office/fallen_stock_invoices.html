@@ -25,7 +25,7 @@
       font-size: 0.875rem;
       font-weight: 600;
       color: var(--muted);
-      margin-bottom: 0.35rem;
+      margin: 0.9rem 0 0.35rem;
     }
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .slicer-btn {
@@ -62,7 +62,7 @@
       color: #fff;
     }
     .farm-slicer .slicer-btn.selected .slicer-icon { background: #fff; color: var(--accent); }
-    .date-inputs { display: grid; gap: 0.35rem; margin-bottom: 0.85rem; }
+    .date-inputs { display: grid; gap: 0.35rem; }
     .date-inputs label {
       display: flex;
       justify-content: space-between;
@@ -73,6 +73,19 @@
     }
     .date-inputs input[type="range"] { width: 100%; margin: 0; }
     .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; }
+    .archive-list { display: flex; flex-direction: column; gap: 0.35rem; }
+    .archive-chip {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 0.4rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-align: left;
+    }
+    .archive-chip.active { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
+    .archive-empty { color: var(--muted); font-size: 0.85rem; margin: 0; }
     .content-panel { min-width: 0; }
     .action-bar {
       display: flex;
@@ -81,108 +94,97 @@
       gap: 0.6rem;
       margin-bottom: 0.75rem;
     }
-    .action-bar .primary, .action-bar .secondary {
+    .action-bar .secondary, .month-heading .secondary, .dialog-actions .secondary, .dialog-actions .primary {
       padding: 0.45rem 0.85rem;
       border-radius: 6px;
       font-weight: 600;
       cursor: pointer;
     }
-    .action-bar .primary { background: #1e3a5f; border: 1px solid #1e3a5f; color: #fff; }
-    .action-bar .secondary { background: #fff; border: 1px solid var(--line); color: var(--ink); }
-    .action-bar label.upload-btn { display: inline-flex; font: inherit; }
-    .action-bar button:disabled { opacity: 0.55; cursor: default; }
-    .archive-chip {
-      border: 1px solid var(--line);
+    .action-bar .secondary, .month-heading .secondary, .dialog-actions .secondary {
       background: #fff;
-      border-radius: 999px;
-      padding: 0.25rem 0.7rem;
-      cursor: pointer;
-      font-size: 0.82rem;
+      border: 1px solid var(--line);
+      color: var(--ink);
     }
-    .archive-chip.active { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
+    .dialog-actions .primary, .month-heading .primary {
+      background: #1e3a5f;
+      border: 1px solid #1e3a5f;
+      color: #fff;
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .action-bar label.upload-btn { display: inline-flex; font: inherit; }
     .hint, .meta-line { color: var(--muted); font-size: 0.9rem; }
-    .banner {
-      margin: 0 0 0.75rem;
-      padding: 0.7rem 0.85rem;
-      border-radius: 8px;
-      background: #eef4ea;
-      color: #1a2a1f;
+    .month-block { margin-bottom: 1.5rem; }
+    .month-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 0 0 0.5rem;
+    }
+    .month-heading h2 { margin: 0; font-size: 1.05rem; }
+    .archive-view {
+      margin-top: 0.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
     }
     .table-wrap {
       overflow: auto;
-      max-height: calc(100vh - 16rem);
       border: 1px solid var(--line);
       border-radius: 8px;
     }
-    #invoice-table { width: 100%; border-collapse: collapse; }
-    #invoice-table th, #invoice-table td {
+    .invoice-table { width: 100%; border-collapse: collapse; }
+    .invoice-table th, .invoice-table td {
       padding: 0.45rem 0.6rem;
       text-align: right;
       white-space: nowrap;
       vertical-align: middle;
     }
-    #invoice-table th.band, #invoice-table td.band { text-align: left; }
-    #invoice-table th.farm-name { text-align: center; }
-    #invoice-table thead th.farm-start { border-left: 2px solid rgba(255, 255, 255, 0.7); }
-    #invoice-table tbody td.farm-start { border-left: 2px solid #1e3a5f; }
-    #invoice-table thead th {
+    .invoice-table th.band, .invoice-table td.band { text-align: left; }
+    .invoice-table th.farm-name { text-align: center; }
+    .invoice-table thead th.farm-start { border-left: 2px solid rgba(255, 255, 255, 0.7); }
+    .invoice-table tbody td.farm-start { border-left: 2px solid #1e3a5f; }
+    .invoice-table thead th {
       background: #1e3a5f;
       color: #fff;
       font-weight: 600;
-      position: sticky;
-      z-index: 1;
-      border-bottom: none;
     }
-    #invoice-table thead tr:first-child th { top: 0; }
-    #invoice-table thead tr:nth-child(2) th { top: 2.35rem; }
-    #invoice-table input[type="number"] {
+    .invoice-table input[type="number"] {
       width: 4.2rem;
       margin: 0;
       text-align: right;
     }
+    .invoice-table tr.stillbirths td { background: #f8fafc; }
     .diff-ok { color: #15803d; font-weight: 700; }
     .diff-off { color: #b45309; font-weight: 700; }
-    .stillborn-panel {
-      margin-top: 1.25rem;
-      padding: 1rem;
+    .edit-btn {
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-    }
-    .stillborn-panel h2 { margin: 0 0 0.35rem; font-size: 1rem; }
-    .stillborn-form {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      align-items: end;
-      margin: 0.75rem 0;
-    }
-    .stillborn-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; color: var(--muted); }
-    .stillborn-form input, .stillborn-form select { margin: 0; }
-    .stillborn-form .primary {
-      padding: 0.45rem 0.85rem;
+      background: #fff;
       border-radius: 6px;
-      border: 1px solid #1e3a5f;
-      background: #1e3a5f;
-      color: #fff;
+      padding: 0.3rem 0.7rem;
       font-weight: 600;
       cursor: pointer;
     }
-    .stillborn-list { list-style: none; margin: 0; padding: 0; }
-    .stillborn-list li {
+    dialog {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1.1rem 1.2rem;
+      width: min(24rem, calc(100vw - 2rem));
+    }
+    dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+    dialog h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
+    .stillbirth-fields { display: grid; gap: 0.55rem; }
+    .stillbirth-fields label {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 0.75rem;
-      padding: 0.4rem 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .linkish {
-      border: 0;
-      background: transparent;
-      color: #b45309;
-      cursor: pointer;
       font-weight: 600;
     }
+    .stillbirth-fields input { width: 6rem; margin: 0; text-align: right; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
     @media (max-width: 800px) {
       .page-layout { grid-template-columns: 1fr; }
     }
@@ -195,8 +197,10 @@
       <aside class="filter-panel">
         <h2>Filters</h2>
         <div class="date-inputs">
-          <label>Month <span class="month-label" id="month-label">—</span></label>
-          <input type="range" id="month-range" min="0" max="0" value="0" aria-label="Month">
+          <label>From <span class="month-label" id="min-date-label">—</span></label>
+          <input type="range" id="min-date-range" min="0" max="0" value="0" aria-label="From month">
+          <label>To <span class="month-label" id="max-date-label">—</span></label>
+          <input type="range" id="max-date-range" min="0" max="0" value="0" aria-label="To month">
         </div>
         <span class="section-label">Farm</span>
         <div class="slicer-group farm-slicer" role="group" aria-label="Farm">
@@ -207,52 +211,44 @@
             </button>
           {% endfor %}
         </div>
+        <span class="section-label">Archive</span>
+        <div class="archive-list" id="archive-list"></div>
       </aside>
     </div>
     <section class="content-panel">
       <div class="action-bar">
-        <button type="button" class="primary" id="archive-btn">Archive month</button>
-        <button type="button" class="secondary" id="unarchive-btn" hidden>Unarchive</button>
         <label class="secondary upload-btn">
           Upload invoice
           <input type="file" id="invoice-upload" accept="application/pdf,.pdf" multiple hidden>
         </label>
-        <span id="archive-list"></span>
       </div>
-      <p class="banner" id="archive-banner" hidden></p>
-      <p class="hint">On-farm deaths for the month, excluding OFS. Died includes stillborn calves added below. Difference is the invoice quantity minus our count. Upload a Brassington invoice to fill the quantities from the collection lines. Uploading it again replaces those figures. An archived month is left as it is.</p>
+      <p class="hint">On-farm deaths, excluding OFS. Still births are included in the 0-1 month total. Difference is the invoice quantity minus our count. An archived month leaves this list and can be opened from Archive.</p>
       <p class="meta-line" id="meta-line"></p>
-      <div class="table-wrap">
-        <table id="invoice-table">
-          <thead id="table-head"></thead>
-          <tbody id="table-body"></tbody>
-        </table>
-      </div>
-      <div class="stillborn-panel">
-        <h2>Stillborn calves</h2>
-        <p class="hint">Calves with no death in DairyComp. They are counted in 0-1 month.</p>
-        <form class="stillborn-form" id="stillborn-form">
-          <label>Farm
-            <select id="stillborn-farm">
-              {% for farm in farm_options %}
-                <option value="{{ farm }}">{{ farm }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>Date
-            <input type="date" id="stillborn-date" required>
-          </label>
-          <label>Note
-            <input type="text" id="stillborn-note" maxlength="255" placeholder="Dam or ticket">
-          </label>
-          <button type="submit" class="primary" id="stillborn-add">Add</button>
-        </form>
-        <ul class="stillborn-list" id="stillborn-list"></ul>
-      </div>
+      <div id="month-tables"></div>
+      <section class="archive-view" id="archive-view" hidden>
+        <div class="month-heading">
+          <h2 id="archive-title"></h2>
+          <button type="button" class="secondary" id="unarchive-btn">Unarchive</button>
+        </div>
+        <div class="table-wrap" id="archive-table"></div>
+      </section>
     </section>
   </div>
+  <dialog id="stillbirth-dialog">
+    <form id="stillbirth-form">
+      <h2 id="stillbirth-title">Still births</h2>
+      <div class="stillbirth-fields" id="stillbirth-fields"></div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="stillbirth-cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
   <script>
-    let payload = null;
+    let months = [];
+    let archivedMonths = [];
+    let archiveMonth = null;
+    let archivePayload = null;
     const monthList = [];
 
     function selectedFarms() {
@@ -293,23 +289,46 @@
         cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
         monthList.push(cursor);
       }
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      minRange.min = "0";
+      minRange.max = String(monthList.length - 1);
+      maxRange.min = "0";
+      maxRange.max = String(monthList.length - 1);
       return monthList.findIndex(month => monthKey(month) === yyyyMm);
     }
 
-    function monthValue() {
-      const index = parseInt(document.getElementById("month-range").value, 10);
-      const month = monthList[index];
-      return month ? monthKey(month) : "";
+    function updateDateLabels() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      const from = monthList[parseInt(minRange.value, 10)];
+      const to = monthList[parseInt(maxRange.value, 10)];
+      document.getElementById("min-date-label").textContent = from ? formatMonthLabel(from) : "—";
+      document.getElementById("max-date-label").textContent = to ? formatMonthLabel(to) : "—";
     }
 
-    function setMonth(yyyyMm) {
-      const index = ensureMonth(yyyyMm);
-      const range = document.getElementById("month-range");
-      range.min = "0";
-      range.max = String(monthList.length - 1);
-      range.value = String(Math.max(0, index));
-      const chosen = monthList[parseInt(range.value, 10)];
-      document.getElementById("month-label").textContent = chosen ? formatMonthLabel(chosen) : "—";
+    function rangeValue() {
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      const from = monthList[parseInt(minRange.value, 10)];
+      const to = monthList[parseInt(maxRange.value, 10)];
+      return {
+        from: from ? monthKey(from) : "",
+        to: to ? monthKey(to) : "",
+      };
+    }
+
+    function setRange(fromKey, toKey) {
+      const fromIndex = ensureMonth(fromKey);
+      const toIndex = ensureMonth(toKey);
+      const minRange = document.getElementById("min-date-range");
+      const maxRange = document.getElementById("max-date-range");
+      let lo = Math.max(0, fromIndex);
+      let hi = Math.max(0, toIndex);
+      if (lo > hi) hi = lo;
+      minRange.value = String(lo);
+      maxRange.value = String(hi);
+      updateDateLabels();
     }
 
     function previousMonth() {
@@ -322,12 +341,6 @@
       return new Date(year, mon - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
     }
 
-    function fmtDate(iso) {
-      if (!iso) return "";
-      const [year, mon, day] = iso.split("-").map(Number);
-      return new Date(year, mon - 1, day).toLocaleDateString("en-GB");
-    }
-
     function diffCell(died, invoice) {
       if (invoice == null || invoice === "") return "<td>—</td>";
       const diff = Number(invoice) - died;
@@ -335,59 +348,78 @@
       return `<td class="${cls}">${diff > 0 ? "+" : ""}${diff}</td>`;
     }
 
-    function render() {
-      const farms = selectedFarms();
-      const head = document.getElementById("table-head");
-      const body = document.getElementById("table-body");
-      const locked = Boolean(payload && payload.archived);
-      document.getElementById("archive-btn").hidden = locked;
-      document.getElementById("unarchive-btn").hidden = !locked;
-      document.getElementById("stillborn-form").hidden = locked;
-      const banner = document.getElementById("archive-banner");
-      banner.hidden = !locked;
-      if (locked) {
-        banner.textContent = `Archived ${fmtDate(payload.archived_on)}. The counts stay as they were.`;
-      }
-      if (!payload) {
-        head.innerHTML = "";
-        body.innerHTML = "";
-        return;
-      }
-      head.innerHTML = `<tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th class="farm-name farm-start" colspan="3">${farm}</th>`).join("")}</tr>`
-        + `<tr>${farms.map(() => `<th class="farm-start">Died</th><th>Invoice</th><th>Diff</th>`).join("")}</tr>`;
-      body.innerHTML = payload.bands.map(band => {
-        const cells = farms.map(farm => {
-          const died = payload.counts[band.id][farm] || 0;
-          const invoice = payload.invoice[band.id][farm];
-          const value = invoice == null ? "" : invoice;
-          return `<td class="farm-start">${died}</td><td><input type="number" min="0" step="1" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
-        }).join("");
-        return `<tr><td class="band">${escapeHtml(band.label)}</td>${cells}</tr>`;
-      }).join("");
-      const visible = new Set(farms);
-      const rows = (payload.stillborns || []).filter(row => visible.has(row.farm));
-      document.getElementById("stillborn-list").innerHTML = rows.length
-        ? rows.map(row => `<li><span>${fmtDate(row.born_on)} · ${escapeHtml(row.farm)}${row.note ? " · " + escapeHtml(row.note) : ""}</span>${locked ? "" : `<button type="button" class="linkish" data-remove="${row.id}">Remove</button>`}</li>`).join("")
-        : `<li><span>None added for the farms being shown.</span></li>`;
-      const list = document.getElementById("archive-list");
-      list.innerHTML = (payload.archived_months || []).map(item => {
-        const on = item.month === payload.month ? "active" : "";
-        return `<button type="button" class="archive-chip ${on}" data-month="${item.month}">${monthLabel(item.month)}</button>`;
-      }).join("");
+    function stillbirthCounts(month) {
+      if (month.stillbirth_counts) return month.stillbirth_counts;
+      const counts = {};
+      (month.farms || []).forEach(farm => { counts[farm] = 0; });
+      (month.stillborns || []).forEach(row => {
+        counts[row.farm] = (counts[row.farm] || 0) + 1;
+      });
+      return counts;
     }
 
-    async function load(month) {
+    function tableHtml(month, locked) {
+      const farms = selectedFarms();
+      const bands = (month.bands || []).filter(band => band.id !== "unknown");
+      const head = `<thead><tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th class="farm-name farm-start" colspan="3">${farm}</th>`).join("")}<th rowspan="2"></th></tr>`
+        + `<tr>${farms.map(() => `<th class="farm-start">Died</th><th>Invoice</th><th>Diff</th>`).join("")}</tr></thead>`;
+      const rows = bands.map(band => {
+        const cells = farms.map(farm => {
+          const died = (month.counts[band.id] && month.counts[band.id][farm]) || 0;
+          const invoice = month.invoice[band.id] ? month.invoice[band.id][farm] : null;
+          const value = invoice == null ? "" : invoice;
+          return `<td class="farm-start">${died}</td><td><input type="number" min="0" step="1" data-month="${month.month}" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
+        }).join("");
+        return `<tr><td class="band">${escapeHtml(band.label)}</td>${cells}<td></td></tr>`;
+      }).join("");
+      const counts = stillbirthCounts(month);
+      const stillCells = farms.map(farm => `<td class="farm-start">${counts[farm] || 0}</td><td></td><td></td>`).join("");
+      const edit = locked ? "" : `<button type="button" class="edit-btn" data-edit="${month.month}">Edit</button>`;
+      const stillRow = `<tr class="stillbirths"><td class="band">Still births</td>${stillCells}<td>${edit}</td></tr>`;
+      return `<table class="invoice-table">${head}<tbody>${rows}${stillRow}</tbody></table>`;
+    }
+
+    function render() {
+      const host = document.getElementById("month-tables");
+      host.innerHTML = months.length
+        ? months.map(month => `<section class="month-block"><div class="month-heading"><h2>${monthLabel(month.month)}</h2><button type="button" class="secondary" data-archive="${month.month}">Archive</button></div><div class="table-wrap">${tableHtml(month, false)}</div></section>`).join("")
+        : `<p class="hint">No open months in this range.</p>`;
+      const list = document.getElementById("archive-list");
+      list.innerHTML = archivedMonths.length
+        ? archivedMonths.map(item => `<button type="button" class="archive-chip ${item.month === archiveMonth ? "active" : ""}" data-month="${item.month}">${monthLabel(item.month)}</button>`).join("")
+        : `<p class="archive-empty">None archived.</p>`;
+      const view = document.getElementById("archive-view");
+      if (archivePayload && archivePayload.archived) {
+        view.hidden = false;
+        document.getElementById("archive-title").textContent = monthLabel(archivePayload.month);
+        document.getElementById("archive-table").innerHTML = tableHtml(archivePayload, true);
+      } else {
+        view.hidden = true;
+      }
+    }
+
+    async function load() {
       const meta = document.getElementById("meta-line");
-      const chosen = month || monthValue();
-      if (chosen) setMonth(chosen);
+      const range = rangeValue();
       meta.textContent = "Loading…";
-      const res = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(monthValue())}`);
+      const res = await fetch(`/office/api/fallen-stock-invoices?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`);
       if (!res.ok) {
-        meta.textContent = "Could not load the month.";
+        meta.textContent = "Could not load the months.";
         return;
       }
-      payload = await res.json();
-      meta.textContent = monthLabel(payload.month);
+      const payload = await res.json();
+      months = payload.months || [];
+      archivedMonths = payload.archived_months || [];
+      if (archiveMonth) {
+        const archived = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(archiveMonth)}`);
+        archivePayload = archived.ok ? await archived.json() : null;
+        if (!archivePayload || !archivePayload.archived) {
+          archiveMonth = null;
+          archivePayload = null;
+        }
+      }
+      const label = range.from === range.to ? monthLabel(range.from) : `${monthLabel(range.from)} to ${monthLabel(range.to)}`;
+      meta.textContent = label;
       render();
     }
 
@@ -402,13 +434,20 @@
       });
     });
 
-    document.getElementById("month-range").addEventListener("input", () => {
-      const chosen = monthList[parseInt(document.getElementById("month-range").value, 10)];
-      document.getElementById("month-label").textContent = chosen ? formatMonthLabel(chosen) : "—";
-    });
-    document.getElementById("month-range").addEventListener("change", () => load());
+    function bindRange(id, otherId, isFrom) {
+      const range = document.getElementById(id);
+      const other = document.getElementById(otherId);
+      range.addEventListener("input", () => {
+        if (isFrom && parseInt(range.value, 10) > parseInt(other.value, 10)) other.value = range.value;
+        if (!isFrom && parseInt(range.value, 10) < parseInt(other.value, 10)) other.value = range.value;
+        updateDateLabels();
+      });
+      range.addEventListener("change", () => load());
+    }
+    bindRange("min-date-range", "max-date-range", true);
+    bindRange("max-date-range", "min-date-range", false);
 
-    document.getElementById("table-body").addEventListener("change", async event => {
+    document.getElementById("month-tables").addEventListener("change", async event => {
       const input = event.target;
       if (!input.matches?.("input[data-band]")) return;
       const meta = document.getElementById("meta-line");
@@ -416,7 +455,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          month: monthValue(),
+          month: input.dataset.month,
           farm: input.dataset.farm,
           band: input.dataset.band,
           quantity: input.value === "" ? null : Number(input.value),
@@ -428,82 +467,125 @@
         await load();
         return;
       }
-      payload.invoice[input.dataset.band][input.dataset.farm] = input.value === "" ? null : Number(input.value);
+      const month = months.find(item => item.month === input.dataset.month);
+      if (month) month.invoice[input.dataset.band][input.dataset.farm] = input.value === "" ? null : Number(input.value);
       render();
     });
 
-    document.getElementById("stillborn-form").addEventListener("submit", async event => {
+    document.getElementById("month-tables").addEventListener("click", async event => {
+      const archive = event.target.closest?.("[data-archive]");
+      if (archive) {
+        const monthKeyValue = archive.dataset.archive;
+        const month = months.find(item => item.month === monthKeyValue);
+        if (!month) return;
+        if (!confirm(`Archive ${monthLabel(month.month)}? It will leave this list.`)) return;
+        const block = archive.closest(".month-block");
+        const quantities = [];
+        (month.farms || []).forEach(farm => {
+          (month.bands || []).filter(band => band.id !== "unknown").forEach(band => {
+            const input = block.querySelector(`input[data-band="${band.id}"][data-farm="${farm}"]`);
+            const saved = month.invoice[band.id] ? month.invoice[band.id][farm] : null;
+            quantities.push({
+              farm,
+              band: band.id,
+              quantity: input ? (input.value === "" ? null : Number(input.value)) : saved,
+            });
+          });
+        });
+        const res = await fetch("/office/api/fallen-stock-invoices/archive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ month: month.month, quantities }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          document.getElementById("meta-line").textContent = body.error || "Could not archive the month.";
+          return;
+        }
+        archiveMonth = month.month;
+        await load();
+        document.getElementById("meta-line").textContent = `${monthLabel(month.month)} archived.`;
+        return;
+      }
+      const edit = event.target.closest?.("[data-edit]");
+      if (!edit) return;
+      openStillbirths(edit.dataset.edit);
+    });
+
+    function openStillbirths(monthKeyValue) {
+      const month = months.find(item => item.month === monthKeyValue);
+      if (!month) return;
+      const counts = stillbirthCounts(month);
+      document.getElementById("stillbirth-title").textContent = `Still births · ${monthLabel(month.month)}`;
+      document.getElementById("stillbirth-fields").innerHTML = (month.farms || []).map(farm => `
+        <label>${farm}
+          <input type="number" min="0" step="1" data-farm="${farm}" value="${counts[farm] || 0}" aria-label="${farm} still births">
+        </label>`).join("");
+      document.getElementById("stillbirth-form").dataset.month = month.month;
+      document.getElementById("stillbirth-dialog").showModal();
+    }
+
+    document.getElementById("stillbirth-cancel").addEventListener("click", () => {
+      document.getElementById("stillbirth-dialog").close();
+    });
+
+    document.getElementById("stillbirth-form").addEventListener("submit", async event => {
       event.preventDefault();
-      const meta = document.getElementById("meta-line");
-      const res = await fetch("/office/api/fallen-stock-invoices/stillborns", {
+      const form = event.target;
+      const counts = {};
+      form.querySelectorAll("input[data-farm]").forEach(input => {
+        counts[input.dataset.farm] = input.value === "" ? 0 : Number(input.value);
+      });
+      const res = await fetch("/office/api/fallen-stock-invoices/stillbirths", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          farm: document.getElementById("stillborn-farm").value,
-          born_on: document.getElementById("stillborn-date").value,
-          note: document.getElementById("stillborn-note").value,
-        }),
+        body: JSON.stringify({ month: form.dataset.month, counts }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        meta.textContent = body.error || "Could not add the calf.";
+        document.getElementById("meta-line").textContent = body.error || "Could not save the still births.";
         return;
       }
-      document.getElementById("stillborn-note").value = "";
-      const farm = document.getElementById("stillborn-farm").value;
-      const born = document.getElementById("stillborn-date").value.slice(0, 7);
-      await load(born);
-      if (!selectedFarms().includes(farm)) {
-        document.getElementById("meta-line").textContent = `Added on ${farm}. Turn that farm on to see it.`;
-      }
-    });
-
-    document.getElementById("stillborn-list").addEventListener("click", async event => {
-      const button = event.target.closest?.("[data-remove]");
-      if (!button) return;
-      const res = await fetch(`/office/api/fallen-stock-invoices/stillborns/${button.dataset.remove}`, { method: "DELETE" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        document.getElementById("meta-line").textContent = body.error || "Could not remove the calf.";
-        return;
-      }
-      await load();
-    });
-
-    document.getElementById("archive-btn").addEventListener("click", async () => {
-      if (!confirm(`Archive ${monthLabel(monthValue())}? The counts will stay as they are now.`)) return;
-      const res = await fetch("/office/api/fallen-stock-invoices/archive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          month: monthValue(),
-          quantities: [...document.querySelectorAll("#table-body input[data-band]")].map(input => ({
-            farm: input.dataset.farm,
-            band: input.dataset.band,
-            quantity: input.value === "" ? null : Number(input.value),
-          })),
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        document.getElementById("meta-line").textContent = body.error || "Could not archive the month.";
-        return;
-      }
+      document.getElementById("stillbirth-dialog").close();
       await load();
     });
 
     document.getElementById("unarchive-btn").addEventListener("click", async () => {
+      if (!archiveMonth) return;
+      const month = archiveMonth;
       const res = await fetch("/office/api/fallen-stock-invoices/unarchive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month: monthValue() }),
+        body: JSON.stringify({ month }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         document.getElementById("meta-line").textContent = body.error || "Could not unarchive the month.";
         return;
       }
+      archiveMonth = null;
+      archivePayload = null;
       await load();
+      document.getElementById("meta-line").textContent = `${monthLabel(month)} is back with the open months.`;
+    });
+
+    document.getElementById("archive-list").addEventListener("click", async event => {
+      const button = event.target.closest?.("[data-month]");
+      if (!button) return;
+      if (archiveMonth === button.dataset.month) {
+        archiveMonth = null;
+        archivePayload = null;
+        render();
+        return;
+      }
+      archiveMonth = button.dataset.month;
+      const res = await fetch(`/office/api/fallen-stock-invoices?month=${encodeURIComponent(archiveMonth)}`);
+      if (!res.ok) {
+        document.getElementById("meta-line").textContent = "Could not open the archived month.";
+        return;
+      }
+      archivePayload = await res.json();
+      render();
     });
 
     document.getElementById("invoice-upload").addEventListener("change", async event => {
@@ -521,17 +603,19 @@
         return;
       }
       const filled = (saved.results || []).flatMap(result => (result.filled || []).map(row => row.month));
-      const showing = monthValue();
-      await load(filled.includes(showing) ? showing : filled[filled.length - 1]);
+      if (filled.length) {
+        const range = rangeValue();
+        const keys = [range.from, range.to, ...filled].filter(Boolean).sort();
+        setRange(keys[0], keys[keys.length - 1]);
+      }
+      await load();
       meta.textContent = saved.message || "Invoice quantities updated.";
     });
 
-    document.getElementById("archive-list").addEventListener("click", event => {
-      const button = event.target.closest?.("[data-month]");
-      if (!button) return;
-      load(button.dataset.month);
-    });
-
-    setTimeout(() => load(previousMonth()), 0);
+    setTimeout(() => {
+      const month = previousMonth();
+      setRange(month, month);
+      load();
+    }, 0);
   </script>
 {% endblock %}

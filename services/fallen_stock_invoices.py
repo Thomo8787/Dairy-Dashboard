@@ -84,10 +84,12 @@ def _blank_invoice() -> dict[str, dict[str, int | None]]:
     return {band_id: {farm: None for farm in HERD_FARM_OPTIONS} for band_id, *_rest in AGE_BANDS}
 
 
-def _live_month(db: Session, month: dt.date) -> dict[str, Any]:
+def _live_month(db: Session, month: dt.date, deaths: list[Any] | None = None) -> dict[str, Any]:
     end = _next_month(month)
     counts = _empty_grid()
-    for event in _load_deaths(db, list(HERD_FARM_OPTIONS)):
+    if deaths is None:
+        deaths = _load_deaths(db, list(HERD_FARM_OPTIONS))
+    for event in deaths:
         event_date = event.event_date
         if event_date is None or event_date < month or event_date >= end:
             continue
@@ -95,6 +97,8 @@ def _live_month(db: Session, month: dt.date) -> dict[str, Any]:
         if isinstance(born, dt.datetime):
             born = born.date()
         band = band_for_age(completed_months(born, event_date) if born else None)
+        if band == "unknown":
+            band = STILLBORN_BAND
         farm = event.farm
         if farm in counts[band]:
             counts[band][farm] += 1
@@ -129,12 +133,46 @@ def _live_month(db: Session, month: dt.date) -> dict[str, Any]:
         "month": month.isoformat()[:7],
         "archived": False,
         "archived_on": None,
-        "bands": [{"id": band_id, "label": label} for band_id, label, *_rest in AGE_BANDS],
+        "bands": [
+            {"id": band_id, "label": label}
+            for band_id, label, *_rest in AGE_BANDS
+            if band_id != "unknown"
+        ],
         "farms": list(HERD_FARM_OPTIONS),
         "counts": counts,
         "invoice": invoice,
+        "stillbirth_counts": _stillbirth_counts(stillborn_rows),
         "stillborns": stillborn_rows,
     }
+
+
+def _stillbirth_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {farm: 0 for farm in HERD_FARM_OPTIONS}
+    for row in rows:
+        farm = row.get("farm")
+        if farm in counts:
+            counts[farm] += 1
+    return counts
+
+
+def _previous_month(month: dt.date) -> dt.date:
+    if month.month == 1:
+        return dt.date(month.year - 1, 12, 1)
+    return dt.date(month.year, month.month - 1, 1)
+
+
+def invoice_range(db: Session, start: dt.date, end: dt.date) -> dict[str, Any]:
+    """Open months in the range, newest first. Archived months are left out."""
+    if start > end:
+        start, end = end, start
+    deaths = _load_deaths(db, list(HERD_FARM_OPTIONS))
+    months: list[dict[str, Any]] = []
+    cursor = end
+    while cursor >= start:
+        if _archive_row(db, cursor) is None:
+            months.append(_live_month(db, cursor, deaths))
+        cursor = _previous_month(cursor)
+    return {"months": months, "archived_months": archived_months(db)}
 
 
 def _archive_row(db: Session, month: dt.date) -> FallenStockInvoiceArchive | None:
@@ -209,6 +247,33 @@ def add_stillborn(db: Session, *, farm: str, born_on: dt.date, note: str) -> dic
     db.add(row)
     db.flush()
     return {"id": row.id, "farm": row.farm, "born_on": row.born_on.isoformat(), "note": row.note}
+
+
+def set_stillbirth_count(db: Session, *, month: dt.date, farm: str, quantity: int) -> None:
+    """Set how many stillbirths a farm has in the month."""
+    if farm not in HERD_FARM_OPTIONS:
+        raise ValueError("Choose a farm.")
+    if quantity < 0:
+        raise ValueError("Still births cannot be negative.")
+    _require_open(db, month)
+    end = _next_month(month)
+    rows = list(
+        db.scalars(
+            select(FallenStockStillborn)
+            .where(
+                FallenStockStillborn.farm == farm,
+                FallenStockStillborn.born_on >= month,
+                FallenStockStillborn.born_on < end,
+            )
+            .order_by(FallenStockStillborn.id)
+        ).all()
+    )
+    if len(rows) > quantity:
+        for row in rows[quantity:]:
+            db.delete(row)
+        return
+    for _ in range(quantity - len(rows)):
+        db.add(FallenStockStillborn(farm=farm, born_on=month, note=""))
 
 
 def delete_stillborn(db: Session, stillborn_id: int) -> None:
