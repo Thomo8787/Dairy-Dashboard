@@ -33,7 +33,6 @@
     }
     .slicer-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .stock-group-slicer { grid-template-columns: 1fr 1fr; }
-    .stock-group-slicer .span-2 { grid-column: 1 / -1; }
     .slicer-btn .slicer-sub { font-size: 0.75rem; font-weight: 600; }
     .slicer-btn {
       display: flex;
@@ -190,10 +189,10 @@
           <div class="slicer-group stock-group-slicer" role="group" aria-label="Stock group">
             <button type="button" class="slicer-btn selected" data-value="cows" aria-pressed="true">Cows</button>
             <button type="button" class="slicer-btn" data-value="beef" aria-pressed="false">Beef</button>
-            <button type="button" class="slicer-btn span-2" data-value="dairy_bull" aria-pressed="false">Dairy bulls</button>
             <button type="button" class="slicer-btn" data-value="ys_0_12" aria-pressed="false">Youngstock<span class="slicer-sub">0–12 months</span></button>
             <button type="button" class="slicer-btn" data-value="ys_12_plus" aria-pressed="false">Youngstock<span class="slicer-sub">12+ months</span></button>
-            <button type="button" class="slicer-btn span-2" data-value="youngstock" aria-pressed="false">Youngstock total</button>
+            <button type="button" class="slicer-btn" data-value="dairy_bull" aria-pressed="false">Dairy bulls</button>
+            <button type="button" class="slicer-btn" data-value="youngstock" aria-pressed="false">Youngstock total</button>
           </div>
         </div>
         <div class="filter-section">
