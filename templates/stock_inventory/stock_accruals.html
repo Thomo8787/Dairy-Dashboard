@@ -64,6 +64,7 @@
     .slicer-btn[data-value="ys_0_12"].selected,
     .slicer-btn[data-value="ys_12_plus"].selected { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
     .slicer-btn[data-value="beef"].selected { background: #ede9fe; border-color: #a78bfa; color: #5b21b6; }
+    .slicer-btn[data-value="dairy_bull"].selected { background: #dbeafe; border-color: #60a5fa; color: #1e3a8a; }
     .date-inputs { display: grid; gap: 0.5rem; }
     .filter-select { width: 100%; margin: 0; }
     .date-inputs label {
@@ -189,6 +190,7 @@
           <div class="slicer-group stock-group-slicer" role="group" aria-label="Stock group">
             <button type="button" class="slicer-btn selected" data-value="cows" aria-pressed="true">Cows</button>
             <button type="button" class="slicer-btn" data-value="beef" aria-pressed="false">Beef</button>
+            <button type="button" class="slicer-btn span-2" data-value="dairy_bull" aria-pressed="false">Dairy bulls</button>
             <button type="button" class="slicer-btn" data-value="ys_0_12" aria-pressed="false">Youngstock<span class="slicer-sub">0–12 months</span></button>
             <button type="button" class="slicer-btn" data-value="ys_12_plus" aria-pressed="false">Youngstock<span class="slicer-sub">12+ months</span></button>
             <button type="button" class="slicer-btn span-2" data-value="youngstock" aria-pressed="false">Youngstock total</button>
@@ -242,6 +244,7 @@
       ys_0_12: "Youngstock 0–12 months",
       ys_12_plus: "Youngstock 12+ months",
       beef: "Beef",
+      dairy_bull: "Dairy bulls",
     };
     let monthList = [];
     let loadTimer = null;
@@ -271,7 +274,7 @@
 
 
     function showBirthsColumn(stockGroup) {
-      return stockGroup === "youngstock" || stockGroup === "ys_0_12" || stockGroup === "beef";
+      return stockGroup === "youngstock" || stockGroup === "ys_0_12" || stockGroup === "beef" || stockGroup === "dairy_bull";
     }
 
     function showTurned12Column(stockGroup) {

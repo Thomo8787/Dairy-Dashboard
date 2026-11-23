@@ -444,12 +444,14 @@ STOCK_GROUP_YOUNGSTOCK = "youngstock"
 STOCK_GROUP_YOUNGSTOCK_0_12 = "ys_0_12"
 STOCK_GROUP_YOUNGSTOCK_12_PLUS = "ys_12_plus"
 STOCK_GROUP_BEEF = "beef"
+STOCK_GROUP_DAIRY_BULL = "dairy_bull"
 STOCK_GROUP_OPTIONS: tuple[str, ...] = (
     STOCK_GROUP_COWS,
     STOCK_GROUP_YOUNGSTOCK,
     STOCK_GROUP_YOUNGSTOCK_0_12,
     STOCK_GROUP_YOUNGSTOCK_12_PLUS,
     STOCK_GROUP_BEEF,
+    STOCK_GROUP_DAIRY_BULL,
 )
 STOCK_GROUP_CATEGORY: dict[str, str] = {
     STOCK_GROUP_COWS: "Dairy",
@@ -457,6 +459,8 @@ STOCK_GROUP_CATEGORY: dict[str, str] = {
     STOCK_GROUP_YOUNGSTOCK_0_12: "Youngstock",
     STOCK_GROUP_YOUNGSTOCK_12_PLUS: "Youngstock",
     STOCK_GROUP_BEEF: "Beef",
+    # Cattle-sale remittances still treat these calves as beef.
+    STOCK_GROUP_DAIRY_BULL: "Beef",
 }
 
 

@@ -11,11 +11,12 @@ from sqlalchemy.orm import Session
 from services.database import (
     STOCK_GROUP_BEEF,
     STOCK_GROUP_COWS,
+    STOCK_GROUP_DAIRY_BULL,
     STOCK_GROUP_YOUNGSTOCK,
     CowEvent,
     StockPurchaseAnimal,
 )
-from services.herd_import_utils import CATEGORY_DAIRY, category_from_birth
+from services.herd_import_utils import BEEF_CBREED_MIN, CATEGORY_DAIRY, category_from_birth
 
 
 def classify_purchase_stock_group(
@@ -28,10 +29,30 @@ def classify_purchase_stock_group(
     min_lact: int | None = None,
 ) -> str:
     """Classify a purchased animal using status at arrival, not current lactation."""
-    if category_from_birth(cbrd, gndr) != CATEGORY_DAIRY:
-        return STOCK_GROUP_BEEF
-
     arrival_lact = min_lact if min_lact is not None else lact
+    gender = (gndr or "").strip().upper()
+    try:
+        breed_code = int(cbrd) if cbrd is not None else None
+    except (TypeError, ValueError):
+        breed_code = None
+    if (
+        (arrival_lact is None or arrival_lact == 0)
+        and gender == "M"
+        and breed_code is not None
+        and breed_code < BEEF_CBREED_MIN
+    ):
+        return STOCK_GROUP_DAIRY_BULL
+
+    if category_from_birth(cbrd, gndr) != CATEGORY_DAIRY:
+        if (
+            gender == "M"
+            and breed_code is not None
+            and breed_code < BEEF_CBREED_MIN
+            and arrival_lact is not None
+            and arrival_lact > 0
+        ):
+            return STOCK_GROUP_COWS
+        return STOCK_GROUP_BEEF
     if arrival_lact == 0:
         return STOCK_GROUP_YOUNGSTOCK
 

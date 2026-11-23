@@ -5,6 +5,7 @@ from __future__ import annotations
 from services.database import (
     STOCK_GROUP_BEEF,
     STOCK_GROUP_COWS,
+    STOCK_GROUP_DAIRY_BULL,
     STOCK_GROUP_OPTIONS,
     STOCK_GROUP_YOUNGSTOCK,
 )
@@ -51,15 +52,27 @@ def stock_group_from_event_fields(
 
     gender = (gndr or "").strip().upper()
     cbrd_code = _normalize_cbrd(cbrd)
+    if (
+        gender == "M"
+        and cbrd_code is not None
+        and cbrd_code < BEEF_CBREED_MIN
+    ):
+        return STOCK_GROUP_DAIRY_BULL
     if gender == "F" and cbrd_code is not None and cbrd_code < BEEF_CBREED_MIN:
         return STOCK_GROUP_YOUNGSTOCK
     return STOCK_GROUP_BEEF
 
 
-def stock_group_from_inventory(lact: int | float | None, sbrd: str | None) -> str:
+def stock_group_from_inventory(
+    lact: int | float | None,
+    sbrd: str | None,
+    gender: str | None = None,
+) -> str:
     lact_n = _normalize_lact(lact)
     if lact_n > 0:
         return STOCK_GROUP_COWS
+    if (gender or "").strip().lower() == "male" and not inventory_sbrd_is_beef(sbrd):
+        return STOCK_GROUP_DAIRY_BULL
     if inventory_sbrd_is_beef(sbrd):
         return STOCK_GROUP_BEEF
     return STOCK_GROUP_YOUNGSTOCK

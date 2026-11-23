@@ -13,6 +13,7 @@ from services.database import (
     STOCK_GROUP_BEEF,
     STOCK_GROUP_CATEGORY,
     STOCK_GROUP_COWS,
+    STOCK_GROUP_DAIRY_BULL,
     STOCK_GROUP_OPTIONS,
     STOCK_GROUP_YOUNGSTOCK,
     STOCK_GROUP_YOUNGSTOCK_0_12,
@@ -41,11 +42,14 @@ from services.events_common import (
 from services.farms import HERD_FARM_OPTIONS
 from services.herd_import_utils import BEEF_CBREED_MIN, CATEGORY_BEEF, CATEGORY_DAIRY
 from services.stock_group import normalize_stock_group
-from services.stock_purchase_derivation import ensure_stock_purchases
+from services.stock_purchase_derivation import (
+    ensure_stock_purchases,
+    rebuild_stock_purchases,
+)
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "dairy-farm-group-v1"
+ACCRUAL_LOGIC_VERSION = "dairy-bull-v1"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
@@ -118,11 +122,23 @@ def _youngstock_cow_event_filter():
     )
 
 
+def _dairy_bull_event_clause():
+    """Male dairy breed at lactation 0. Lactation above 0 stays with the cows."""
+    return and_(
+        CowEvent.lact == 0,
+        func.upper(func.coalesce(CowEvent.gndr, "")) == "M",
+        CowEvent.cbrd.isnot(None),
+        CowEvent.cbrd < BEEF_CBREED_MIN,
+    )
+
+
 def _apply_cow_event_stock_group(query, stock_group: str):
     if stock_group == STOCK_GROUP_COWS:
         return query.where(CowEvent.lact.isnot(None)).where(CowEvent.lact > 0)
+    if stock_group == STOCK_GROUP_DAIRY_BULL:
+        return query.where(_dairy_bull_event_clause())
     if stock_group == STOCK_GROUP_BEEF:
-        query = query.where(CowEvent.lact == 0)
+        query = query.where(CowEvent.lact == 0).where(~_dairy_bull_event_clause())
         return query.where(
             or_(
                 func.upper(func.coalesce(CowEvent.gndr, "")) != "F",
@@ -309,6 +325,44 @@ def _fetch_births_by_month(
     }
 
 
+def _dairy_bull_birth_clause():
+    return and_(
+        func.upper(func.coalesce(HerdBirth.gndr, "")) == "M",
+        HerdBirth.cbrd.isnot(None),
+        HerdBirth.cbrd < BEEF_CBREED_MIN,
+    )
+
+
+def _fetch_dairy_bull_births_by_month(
+    db: Session,
+    *,
+    farm: str,
+    month_from: dt.date,
+    month_to: dt.date,
+) -> dict[tuple[int, int], int]:
+    query = (
+        select(
+            extract("year", HerdBirth.bdat),
+            extract("month", HerdBirth.bdat),
+            func.count(),
+        )
+        .where(HerdBirth.bdat.isnot(None))
+        .where(HerdBirth.farm == farm)
+        .where(_dairy_bull_birth_clause())
+        .where(HerdBirth.bdat >= month_from)
+        .where(HerdBirth.bdat <= month_to)
+        .group_by(
+            extract("year", HerdBirth.bdat),
+            extract("month", HerdBirth.bdat),
+        )
+    )
+    return {
+        (int(year), int(month)): int(count)
+        for year, month, count in db.execute(query).all()
+        if year is not None and month is not None
+    }
+
+
 def _fetch_beef_births_by_month(
     db: Session,
     *,
@@ -324,6 +378,7 @@ def _fetch_beef_births_by_month(
         )
         .where(HerdBirth.bdat.isnot(None))
         .where(HerdBirth.farm == farm)
+        .where(~_dairy_bull_birth_clause())
         .where(
             or_(
                 HerdBirth.category == CATEGORY_BEEF,
@@ -622,6 +677,12 @@ def _movement_totals(
                 db, farm=farm, month_from=month_from, month_to=month_to
             )
         )
+    elif stock_group == STOCK_GROUP_DAIRY_BULL:
+        births = _sum_month_counts(
+            _fetch_dairy_bull_births_by_month(
+                db, farm=farm, month_from=month_from, month_to=month_to
+            )
+        )
     elif stock_group == STOCK_GROUP_COWS:
         calvings = _sum_month_counts(
             _fetch_event_count_by_month(
@@ -647,15 +708,26 @@ def _movement_totals(
 def _inventory_count(db: Session, farm: str, stock_group: str) -> int:
     if stock_group in (STOCK_GROUP_YOUNGSTOCK_0_12, STOCK_GROUP_YOUNGSTOCK_12_PLUS):
         return _youngstock_age_inventory_count(db, farm, stock_group)
-    category = STOCK_GROUP_CATEGORY[stock_group]
-    return (
-        db.scalar(
-            select(func.count())
-            .select_from(HerdInventory)
-            .where(HerdInventory.farm == farm, HerdInventory.category == category)
+    if stock_group == STOCK_GROUP_DAIRY_BULL:
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(HerdInventory)
+                .where(HerdInventory.farm == farm)
+                .where(HerdInventory.category == "Youngstock")
+                .where(HerdInventory.gender == "Male")
+            )
+            or 0
         )
-        or 0
+    category = STOCK_GROUP_CATEGORY[stock_group]
+    query = (
+        select(func.count())
+        .select_from(HerdInventory)
+        .where(HerdInventory.farm == farm, HerdInventory.category == category)
     )
+    if stock_group == STOCK_GROUP_YOUNGSTOCK:
+        query = query.where(HerdInventory.gender != "Male")
+    return db.scalar(query) or 0
 
 
 def _youngstock_age_inventory_count(db: Session, farm: str, stock_group: str) -> int:
@@ -846,6 +918,10 @@ def _compute_farm_rows(
         births = _fetch_beef_births_by_month(
             db, farm=farm, month_from=baseline_month, month_to=calc_end
         )
+    elif stock_group == STOCK_GROUP_DAIRY_BULL:
+        births = _fetch_dairy_bull_births_by_month(
+            db, farm=farm, month_from=baseline_month, month_to=calc_end
+        )
     elif stock_group == STOCK_GROUP_COWS:
         calvings = _fetch_event_count_by_month(
             db,
@@ -870,6 +946,7 @@ def _compute_farm_rows(
             STOCK_GROUP_YOUNGSTOCK,
             STOCK_GROUP_YOUNGSTOCK_0_12,
             STOCK_GROUP_BEEF,
+            STOCK_GROUP_DAIRY_BULL,
         )
         month_births = births.get(key, 0) if show_births else 0
         raw_calvings = calvings.get(key, 0)
@@ -1106,6 +1183,7 @@ def _ensure_accrual_logic_version(db: Session) -> None:
     row = db.scalar(select(AppSetting).where(AppSetting.key == ACCRUAL_LOGIC_SETTING))
     if row is not None and row.value == ACCRUAL_LOGIC_VERSION:
         return
+    rebuild_stock_purchases(db)
     rebuild_stock_accrual_snapshots(db)
     if row is None:
         db.add(AppSetting(key=ACCRUAL_LOGIC_SETTING, value=ACCRUAL_LOGIC_VERSION))
