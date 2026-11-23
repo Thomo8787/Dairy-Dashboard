@@ -32,14 +32,41 @@
     }
     .farm-slicer { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .slicer-btn {
-      display: flex; align-items: center; justify-content: center;
-      min-height: 2.5rem; padding: 0.45rem 0.4rem;
-      border: 2px solid var(--line); border-radius: 8px;
-      background: #f3f4f6; color: var(--muted);
-      font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
     }
     .farm-slicer .slicer-btn.selected {
-      background: var(--accent); border-color: var(--accent); color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
     }
     .date-inputs { display: grid; gap: 0.5rem; }
     .date-inputs label {
@@ -51,10 +78,17 @@
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
     .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-    #mpc-table { width: 100%; border-collapse: collapse; }
+    #mpc-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      table-layout: auto;
+    }
     #mpc-table th, #mpc-table td {
-      padding: 0.45rem 0.55rem; text-align: right;
-      border-bottom: 1px solid var(--line); white-space: nowrap;
+      padding: 0.45rem 0.75rem;
+      text-align: right;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
       font-variant-numeric: tabular-nums;
     }
     #mpc-table th:nth-child(1), #mpc-table td:nth-child(1),
@@ -79,7 +113,10 @@
               class="slicer-btn selected"
               data-value="{{ farm.code }}"
               aria-pressed="true"
-            >{{ farm.code }}</button>
+            >
+              <span class="slicer-icon" aria-hidden="true">{{ farm.code[0] }}</span>
+              {{ farm.code }}
+            </button>
             {% endfor %}
           </div>
         </div>
@@ -93,9 +130,11 @@
           </div>
         </div>
         <p class="help-text">
-          One row per farm and day. Total milk is the ticket litres for that day.
-          Fat %, protein %, and SCC are litre-weighted when there is more than one collection.
-          Milk per cow is total milk divided by cows in milk. Double-click a farm to show only that one.
+          One row per farm and day. Total milk is that day’s ticket litres.
+          The 4-day average is the mean of this farm’s last up to four days with milk.
+          Milk per cow is that average divided by cows in milk on that day.
+          Fat %, protein %, SCC, Bactoscan, and urea are litre-weighted when there is
+          more than one collection. Double-click a farm to show only that one.
         </p>
       </aside>
     </div>
@@ -108,16 +147,19 @@
             <tr>
               <th>Farm</th>
               <th>Date</th>
-              <th>Milk per cow</th>
-              <th>Total cows</th>
               <th>Total milk</th>
+              <th>4 day average</th>
+              <th>Total cows</th>
+              <th>Milk per cow</th>
               <th>Fat %</th>
               <th>Prot %</th>
               <th>SCC</th>
+              <th>Bactoscan</th>
+              <th>Urea</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr><td colspan="8" class="empty-state">Loading…</td></tr>
+            <tr><td colspan="11" class="empty-state">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -209,19 +251,22 @@
     const farms = selectedFarms().join(", ") || "All farms";
     meta.textContent = farms + " · " + rows.length + " day(s)";
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No collections in this date range.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No collections in this date range.</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map((row) =>
       "<tr>" +
         `<td>${row.farm || ""}</td>` +
         `<td>${row.sample_date || ""}</td>` +
-        `<td>${num(row.milk_per_cow, 1)}</td>` +
-        `<td>${intFmt(row.total_cows)}</td>` +
         `<td>${intFmt(row.total_milk)}</td>` +
+        `<td>${intFmt(row.four_day_avg)}</td>` +
+        `<td>${intFmt(row.total_cows)}</td>` +
+        `<td>${num(row.milk_per_cow, 1)}</td>` +
         `<td>${num(row.butterfat_pct, 2)}</td>` +
         `<td>${num(row.protein_pct, 2)}</td>` +
         `<td>${intFmt(row.scc)}</td>` +
+        `<td>${intFmt(row.bactoscan)}</td>` +
+        `<td>${num(row.urea_pct, 3)}</td>` +
       "</tr>"
     ).join("");
   }
@@ -247,7 +292,7 @@
       render(data);
     } catch (err) {
       meta.textContent = err.message || "Failed to load milk per cow";
-      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Could not load the table.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="empty-state">Could not load the table.</td></tr>';
     }
   }
 
