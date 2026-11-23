@@ -237,6 +237,71 @@
       color: #991b1b;
       font-weight: 700;
     }
+    #bulls-table td.good { background: #bbf7d0; color: #166534; font-weight: 700; }
+    #bulls-table td.bad { background: #fecaca; color: #991b1b; font-weight: 700; }
+    .columns-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .columns-overlay[hidden] { display: none; }
+    .columns-card {
+      width: min(760px, 100%);
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      padding: 1rem;
+    }
+    .columns-head, .columns-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .columns-head h2 { margin: 0; font-size: 1.05rem; }
+    .columns-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 0.75rem;
+      margin: 0.9rem 0;
+    }
+    .columns-moves { display: flex; flex-direction: column; justify-content: center; gap: 0.4rem; }
+    .column-list {
+      list-style: none;
+      margin: 0.4rem 0 0;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 50vh;
+      overflow: auto;
+    }
+    .column-list li {
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 0.84rem;
+    }
+    .column-list li:last-child { border-bottom: 0; }
+    .column-list li.selected { background: #dceaf7; }
+    .column-list li[draggable="true"] { cursor: grab; }
+    .columns-search { width: 100%; margin: 0; }
+    .colours-card { width: min(680px, 100%); }
+    .colours-scroll { max-height: 50vh; overflow: auto; margin: 0.8rem 0; }
+    .colours-table { width: 100%; border-collapse: collapse; }
+    .colours-table th, .colours-table td {
+      text-align: left;
+      padding: 0.35rem 0.4rem;
+      font-size: 0.84rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .colours-table th { color: var(--muted); font-weight: 600; }
+    .colours-table select, .colours-table input { width: 100%; margin: 0; }
+    .colours-table td:first-child { font-weight: 600; white-space: nowrap; }
     #bulls-table th.num { text-align: right; }
     #bulls-table th.bull-name,
     #bulls-table td.bull-name {
@@ -306,8 +371,9 @@
           <a href="https://breedingdairy.ahdb.org.uk/bull-and-cow-reports/tables" target="_blank" rel="noopener">AHDB Dairy Breeding</a>.
           <strong>G</strong> is marketed genomic; <strong>P</strong> is proven (UK marketed and top international, one row per bull).
           Upload the Thomasson bull file to add Custom Index (CI) for each bull. Bulls in that file that are not on AHDB stay on this list until a later AHDB refresh finds them.
-          Click a column heading to sort. Tick bulls and choose Add to current bulls to keep a short list for the farm.
-          Current bulls shows that group. Use this list to compare animals — do not republish the dataset.
+          Use Columns to choose traits and Colours to mark good and poor values. Click a column heading to sort.
+          Tick bulls and choose Add to current bulls to keep a short list for the farm. Current bulls shows that group.
+          Use this list to compare animals — do not republish the dataset.
         </p>
       </aside>
     </div>
@@ -319,6 +385,8 @@
         <button type="button" class="secondary small" id="current-bulls-btn" aria-pressed="false">Current bulls</button>
         <button type="button" class="secondary small" id="add-current-btn">Add to current bulls</button>
         <button type="button" class="secondary small" id="remove-current-btn" hidden>Remove</button>
+        <button type="button" class="secondary small" id="columns-btn">Columns</button>
+        <button type="button" class="secondary small" id="colours-btn">Colours</button>
         <button type="button" class="secondary small" id="refresh-btn">Refresh from AHDB</button>
         <button type="button" class="secondary small" id="upload-btn">Upload bull file</button>
         <input type="file" id="upload-input" accept=".xlsx,.xls,.xlsm,.csv" hidden>
@@ -428,6 +496,56 @@
       </div>
     </section>
   </div>
+  <div id="columns-overlay" class="columns-overlay" hidden>
+    <div class="columns-card" role="dialog" aria-labelledby="columns-title">
+      <div class="columns-head">
+        <h2 id="columns-title">Columns</h2>
+        <button type="button" class="secondary small" id="columns-default">Default columns</button>
+      </div>
+      <p class="help-text" id="columns-note">Proof, bull name, and HBN stay on the table. Drag the displayed traits to change their order.</p>
+      <div class="columns-body">
+        <section>
+          <span class="section-label">Available</span>
+          <input type="search" id="available-search" class="columns-search" placeholder="Search">
+          <ul id="available-list" class="column-list"></ul>
+        </section>
+        <div class="columns-moves">
+          <button type="button" class="secondary small" id="columns-add">Add</button>
+          <button type="button" class="secondary small" id="columns-remove">Remove</button>
+        </div>
+        <section>
+          <span class="section-label">Displayed</span>
+          <input type="search" id="displayed-search" class="columns-search" placeholder="Search">
+          <ul id="displayed-list" class="column-list"></ul>
+        </section>
+      </div>
+      <div class="columns-foot">
+        <button type="button" class="secondary small" id="columns-close">Close</button>
+        <button type="button" id="columns-update">Update</button>
+      </div>
+    </div>
+  </div>
+  <div id="colours-overlay" class="columns-overlay" hidden>
+    <div class="columns-card colours-card" role="dialog" aria-labelledby="colours-title">
+      <div class="columns-head">
+        <h2 id="colours-title">Colours</h2>
+        <button type="button" class="secondary small" id="colours-clear">Clear colours</button>
+      </div>
+      <p class="help-text" id="colours-note">Only traits on the table are listed. Higher means a bigger number is good. Leave a box empty to skip that colour.</p>
+      <div class="colours-scroll">
+        <table class="colours-table">
+          <thead>
+            <tr><th>Trait</th><th>Good when</th><th>Green from</th><th>Red from</th></tr>
+          </thead>
+          <tbody id="colours-rows"></tbody>
+        </table>
+      </div>
+      <div class="columns-foot">
+        <button type="button" class="secondary small" id="colours-close">Close</button>
+        <button type="button" id="colours-update">Update</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
@@ -438,11 +556,14 @@
     const BULLS_UPLOAD_URL = {{ url_for('genetics_api_bull_search_upload') | tojson }};
     const BULLS_INDEX_URL = {{ url_for('genetics_api_bull_index_settings') | tojson }};
     const BULLS_INDEX_RESET_URL = {{ url_for('genetics_api_bull_index_reset') | tojson }};
-    const COLUMNS = [
+    const FIXED_COLUMNS = [
       { key: "proof", label: "Proof", type: "text" },
+      { key: "bull_name", label: "Bull Name", type: "text" },
+      { key: "hbn", label: "HBN", type: "text" },
+    ];
+    const CATALOG = [
       { key: "supplier_gb", label: "Supplier", type: "text" },
       { key: "rank", label: "Rank", type: "num", digits: 0 },
-      { key: "bull_name", label: "Bull Name", type: "text" },
       { key: "pli", label: "£PLI", type: "num", digits: 0 },
       { key: "custom_index", label: "Custom Index", type: "num", digits: 0 },
       { key: "dp_index", label: "£DP Index", type: "num", digits: 0 },
@@ -472,32 +593,20 @@
       { key: "legs", label: "Legs", type: "num", digits: 2 },
       { key: "udder", label: "Udder", type: "num", digits: 2 },
       { key: "type_merit", label: "TM", type: "num", digits: 2 },
-      { key: "hbn", label: "HBN", type: "text" },
       { key: "sire_name", label: "Sire", type: "text" },
       { key: "grandsire_name", label: "MGS", type: "text" },
     ];
+    const DEFAULT_TRAIT_KEYS = [
+      "supplier_gb", "rank", "pli", "custom_index", "dp_index", "fw_index", "cm_index",
+      "milk_kg", "fat_kg", "protein_kg", "fat_pct", "protein_pct",
+      "fertility_index", "lifespan_days", "scc", "lameness",
+      "sire_name", "grandsire_name",
+    ];
+    const COLUMN_STORAGE_KEY = "genetics-bull-columns";
+    const COLOUR_STORAGE_KEY = "genetics-bull-colours";
     const SEARCH_KEYS = [
       "bull_name", "bull_name_full", "sire_name", "grandsire_name",
       "hbn", "supplier_gb", "proof",
-    ];
-    const TRAIT_FILTERS = [
-      { key: "pli", label: "£PLI", step: "1" },
-      { key: "custom_index", label: "Custom Index", step: "1" },
-      { key: "dp_index", label: "£DP", step: "1" },
-      { key: "fw_index", label: "£FW", step: "1" },
-      { key: "cm_index", label: "£CM", step: "1" },
-      { key: "milk_kg", label: "Milk", step: "1" },
-      { key: "fat_kg", label: "Fat kg", step: "0.1" },
-      { key: "protein_kg", label: "Prot kg", step: "0.1" },
-      { key: "fat_pct", label: "Fat %", step: "0.01" },
-      { key: "protein_pct", label: "Prot %", step: "0.01" },
-      { key: "fertility_index", label: "FI", step: "0.1" },
-      { key: "lifespan_days", label: "LS", step: "1" },
-      { key: "scc", label: "SCC", step: "1" },
-      { key: "lameness", label: "Lame", step: "0.1" },
-      { key: "healthycow", label: "HealthyCow", step: "1" },
-      { key: "mastitis", label: "Mast", step: "1" },
-      { key: "tb_advantage", label: "TB", step: "0.1" },
     ];
     const BLANK_SUPPLIER = "";
     const PAGE_SIZE = 100;
@@ -522,6 +631,59 @@
     let currentBulls = new Set();
     let showCurrentOnly = false;
     let picked = new Set();
+    let displayedKeys = loadDisplayed();
+    let colourRules = loadColourRules();
+    let draftKeys = [];
+    let selectedAvailable = new Set();
+    let selectedDisplayed = new Set();
+    let dragKey = "";
+
+    function loadDisplayed() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(COLUMN_STORAGE_KEY) || "[]");
+        if (!Array.isArray(saved) || !saved.length) return DEFAULT_TRAIT_KEYS.slice();
+        const known = new Set(CATALOG.map((col) => col.key));
+        const kept = saved.filter((key) => typeof key === "string" && known.has(key));
+        return kept.length ? kept : DEFAULT_TRAIT_KEYS.slice();
+      } catch (err) {
+        return DEFAULT_TRAIT_KEYS.slice();
+      }
+    }
+
+    function loadColourRules() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(COLOUR_STORAGE_KEY) || "{}");
+        return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      } catch (err) {
+        return {};
+      }
+    }
+
+    function catalogByKey(key) {
+      return CATALOG.find((col) => col.key === key) || FIXED_COLUMNS.find((col) => col.key === key);
+    }
+
+    function activeColumns() {
+      const traits = displayedKeys.map(catalogByKey).filter(Boolean);
+      return FIXED_COLUMNS.concat(traits);
+    }
+
+    function numericColumns() {
+      return activeColumns().filter((col) => col.type === "num");
+    }
+
+    function colourClass(key, value) {
+      const rule = colourRules[key];
+      if (!rule) return "";
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "";
+      const green = rule.green === "" || rule.green == null ? null : Number(rule.green);
+      const red = rule.red === "" || rule.red == null ? null : Number(rule.red);
+      const higherIsGood = rule.direction !== "low";
+      if (Number.isFinite(green) && (higherIsGood ? num >= green : num <= green)) return "good";
+      if (Number.isFinite(red) && (higherIsGood ? num < red : num > red)) return "bad";
+      return "";
+    }
 
     function showMessage(text, kind) {
       const el = document.getElementById("status-message");
@@ -538,6 +700,7 @@
       fillIndexForm(data.index_settings);
       updateCurrentControls();
       renderSupplierSlicers();
+      renderTraitFilters();
       renderTable();
     }
 
@@ -630,14 +793,14 @@
 
     function readTraitBounds() {
       const bounds = [];
-      TRAIT_FILTERS.forEach((trait) => {
-        const minInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="min"]');
-        const maxInput = document.querySelector('#trait-filters input[data-key="' + trait.key + '"][data-bound="max"]');
+      document.querySelectorAll("#trait-filters .trait-filter-row").forEach((row) => {
+        const minInput = row.querySelector('input[data-bound="min"]');
+        const maxInput = row.querySelector('input[data-bound="max"]');
         const min = minInput && minInput.value !== "" ? Number(minInput.value) : null;
         const max = maxInput && maxInput.value !== "" ? Number(maxInput.value) : null;
         if (Number.isFinite(min) || Number.isFinite(max)) {
           bounds.push({
-            key: trait.key,
+            key: minInput.dataset.key,
             min: Number.isFinite(min) ? min : null,
             max: Number.isFinite(max) ? max : null,
           });
@@ -669,7 +832,7 @@
       if (typeof value === "number") return value;
       const num = Number(value);
       if (value !== "" && Number.isFinite(num) && String(value).trim() !== "") {
-        const col = COLUMNS.find((c) => c.key === key);
+        const col = catalogByKey(key);
         if (col && col.type === "num") return num;
       }
       return String(value).toLowerCase();
@@ -762,22 +925,101 @@
 
     function renderTraitFilters() {
       const host = document.getElementById("trait-filters");
-      if (host.dataset.ready === "1") return;
-      host.innerHTML = TRAIT_FILTERS.map((trait) => {
+      const kept = readTraitBounds();
+      const traits = numericColumns();
+      host.innerHTML = traits.map((trait) => {
+        const bound = kept.find((item) => item.key === trait.key) || {};
+        const min = bound.min == null ? "" : bound.min;
+        const max = bound.max == null ? "" : bound.max;
         return '<div class="trait-filter-row">' +
           "<label>" + escapeHtml(trait.label) + "</label>" +
-          '<input type="number" data-key="' + trait.key + '" data-bound="min" step="' + trait.step + '" placeholder="—">' +
-          '<input type="number" data-key="' + trait.key + '" data-bound="max" step="' + trait.step + '" placeholder="—">' +
+          '<input type="number" data-key="' + escapeHtml(trait.key) + '" data-bound="min" step="any" placeholder="—" value="' + min + '">' +
+          '<input type="number" data-key="' + escapeHtml(trait.key) + '" data-bound="max" step="any" placeholder="—" value="' + max + '">' +
           "</div>";
       }).join("");
-      host.dataset.ready = "1";
-      host.addEventListener("input", () => scheduleRender(true));
+    }
+
+    function listItems(keys, selected, search, draggable) {
+      const needle = search.trim().toLowerCase();
+      return keys.filter((key) => {
+        const col = catalogByKey(key);
+        return col && (!needle || col.label.toLowerCase().includes(needle));
+      }).map((key) => {
+        const col = catalogByKey(key);
+        const classes = selected.has(key) ? "selected" : "";
+        return '<li data-key="' + escapeHtml(key) + '" class="' + classes + '"' +
+          (draggable ? ' draggable="true"' : "") + ">" + escapeHtml(col.label) + "</li>";
+      }).join("");
+    }
+
+    function renderColumnLists() {
+      const available = CATALOG
+        .map((col) => col.key)
+        .filter((key) => !draftKeys.includes(key));
+      document.getElementById("available-list").innerHTML = listItems(
+        available,
+        selectedAvailable,
+        document.getElementById("available-search").value,
+        false
+      );
+      document.getElementById("displayed-list").innerHTML = listItems(
+        draftKeys,
+        selectedDisplayed,
+        document.getElementById("displayed-search").value,
+        true
+      );
+    }
+
+    function openColumns() {
+      draftKeys = displayedKeys.slice();
+      selectedAvailable = new Set();
+      selectedDisplayed = new Set();
+      document.getElementById("columns-overlay").hidden = false;
+      renderColumnLists();
+    }
+
+    function closeColumns() {
+      document.getElementById("columns-overlay").hidden = true;
+    }
+
+    function renderColourRows() {
+      const traits = numericColumns();
+      const body = document.getElementById("colours-rows");
+      if (!traits.length) {
+        body.innerHTML = '<tr><td colspan="4" class="empty-state">Add a trait in Columns to set colours.</td></tr>';
+        return;
+      }
+      body.innerHTML = traits.map((trait) => {
+        const rule = colourRules[trait.key] || {};
+        const direction = rule.direction === "low" ? "low" : "high";
+        const green = rule.green == null ? "" : rule.green;
+        const red = rule.red == null ? "" : rule.red;
+        return '<tr data-key="' + escapeHtml(trait.key) + '">' +
+          "<td>" + escapeHtml(trait.label) + "</td>" +
+          '<td><select data-bound="direction">' +
+          '<option value="high"' + (direction === "high" ? " selected" : "") + ">Higher</option>" +
+          '<option value="low"' + (direction === "low" ? " selected" : "") + ">Lower</option>" +
+          "</select></td>" +
+          '<td><input type="number" data-bound="green" step="any" value="' + escapeHtml(green) + '"></td>' +
+          '<td><input type="number" data-bound="red" step="any" value="' + escapeHtml(red) + '"></td>' +
+          "</tr>";
+      }).join("");
+    }
+
+    function openColours() {
+      document.getElementById("colours-overlay").hidden = false;
+      renderColourRows();
+    }
+
+    function closeColours() {
+      document.getElementById("colours-overlay").hidden = true;
     }
 
     function renderHead() {
+      const columns = activeColumns();
       const head = document.getElementById("bulls-head");
       const pick = '<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select the bulls on this page"></th>';
-      head.innerHTML = pick + COLUMNS.map((col) => {
+      head.innerHTML = pick + columns.map((col) => {
         const cls = [
           col.type === "num" ? "num" : "",
           col.key === "bull_name" ? "bull-name" : "",
@@ -789,6 +1031,7 @@
 
     function renderTable() {
       renderHead();
+      const columns = activeColumns();
       const visible = sortedRows(filteredRows());
       const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
       if (currentPage > pageCount) currentPage = pageCount;
@@ -821,7 +1064,7 @@
         const empty = showCurrentOnly && !currentBulls.size
           ? "No current bulls yet. Tick bulls and choose Add to current bulls."
           : "No bulls match the current filters.";
-        body.innerHTML = '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">' + empty + "</td></tr>";
+        body.innerHTML = '<tr><td colspan="' + (columns.length + 1) + '" class="empty-state">' + empty + "</td></tr>";
         syncPickAll();
         return;
       }
@@ -829,11 +1072,13 @@
         const selected = picked.has(row.hbn);
         const pick = '<td class="pick"><input type="checkbox" data-hbn="' + escapeHtml(row.hbn) + '"' +
           (selected ? " checked" : "") + ' aria-label="Select ' + escapeHtml(row.bull_name || row.hbn) + '"></td>';
-        return "<tr>" + pick + COLUMNS.map((col) => {
+        return "<tr>" + pick + columns.map((col) => {
+          const tone = col.type === "num" ? colourClass(col.key, row[col.key]) : "";
           const classes = [
             col.type === "num" ? "num" : "",
             col.key === "bull_name" ? "bull-name" : "",
-            (col.key === "fat_pct" || col.key === "protein_pct" || col.key === "fertility_index") &&
+            tone,
+            !tone && (col.key === "fat_pct" || col.key === "protein_pct" || col.key === "fertility_index") &&
               Number.isFinite(Number(row[col.key])) && Number(row[col.key]) < 0
               ? "negative-pct"
               : "",
@@ -907,7 +1152,7 @@
     async function loadRows() {
       document.getElementById("meta-line").textContent = "Loading…";
         document.getElementById("table-body").innerHTML =
-        '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">Loading AHDB bull lists…</td></tr>';
+        '<tr><td colspan="' + (activeColumns().length + 1) + '" class="empty-state">Loading AHDB bull lists…</td></tr>';
       try {
         const res = await fetch(BULLS_URL);
         const data = await res.json().catch(() => ({}));
@@ -917,7 +1162,7 @@
       } catch (err) {
         rows = [];
         document.getElementById("table-body").innerHTML =
-          '<tr><td colspan="' + (COLUMNS.length + 1) + '" class="empty-state">Could not load bull lists.</td></tr>';
+          '<tr><td colspan="' + (activeColumns().length + 1) + '" class="empty-state">Could not load bull lists.</td></tr>';
         document.getElementById("meta-line").textContent = "";
         showMessage(err.message, "err");
       }
@@ -925,6 +1170,7 @@
 
     function bindFilters() {
       document.getElementById("search-input").addEventListener("input", () => scheduleRender(true));
+      document.getElementById("trait-filters").addEventListener("input", () => scheduleRender(true));
       document.querySelectorAll(".list-slicer .slicer-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const selected = btn.classList.contains("selected");
@@ -1006,10 +1252,95 @@
           sortState.dir *= -1;
         } else {
           sortState.key = key;
-          const col = COLUMNS.find((c) => c.key === key);
+          const col = catalogByKey(key);
           sortState.dir = col && col.type === "num" ? -1 : 1;
         }
         currentPage = 1;
+        renderTable();
+      });
+      document.getElementById("columns-btn").addEventListener("click", openColumns);
+      document.getElementById("colours-btn").addEventListener("click", openColours);
+      document.getElementById("columns-close").addEventListener("click", closeColumns);
+      document.getElementById("colours-close").addEventListener("click", closeColours);
+      document.getElementById("columns-default").addEventListener("click", () => {
+        draftKeys = DEFAULT_TRAIT_KEYS.slice();
+        selectedDisplayed = new Set();
+        renderColumnLists();
+      });
+      document.getElementById("columns-update").addEventListener("click", () => {
+        displayedKeys = draftKeys.slice();
+        localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(displayedKeys));
+        closeColumns();
+        renderTraitFilters();
+        renderTable();
+      });
+      document.getElementById("columns-add").addEventListener("click", () => {
+        selectedAvailable.forEach((key) => {
+          if (!draftKeys.includes(key)) draftKeys.push(key);
+        });
+        selectedAvailable = new Set();
+        renderColumnLists();
+      });
+      document.getElementById("columns-remove").addEventListener("click", () => {
+        draftKeys = draftKeys.filter((key) => !selectedDisplayed.has(key));
+        selectedDisplayed = new Set();
+        renderColumnLists();
+      });
+      document.getElementById("available-search").addEventListener("input", renderColumnLists);
+      document.getElementById("displayed-search").addEventListener("input", renderColumnLists);
+      document.getElementById("available-list").addEventListener("click", (event) => {
+        const item = event.target.closest("li[data-key]");
+        if (!item) return;
+        if (selectedAvailable.has(item.dataset.key)) selectedAvailable.delete(item.dataset.key);
+        else selectedAvailable.add(item.dataset.key);
+        renderColumnLists();
+      });
+      document.getElementById("displayed-list").addEventListener("click", (event) => {
+        const item = event.target.closest("li[data-key]");
+        if (!item) return;
+        if (selectedDisplayed.has(item.dataset.key)) selectedDisplayed.delete(item.dataset.key);
+        else selectedDisplayed.add(item.dataset.key);
+        renderColumnLists();
+      });
+      document.getElementById("displayed-list").addEventListener("dragstart", (event) => {
+        const item = event.target.closest("li[data-key]");
+        if (!item) return;
+        dragKey = item.dataset.key;
+      });
+      document.getElementById("displayed-list").addEventListener("dragover", (event) => {
+        if (event.target.closest("li[data-key]")) event.preventDefault();
+      });
+      document.getElementById("displayed-list").addEventListener("drop", (event) => {
+        const item = event.target.closest("li[data-key]");
+        if (!item || !dragKey || item.dataset.key === dragKey) return;
+        event.preventDefault();
+        const from = draftKeys.indexOf(dragKey);
+        const to = draftKeys.indexOf(item.dataset.key);
+        if (from < 0 || to < 0) return;
+        draftKeys.splice(from, 1);
+        draftKeys.splice(to, 0, dragKey);
+        dragKey = "";
+        renderColumnLists();
+      });
+      document.getElementById("colours-clear").addEventListener("click", () => {
+        document.querySelectorAll("#colours-rows tr[data-key]").forEach((row) => {
+          row.querySelector("select").value = "high";
+          row.querySelectorAll("input").forEach((input) => { input.value = ""; });
+        });
+      });
+      document.getElementById("colours-update").addEventListener("click", () => {
+        const next = Object.assign({}, colourRules);
+        document.querySelectorAll("#colours-rows tr[data-key]").forEach((row) => {
+          const key = row.dataset.key;
+          const direction = row.querySelector("select").value === "low" ? "low" : "high";
+          const green = row.querySelector('[data-bound="green"]').value.trim();
+          const red = row.querySelector('[data-bound="red"]').value.trim();
+          if (direction === "high" && green === "" && red === "") delete next[key];
+          else next[key] = { direction: direction, green: green, red: red };
+        });
+        colourRules = next;
+        localStorage.setItem(COLOUR_STORAGE_KEY, JSON.stringify(colourRules));
+        closeColours();
         renderTable();
       });
       document.getElementById("settings-toggle").addEventListener("click", () => {
