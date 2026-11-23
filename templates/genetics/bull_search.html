@@ -305,6 +305,7 @@
           Holstein bull proofs from
           <a href="https://breedingdairy.ahdb.org.uk/bull-and-cow-reports/tables" target="_blank" rel="noopener">AHDB Dairy Breeding</a>.
           <strong>G</strong> is marketed genomic; <strong>P</strong> is proven (UK marketed and top international, one row per bull).
+          Upload the Thomasson bull file to add Custom Index (CI) for each bull. Bulls in that file that are not on AHDB stay on this list until a later AHDB refresh finds them.
           Click a column heading to sort. Tick bulls and choose Add to current bulls to keep a short list for the farm.
           Current bulls shows that group. Use this list to compare animals — do not republish the dataset.
         </p>
@@ -319,6 +320,8 @@
         <button type="button" class="secondary small" id="add-current-btn">Add to current bulls</button>
         <button type="button" class="secondary small" id="remove-current-btn" hidden>Remove</button>
         <button type="button" class="secondary small" id="refresh-btn">Refresh from AHDB</button>
+        <button type="button" class="secondary small" id="upload-btn">Upload bull file</button>
+        <input type="file" id="upload-input" accept=".xlsx,.xls,.xlsm,.csv" hidden>
         <button type="button" class="gear-btn" id="settings-toggle" aria-expanded="false"
           aria-controls="index-settings-panel" title="Change how £DP, £FW and £CM indexes are calculated">
           <svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
@@ -432,6 +435,7 @@
     const BULLS_URL = {{ url_for('genetics_api_bull_search') | tojson }};
     const BULLS_REFRESH_URL = {{ url_for('genetics_api_bull_search_refresh') | tojson }};
     const BULLS_CURRENT_URL = {{ url_for('genetics_api_bull_current_bulls') | tojson }};
+    const BULLS_UPLOAD_URL = {{ url_for('genetics_api_bull_search_upload') | tojson }};
     const BULLS_INDEX_URL = {{ url_for('genetics_api_bull_index_settings') | tojson }};
     const BULLS_INDEX_RESET_URL = {{ url_for('genetics_api_bull_index_reset') | tojson }};
     const COLUMNS = [
@@ -440,6 +444,7 @@
       { key: "rank", label: "Rank", type: "num", digits: 0 },
       { key: "bull_name", label: "Bull Name", type: "text" },
       { key: "pli", label: "£PLI", type: "num", digits: 0 },
+      { key: "custom_index", label: "Custom Index", type: "num", digits: 0 },
       { key: "dp_index", label: "£DP Index", type: "num", digits: 0 },
       { key: "fw_index", label: "£FW Index", type: "num", digits: 0 },
       { key: "cm_index", label: "£CM Index", type: "num", digits: 0 },
@@ -477,6 +482,7 @@
     ];
     const TRAIT_FILTERS = [
       { key: "pli", label: "£PLI", step: "1" },
+      { key: "custom_index", label: "Custom Index", step: "1" },
       { key: "dp_index", label: "£DP", step: "1" },
       { key: "fw_index", label: "£FW", step: "1" },
       { key: "cm_index", label: "£CM", step: "1" },
@@ -508,6 +514,7 @@
 
     let rows = [];
     let fetchedAt = null;
+    let bullUpload = null;
     const sortState = { key: "rank", dir: 1 };
     let selectedSuppliers = null;
     let currentPage = 1;
@@ -525,6 +532,7 @@
     function applyPayload(data) {
       rows = data.rows || [];
       fetchedAt = data.fetched_at || null;
+      bullUpload = data.bull_upload || null;
       currentBulls = new Set(data.current_bulls || []);
       resetPicked();
       fillIndexForm(data.index_settings);
@@ -797,6 +805,13 @@
       }
       const fetched = formatFetched(fetchedAt);
       if (fetched) parts.push(fetched);
+      if (bullUpload && bullUpload.filename) {
+        const indexCount = bullUpload.indexes || 0;
+        parts.push(
+          "Custom Index from " + bullUpload.filename
+          + (indexCount ? " (" + indexCount.toLocaleString("en-GB") + ")" : "")
+        );
+      }
       meta.textContent = parts.join(" · ");
       document.getElementById("page-label").textContent = "Page " + currentPage + " of " + pageCount;
       document.getElementById("page-prev").disabled = currentPage <= 1;
@@ -1054,11 +1069,58 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || data.detail || "Refresh failed");
           applyPayload(data);
-          showMessage("Loaded " + (data.rows_imported || rows.length).toLocaleString("en-GB") + " bulls from AHDB.", "ok");
+          const kept = data.upload_kept || 0;
+          showMessage(
+            "Loaded " + (data.rows_imported || rows.length).toLocaleString("en-GB") + " bulls from AHDB"
+            + (kept ? ", and kept " + kept.toLocaleString("en-GB") + " from the bull file." : "."),
+            "ok"
+          );
         } catch (err) {
           showMessage(err.message, "err");
         } finally {
           btn.disabled = false;
+        }
+      });
+      const uploadButton = document.getElementById("upload-btn");
+      const uploadInput = document.getElementById("upload-input");
+      let uploadBusy = false;
+      function setUploadBusy(busy) {
+        uploadBusy = busy;
+        uploadButton.disabled = busy;
+        uploadButton.textContent = busy ? "Uploading…" : "Upload bull file";
+        uploadButton.setAttribute("aria-busy", busy ? "true" : "false");
+      }
+      uploadButton.addEventListener("click", () => {
+        if (uploadBusy) return;
+        uploadInput.click();
+      });
+      uploadInput.addEventListener("change", async () => {
+        if (uploadBusy) return;
+        const file = uploadInput.files && uploadInput.files[0];
+        if (!file) return;
+        uploadInput.value = "";
+        setUploadBusy(true);
+        showMessage("Uploading bull file…");
+        const body = new FormData();
+        body.append("file", file);
+        try {
+          const res = await fetch(BULLS_UPLOAD_URL, { method: "POST", body });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || data.detail || "Upload failed");
+          applyPayload(data);
+          const imported = data.imported || {};
+          showMessage(
+            "Loaded Custom Index for "
+            + (imported.indexes || 0).toLocaleString("en-GB")
+            + " bulls from "
+            + (imported.filename || file.name)
+            + (imported.added ? ", and added " + imported.added.toLocaleString("en-GB") + " not on AHDB." : "."),
+            "ok"
+          );
+        } catch (err) {
+          showMessage(err.message, "err");
+        } finally {
+          setUploadBusy(false);
         }
       });
     }

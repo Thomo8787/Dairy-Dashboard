@@ -20,6 +20,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from services.bull_upload import apply_upload_to_bulls, attach_custom_index, load_bull_upload
 from services.custom_indexes import attach_custom_indexes, load_index_settings
 from services.database import (
     AhdbBull,
@@ -279,8 +280,14 @@ def import_reports(db: Session, reports: list[AhdbReport]) -> dict[str, Any]:
     db.query(AhdbBull).delete()
     for bull in bulls:
         db.add(bull)
+    db.flush()
+    upload_added = apply_upload_to_bulls(db)
     db.commit()
-    return {"rows_imported": len(bulls), "rows_skipped": skipped}
+    return {
+        "rows_imported": len(bulls) + upload_added,
+        "rows_skipped": skipped,
+        "upload_kept": upload_added,
+    }
 
 
 def refresh_bulls(db: Session, *, keys: list[str] | None = None) -> dict[str, Any]:
@@ -361,6 +368,8 @@ def update_current_bulls(db: Session, add: Any, remove: Any) -> list[str]:
 
 def list_bulls(db: Session) -> dict[str, Any]:
     settings = load_index_settings(db)
+    upload = load_bull_upload(db)
+    indexes = upload.get("indexes") or {}
     rows = list(db.scalars(select(AhdbBull).order_by(AhdbBull.rank, AhdbBull.bull_name)).all())
     counts = {
         key: db.scalar(
@@ -370,13 +379,24 @@ def list_bulls(db: Session) -> dict[str, Any]:
         for key in STORED_TYPES
     }
     fetched_at = db.scalar(select(func.max(AhdbBull.fetched_at)))
+    payload_rows = []
+    for row in rows:
+        item = attach_custom_indexes(row.to_dict(), settings)
+        attach_custom_index(item, indexes)
+        payload_rows.append(item)
     return {
-        "rows": [attach_custom_indexes(row.to_dict(), settings) for row in rows],
+        "rows": payload_rows,
         "count": len(rows),
         "counts": counts,
         "fetched_at": fetched_at.isoformat() if fetched_at else None,
         "index_settings": settings,
         "current_bulls": current_bulls_for_list(db, {row.hbn for row in rows if row.hbn}),
+        "bull_upload": {
+            "filename": upload.get("filename") or "",
+            "uploaded_at": upload.get("uploaded_at"),
+            "indexes": len(indexes),
+            "extras": len(upload.get("extras") or {}),
+        },
     }
 
 

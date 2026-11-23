@@ -104,6 +104,7 @@ from services.ahdb_bulls import (
     refresh_bulls,
     update_current_bulls,
 )
+from services.bull_upload import import_bull_workbook
 from services.genomic_import import import_female_results_workbook
 from services.female_genomics import list_females
 from services.custom_indexes import reset_index_settings, save_index_settings
@@ -1577,6 +1578,24 @@ def genetics_api_bull_current_bulls():
     with get_session() as session:
         update_current_bulls(session, add, remove)
         return jsonify(list_bulls(session))
+
+
+@app.route("/genetics/api/bull-search/upload", methods=["POST"])
+def genetics_api_bull_search_upload():
+    _user, error = _genetics_json_user()
+    if error:
+        return error
+    upload = request.files.get("file")
+    if upload is None or not (upload.filename or "").strip():
+        return jsonify({"error": "Choose a bull file."}), 400
+    try:
+        with get_session() as session:
+            summary = import_bull_workbook(session, upload.read(), upload.filename)
+            payload = list_bulls(session)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    payload["imported"] = summary
+    return jsonify(payload)
 
 
 @app.route("/genetics/api/bull-search/index-settings", methods=["PUT"])
