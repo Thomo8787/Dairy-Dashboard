@@ -147,14 +147,14 @@
       toggle.addEventListener("click", () => sidebar.classList.toggle("is-open"));
     }
 
-    const mobileNavQuery = window.matchMedia("(max-width: 900px)");
     if (sidebar) {
       sidebar.querySelectorAll(".nav-group").forEach((group) => {
         const link = group.querySelector(":scope > .nav-link");
         const sub = group.querySelector(":scope > .nav-sub");
         if (!link || !sub) return;
+        // Parents with children only open/close the submenu; the page loads
+        // when a submenu link is clicked.
         link.addEventListener("click", (event) => {
-          if (!mobileNavQuery.matches) return;
           event.preventDefault();
           const willOpen = !sub.classList.contains("is-open");
           sidebar.querySelectorAll(".nav-sub.is-open").forEach((openSub) => {
