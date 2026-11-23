@@ -1056,11 +1056,13 @@
     }).join("");
   }
 
-  async function loadResults() {
-    showMessage("");
+  async function loadResults(options = {}) {
+    if (!options.keepMessage) showMessage("");
     document.getElementById("meta-line").textContent = "Loading…";
     try {
-      const res = await fetch("/milk-quality/api/results?" + buildQuery());
+      const res = await fetch("/milk-quality/api/results?" + buildQuery(), {
+        cache: "no-store",
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load collections");
       rows = data.rows || [];
@@ -1533,7 +1535,7 @@
       if (!res.ok) throw new Error(data.error || "Could not delete collection");
       closeEditModal();
       showMessage("Deleted collection for " + (data.farm || "") + ".", false);
-      loadResults();
+      await loadResults({ keepMessage: true });
     } catch (err) {
       showEditError(err.message || String(err));
     } finally {
@@ -1590,7 +1592,7 @@
       if (!res.ok) throw new Error(data.error || "Could not save collection");
       closeEditModal();
       showMessage("Updated collection for " + (data.farm || "") + ".", false);
-      loadResults();
+      await loadResults({ keepMessage: true });
     } catch (err) {
       showEditError(err.message || String(err));
     } finally {
