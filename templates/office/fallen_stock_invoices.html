@@ -135,15 +135,16 @@
       border: 1px solid var(--line);
       border-radius: 8px;
     }
-    .invoice-table { width: 100%; border-collapse: collapse; }
+    .invoice-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .invoice-table col.band-col { width: 8.5rem; }
+    .invoice-table col.edit-col { width: 4.5rem; }
     .invoice-table th, .invoice-table td {
-      padding: 0.45rem 0.6rem;
-      text-align: right;
+      padding: 0.45rem 0.35rem;
+      text-align: center;
       white-space: nowrap;
       vertical-align: middle;
     }
     .invoice-table th.band, .invoice-table td.band { text-align: left; }
-    .invoice-table th.farm-name { text-align: center; }
     .invoice-table thead th.farm-start { border-left: 2px solid rgba(255, 255, 255, 0.7); }
     .invoice-table tbody td.farm-start { border-left: 2px solid #1e3a5f; }
     .invoice-table thead th {
@@ -151,14 +152,19 @@
       color: #fff;
       font-weight: 600;
     }
-    .invoice-table input[type="number"] {
-      width: 4.2rem;
-      margin: 0;
-      text-align: right;
-    }
     .invoice-table tr.stillbirths td { background: #f8fafc; }
-    .diff-ok { color: #15803d; font-weight: 700; }
-    .diff-off { color: #b45309; font-weight: 700; }
+    .match-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.35rem;
+      height: 1.35rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .match-mark.ok { color: #15803d; }
+    .match-mark.bad { color: #b91c1c; }
     .edit-btn {
       border: 1px solid var(--line);
       background: #fff;
@@ -222,7 +228,7 @@
           <input type="file" id="invoice-upload" accept="application/pdf,.pdf" multiple hidden>
         </label>
       </div>
-      <p class="hint">On-farm deaths, excluding OFS. Still births are included in the 0-1 month total. Difference is the invoice quantity minus our count. An archived month leaves this list and can be opened from Archive.</p>
+      <p class="hint">On-farm deaths, excluding OFS. Still births are included in the 0-1 month total. A green tick means the invoice quantity matches our count. An archived month leaves this list and can be opened from Archive.</p>
       <p class="meta-line" id="meta-line"></p>
       <div id="month-tables"></div>
       <section class="archive-view" id="archive-view" hidden>
@@ -341,11 +347,12 @@
       return new Date(year, mon - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
     }
 
-    function diffCell(died, invoice) {
-      if (invoice == null || invoice === "") return "<td>—</td>";
-      const diff = Number(invoice) - died;
-      const cls = diff === 0 ? "diff-ok" : "diff-off";
-      return `<td class="${cls}">${diff > 0 ? "+" : ""}${diff}</td>`;
+    function matchCell(died, invoice) {
+      const matched = invoice != null && invoice !== "" && Number(invoice) === Number(died);
+      if (matched) {
+        return `<td><span class="match-mark ok" title="Invoice matches" aria-label="Invoice matches">✓</span></td>`;
+      }
+      return `<td><span class="match-mark bad" title="Invoice does not match" aria-label="Invoice does not match">✕</span></td>`;
     }
 
     function stillbirthCounts(month) {
@@ -361,14 +368,15 @@
     function tableHtml(month, locked) {
       const farms = selectedFarms();
       const bands = (month.bands || []).filter(band => band.id !== "unknown");
+      const cols = `<colgroup><col class="band-col">${farms.map(() => `<col><col><col>`).join("")}<col class="edit-col"></colgroup>`;
       const head = `<thead><tr><th class="band" rowspan="2">Age</th>${farms.map(farm => `<th class="farm-name farm-start" colspan="3">${farm}</th>`).join("")}<th rowspan="2"></th></tr>`
-        + `<tr>${farms.map(() => `<th class="farm-start">Died</th><th>Invoice</th><th>Diff</th>`).join("")}</tr></thead>`;
+        + `<tr>${farms.map(() => `<th class="farm-start">Died</th><th>Invoice</th><th>Match</th>`).join("")}</tr></thead>`;
       const rows = bands.map(band => {
         const cells = farms.map(farm => {
           const died = (month.counts[band.id] && month.counts[band.id][farm]) || 0;
           const invoice = month.invoice[band.id] ? month.invoice[band.id][farm] : null;
-          const value = invoice == null ? "" : invoice;
-          return `<td class="farm-start">${died}</td><td><input type="number" min="0" step="1" data-month="${month.month}" data-band="${band.id}" data-farm="${farm}" value="${value}" ${locked ? "disabled" : ""} aria-label="${farm} ${escapeHtml(band.label)} invoice"></td>${diffCell(died, invoice)}`;
+          const shown = invoice == null || invoice === "" ? "" : invoice;
+          return `<td class="farm-start">${died}</td><td>${shown}</td>${matchCell(died, invoice)}`;
         }).join("");
         return `<tr><td class="band">${escapeHtml(band.label)}</td>${cells}<td></td></tr>`;
       }).join("");
@@ -376,7 +384,7 @@
       const stillCells = farms.map(farm => `<td class="farm-start">${counts[farm] || 0}</td><td></td><td></td>`).join("");
       const edit = locked ? "" : `<button type="button" class="edit-btn" data-edit="${month.month}">Edit</button>`;
       const stillRow = `<tr class="stillbirths"><td class="band">Still births</td>${stillCells}<td>${edit}</td></tr>`;
-      return `<table class="invoice-table">${head}<tbody>${rows}${stillRow}</tbody></table>`;
+      return `<table class="invoice-table">${cols}${head}<tbody>${rows}${stillRow}</tbody></table>`;
     }
 
     function render() {
@@ -447,31 +455,6 @@
     bindRange("min-date-range", "max-date-range", true);
     bindRange("max-date-range", "min-date-range", false);
 
-    document.getElementById("month-tables").addEventListener("change", async event => {
-      const input = event.target;
-      if (!input.matches?.("input[data-band]")) return;
-      const meta = document.getElementById("meta-line");
-      const res = await fetch("/office/api/fallen-stock-invoices/qty", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          month: input.dataset.month,
-          farm: input.dataset.farm,
-          band: input.dataset.band,
-          quantity: input.value === "" ? null : Number(input.value),
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        meta.textContent = body.error || "Could not save the invoice quantity.";
-        await load();
-        return;
-      }
-      const month = months.find(item => item.month === input.dataset.month);
-      if (month) month.invoice[input.dataset.band][input.dataset.farm] = input.value === "" ? null : Number(input.value);
-      render();
-    });
-
     document.getElementById("month-tables").addEventListener("click", async event => {
       const archive = event.target.closest?.("[data-archive]");
       if (archive) {
@@ -479,17 +462,11 @@
         const month = months.find(item => item.month === monthKeyValue);
         if (!month) return;
         if (!confirm(`Archive ${monthLabel(month.month)}? It will leave this list.`)) return;
-        const block = archive.closest(".month-block");
         const quantities = [];
         (month.farms || []).forEach(farm => {
           (month.bands || []).filter(band => band.id !== "unknown").forEach(band => {
-            const input = block.querySelector(`input[data-band="${band.id}"][data-farm="${farm}"]`);
             const saved = month.invoice[band.id] ? month.invoice[band.id][farm] : null;
-            quantities.push({
-              farm,
-              band: band.id,
-              quantity: input ? (input.value === "" ? null : Number(input.value)) : saved,
-            });
+            quantities.push({ farm, band: band.id, quantity: saved });
           });
         });
         const res = await fetch("/office/api/fallen-stock-invoices/archive", {
