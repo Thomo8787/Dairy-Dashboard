@@ -1,10 +1,10 @@
 """Daily milk-per-cow table for the Milk Quality page.
 
-One row per farm and day. Total milk is the sum of ticket litres. Fat %,
-protein %, SCC, Bactoscan, and urea are litre-weighted when there is more
-than one load. The 4-day average is the mean of this farm's last up to four
-days with milk (including today), and milk per cow is that average divided
-by cows in milk on that day.
+One row per farm and day. Total milk prefers weighbridge litres when present,
+otherwise ticket litres. Fat %, protein %, SCC, Bactoscan, and urea are
+litre-weighted when there is more than one load. The 4-day average is the mean
+of this farm's last up to four days with milk (including today), and milk per
+cow is that average divided by cows in milk on that day.
 """
 
 from __future__ import annotations

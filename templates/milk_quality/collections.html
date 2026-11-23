@@ -678,10 +678,10 @@
   }
 
   function loadWeight(row) {
-    const load = Number(row.litres_load);
-    if (Number.isFinite(load) && load > 0) return load;
     const weighbridge = Number(row.litres_weighbridge);
     if (Number.isFinite(weighbridge) && weighbridge > 0) return weighbridge;
+    const load = Number(row.litres_load);
+    if (Number.isFinite(load) && load > 0) return load;
     return null;
   }
 

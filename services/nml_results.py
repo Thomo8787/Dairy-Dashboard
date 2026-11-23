@@ -210,9 +210,12 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
 
 
 def _load_weight(row: dict[str, Any] | Any) -> float | None:
-    """Litres used to weight quality averages. Prefer tanker litres, then weighbridge."""
+    """Litres for daily totals and quality weighting.
+
+    Prefer weighbridge when present (matched Müller litres); otherwise tanker ticket.
+    """
     getter = row.get if isinstance(row, dict) else lambda key, default=None: getattr(row, key, default)
-    for key in ("litres_load", "litres_weighbridge"):
+    for key in ("litres_weighbridge", "litres_load"):
         raw = getter(key)
         if raw is None:
             continue
