@@ -62,6 +62,12 @@ services:
         sync: false
       - key: MULLER_PASSWORD
         sync: false
+      # Home "Update herd files" starts the fetch-one-drive-data cron.
+      # RENDER_HERD_CRON_ID is the crn- id from that cron's Render URL.
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_HERD_CRON_ID
+        sync: false
 
   # Daily Müller weighbridge download. Render cron is UTC:
   # 06:00 UTC is 6am GMT and 7am BST. Chromium lives in Dockerfile.muller.

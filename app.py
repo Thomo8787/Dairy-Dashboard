@@ -80,6 +80,7 @@ from services.herd_sync import (
     herd_import_allowed_on_web,
     herd_import_status_payload,
     start_herd_import_job,
+    trigger_herd_file_update,
 )
 from services.stock_pages import STOCK_PAGES, stock_template_extras
 from services.stock_accruals import build_stock_accruals_report
@@ -2483,6 +2484,14 @@ def events_herd_import_status():
     ):
         return jsonify({"error": "Permission denied."}), 403
     return jsonify(herd_import_status_payload())
+
+
+@app.route("/home/update-herd-files", methods=["POST"])
+@permission_required("perm_sync_onedrive")
+def update_herd_files():
+    started, message = trigger_herd_file_update()
+    flash(message, "info" if started else "error")
+    return redirect(url_for("home"))
 
 
 @app.route("/sync-herd-exports", methods=["POST"])

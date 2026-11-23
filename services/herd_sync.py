@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -114,3 +116,65 @@ def start_herd_import_job(*, force: bool = False) -> tuple[bool, str]:
 
     threading.Thread(target=_runner, name="fetch-one-drive-data", daemon=True).start()
     return True, "Herd import started from OneDrive. Stay on this page — it will show Sync complete when finished."
+
+
+_RENDER_API = "https://api.render.com/v1"
+_trigger_lock = threading.Lock()
+_last_remote_trigger: datetime | None = None
+_REMOTE_TRIGGER_COOLDOWN = timedelta(minutes=10)
+
+
+def trigger_herd_file_update() -> tuple[bool, str]:
+    """Start the herd import.
+
+    Locally this runs in the web process. On Render it starts the
+    fetch-one-drive-data cron, because the events file is too large for the
+    website. A second click within 10 minutes is ignored: Render cancels the
+    run that is already going.
+    """
+    if herd_import_allowed_on_web():
+        return start_herd_import_job(force=False)
+
+    with _trigger_lock:
+        global _last_remote_trigger
+        now = datetime.now(timezone.utc)
+        if _last_remote_trigger and now - _last_remote_trigger < _REMOTE_TRIGGER_COOLDOWN:
+            return (
+                False,
+                "A herd file update is already running. Refresh Home in a few minutes.",
+            )
+        ok, message = _trigger_render_herd_cron()
+        if ok:
+            _last_remote_trigger = now
+        return ok, message
+
+
+def _trigger_render_herd_cron() -> tuple[bool, str]:
+    api_key = (os.environ.get("RENDER_API_KEY") or "").strip()
+    cron_id = (os.environ.get("RENDER_HERD_CRON_ID") or "").strip()
+    if not api_key or not cron_id:
+        return (
+            False,
+            "Herd file update is not set up yet. Add the Render API key and the fetch-one-drive-data cron id to the website.",
+        )
+    url = f"{_RENDER_API}/cron-jobs/{cron_id}/runs"
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+            },
+            timeout=20,
+        )
+    except requests.RequestException:
+        logger.exception("Could not reach Render to start the herd cron")
+        return False, "Could not start the herd file update. Try again in a minute."
+    if response.status_code != 200:
+        logger.error(
+            "Render herd cron trigger failed: %s %s",
+            response.status_code,
+            response.text[:300],
+        )
+        return False, "Could not start the herd file update. Try Trigger run on fetch-one-drive-data in Render."
+    return True, "Herd file update started. Refresh Home in a few minutes."

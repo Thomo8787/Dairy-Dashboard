@@ -463,7 +463,18 @@ html, body {
 .home-herd-files-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
+}
+
+.home-herd-update {
+  margin: 0;
+}
+
+.home-herd-update button {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
 }
 
 .home-herd-file {
