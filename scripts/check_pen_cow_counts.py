@@ -26,7 +26,7 @@ Rebuild rules, per cow, in date order:
   placed in the pen she left, back to the day it stopped being known.
 - Moves on the same day are put in the order that links them up. The file
   does not keep them in order.
-- She counts from day 5 in milk, the same as the dashboard.
+- She counts from her fresh date, the same as the dashboard.
 - Events dated before her earliest entry date are ignored.
 """
 
@@ -48,7 +48,6 @@ if str(ROOT) not in sys.path:
 
 from services.cows_in_milk import (  # noqa: E402
     BNK_MILK_PENS,
-    MIN_DIM,
     MOVE_REMARK,
     MOVED_PEN,
     MilkSegment,
@@ -262,7 +261,7 @@ class Rebuilt:
         last = self.last
         if last is None or not last.in_milk or last.fdat is None:
             return False
-        return (day - last.fdat).days > MIN_DIM
+        return (day - last.fdat).days >= 0
 
     @property
     def place(self) -> str:
@@ -347,13 +346,12 @@ def daily_counts(
 ) -> dict[dt.date, dict[str, int]]:
     """Cows counted in each place at the end of each day."""
     deltas: dict[str, dict[dt.date, int]] = {place: defaultdict(int) for place in PLACES}
-    first_counted = dt.timedelta(days=MIN_DIM + 1)
     for cow in rebuilt.values():
         for index, segment in enumerate(cow.segments):
             if not segment.in_milk or segment.fdat is None:
                 continue
             end = cow.segments[index + 1].start if index + 1 < len(cow.segments) else None
-            start = max(segment.start, segment.fdat + first_counted)
+            start = max(segment.start, segment.fdat)
             if end is not None and start >= end:
                 continue
             place = place_for_pen(segment.pen)

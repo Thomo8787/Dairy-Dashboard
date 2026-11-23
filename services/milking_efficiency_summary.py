@@ -550,8 +550,8 @@ def _day_metrics(
     if bimodal_flags:
         bimodal_pct = 100.0 * sum(bimodal_flags) / len(bimodal_flags)
 
-    # ID Efficiency: unique cows ID'd on the rotary ÷ DairyComp cows in milk
-    # (includes fresh cows; no DIM > 4 delay).
+    # ID Efficiency: unique cows ID'd on the rotary ÷ DairyComp cows in milk,
+    # including fresh cows.
     id_cow_count = _unique_identified_cows(entry_rows, cow_scope=id_cow_scope)
     id_efficiency_pct = None
     if cows_in_milk is not None and cows_in_milk > 0 and entry_rows is not None:
@@ -612,7 +612,7 @@ def _unique_identified_cows(
 def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
     """Current DairyComp inventory cows-in-milk counts keyed by pen.
 
-    Includes fresh cows (no DIM > 4) so ID Efficiency matches Entry IDs.
+    Includes fresh cows so ID Efficiency matches Entry IDs.
     ALH and BNK are split by current pen: BNK is pens 89 to 93, ALH is the
     other pens, and pen 150 is left out.
     """

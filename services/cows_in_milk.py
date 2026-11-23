@@ -1,7 +1,8 @@
 """Daily cows-in-milk counts from herd inventory + DairyComp events.
 
-Inventory defines who is currently milking (LACT > 0, RPRO != DRY, and by
-default DIM > 4). Other farms rebuild history from FRESH / DRY / SOLD / DIED.
+Inventory defines who is currently milking (LACT > 0 and RPRO != DRY),
+including the fresh date. Other farms rebuild history from FRESH / DRY /
+SOLD / DIED.
 
 ALH and BNK share one herd. Stock inventory stays on the barn name. Cows in
 milk follow the pen. Bank is pens 89 to 93. ALH is every other pen, and pen
@@ -16,9 +17,6 @@ when a later move shows her in pen 1, pen 6, or pens 89 to 93. The abort
 itself can put her in a fresh pen with no MOVE line, so the next line often
 shows her leaving that pen. An early abort that is sold from a heifer pen
 does not count.
-
-Pass ``min_dim=None`` to include fresh cows from the freshen date (used by
-Milking Efficiency ID Efficiency). Collections/Home keep the default DIM > 4.
 """
 
 from __future__ import annotations
@@ -41,7 +39,6 @@ _PEN_HISTORY_EVENTS = ("FRESH", "ABORT", "DRY", "SOLD", "DIED", "MOVE")
 _END_MILK_EVENTS = frozenset({"DRY", "SOLD", "DIED"})
 _STOP_ABORT_SEARCH = frozenset({"DRY", "SOLD", "DIED", "FRESH", "ABORT"})
 _START_IN_MILK = "IN MILK"
-MIN_DIM = 4
 SHARED_HERD_FARMS = frozenset({"ALH", "BNK"})
 BNK_MILK_PENS = frozenset(range(89, 94))
 FRESH_PENS = frozenset({1, 6})
@@ -86,7 +83,7 @@ def _is_milking_inventory_row(
     lact: object,
     dim: object,
     *,
-    min_dim: int | None = MIN_DIM,
+    min_dim: int | None = None,
 ) -> bool:
     try:
         lact_n = float(lact) if lact is not None else 0.0
@@ -109,7 +106,7 @@ def current_cows_in_milk(
     db: Session,
     farm: str,
     *,
-    min_dim: int | None = MIN_DIM,
+    min_dim: int | None = None,
 ) -> int:
     """Cows in milk from the latest inventory snapshot for ``farm``."""
     farm_key = (farm or "").strip().upper()
@@ -159,7 +156,7 @@ def _intervals_from_events(
 def _apply_min_dim(
     intervals: list[tuple[dt.date, dt.date | None]],
     *,
-    min_dim: int | None = MIN_DIM,
+    min_dim: int | None = None,
 ) -> list[tuple[dt.date, dt.date | None]]:
     if min_dim is None:
         return list(intervals)
@@ -179,7 +176,7 @@ def _cow_intervals(
     fdat: dt.date | None,
     currently_milking: bool | None,
     today: dt.date,
-    min_dim: int | None = MIN_DIM,
+    min_dim: int | None = None,
 ) -> list[tuple[dt.date, dt.date | None]]:
     base = _intervals_from_events(evs)
     if fdat is None or currently_milking is None:
@@ -786,11 +783,11 @@ def cows_in_milk_for_dates(
     farms: Iterable[str],
     dates: Iterable[dt.date],
     *,
-    min_dim: int | None = MIN_DIM,
+    min_dim: int | None = None,
 ) -> dict[tuple[str, dt.date], int]:
     """Return ``{(farm, date): cows_in_milk}`` for the requested pairs.
 
-    ``min_dim=None`` includes fresh cows from the freshen date (no DIM delay).
+    Fresh cows count from the freshen date.
     """
     farm_keys = sorted({(f or "").strip().upper() for f in farms if f})
     date_list = sorted({d for d in dates if isinstance(d, dt.date)})
