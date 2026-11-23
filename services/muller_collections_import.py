@@ -1,10 +1,17 @@
 """Apply Müller collection CSV litres to Collections weighbridge values.
 
 One CSV row is one tanker collection. Litres is written to litres_weighbridge.
-A sample number with no ticket is added as a new line. Farm-ticket litres are
-left alone. A row with no sample number is matched provisionally (small loads
-first, then big loads in payment-time order) within 1000 L and is not inserted.
 Payment Date is the primary calendar day (Actual Collection is fallback).
+
+Matching order for rows with a sample number:
+1. Sample ID on the payment day, when ticket litres are within 1000 L
+2. Otherwise volume within 1000 L — adopt Müller's sample when free
+3. Duplicate portal samples that do not fit the ticket stay provisional on
+   another volume-matched load (sample not overwritten)
+4. Insert a weighbridge-only line only when litres are at least 1000 L
+
+Blank sample rows match provisionally (small then big, by payment time).
+Weighbridge-only orphans are merged into the matched ticket.
 """
 
 from __future__ import annotations
@@ -34,6 +41,17 @@ _DATE_FORMATS = ("%d-%b-%y", "%d-%b-%Y")
 _VOLUME_TOLERANCE_L = 1000.0
 # ALH full tankers are ~28k; the last/small load is a few thousand at most.
 _SMALL_LOAD_MAX_L = 10000.0
+# Do not invent a Collections line for tiny portal residues (e.g. 278 L).
+_MIN_INSERT_LITRES = 1000.0
+_QUALITY_COPY_FIELDS = (
+    "butterfat_pct",
+    "protein_pct",
+    "scc",
+    "bactoscan",
+    "fpd",
+    "antibiotic_pass",
+    "urea_pct",
+)
 
 
 def farm_from_filename(name: str) -> str | None:
@@ -119,11 +137,17 @@ def _is_small_litres(value: Any) -> bool:
 
 
 def _within_tolerance(ticket_litres: Any, bridge_litres: Any) -> bool:
+    """True when ticket and bridge are close enough to be the same load.
+
+    Uses 1000 L, or 5% of the larger volume — so a flat 28,000 ticket still
+    matches a 26,987 bridge (1,013 L apart).
+    """
     left = _litres_key(ticket_litres)
     right = _litres_key(bridge_litres)
     if left is None or right is None:
         return False
-    return abs(left - right) <= _VOLUME_TOLERANCE_L
+    limit = max(_VOLUME_TOLERANCE_L, 0.05 * max(left, right))
+    return abs(left - right) <= limit
 
 
 def parse_muller_rows(filename: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -246,10 +270,115 @@ def _ticket_sort_key(row: NmlMilkResult) -> tuple[int, int]:
     return (load, row.id or 0)
 
 
+# Claim: record, ticket, confirmed, override_sample_to_muller
+Claim = tuple[dict[str, Any], NmlMilkResult, bool, bool]
+
+
+def _volume_match_ticket(
+    rows: list[NmlMilkResult],
+    record: dict[str, Any],
+    claimed: dict[int, list[Claim]],
+) -> NmlMilkResult | None:
+    """Single unclaimed ticket on the payment day within 1000 L of the portal litres."""
+    day = _primary_date(record)
+    if day is None:
+        return None
+    hits = [
+        row
+        for row in rows
+        if row.id is not None
+        and row.id not in claimed
+        and row.sample_date == day
+        and row.litres_load is not None
+        and _within_tolerance(row.litres_load, record["litres"])
+    ]
+    if not hits:
+        return None
+    bridge_small = _is_small_litres(record["litres"])
+    same = [row for row in hits if _is_small_litres(row.litres_load) == bridge_small]
+    pool = same if same else hits
+    if len(pool) == 1:
+        return pool[0]
+    bridge = _litres_key(record["litres"])
+    assert bridge is not None
+    # Prefer a farm sample that already mentions the portal sample (e.g. 95/96).
+    portal = normalize_sample_id(record.get("sample_id") or "")
+    if portal:
+        mentioned = [
+            row
+            for row in pool
+            if portal in normalize_sample_id(row.sample_id or "")
+            or portal in str(row.sample_id or "")
+        ]
+        if len(mentioned) == 1:
+            return mentioned[0]
+        if mentioned:
+            pool = mentioned
+    pool = sorted(
+        pool,
+        key=lambda row: (
+            abs((_litres_key(row.litres_load) or 0) - bridge),
+            _ticket_sort_key(row),
+        ),
+    )
+    best = abs((_litres_key(pool[0].litres_load) or 0) - bridge)
+    second = abs((_litres_key(pool[1].litres_load) or 0) - bridge)
+    if best < second:
+        return pool[0]
+    # Same distance: pick earliest load so matching is stable.
+    return pool[0]
+
+
+def _sample_taken(
+    rows: list[NmlMilkResult],
+    *,
+    farm: str,
+    day: dt.date,
+    sample_id: str,
+    except_id: int | None,
+) -> bool:
+    """True when another real ticket already owns this sample that day.
+
+    Weighbridge-only orphans are ignored — they are merged into the ticket.
+    """
+    target = normalize_sample_id(sample_id)
+    for row in rows:
+        if row.id == except_id:
+            continue
+        if row.farm != farm or row.sample_date != day:
+            continue
+        if _is_orphan_bridge_row(row):
+            continue
+        if normalize_sample_id(row.sample_id) == target and not row.sample_missing:
+            return True
+    return False
+
+
+def _is_orphan_bridge_row(row: NmlMilkResult) -> bool:
+    """Müller-only line: bridge litres, no farm ticket volume."""
+    return row.litres_load is None and row.litres_weighbridge is not None
+
+
+def _merge_orphan_into(session: Any, ticket: NmlMilkResult, orphan: NmlMilkResult) -> None:
+    for field in _QUALITY_COPY_FIELDS:
+        if getattr(ticket, field) is None and getattr(orphan, field) is not None:
+            setattr(ticket, field, getattr(orphan, field))
+    if ticket.temp_c is None and orphan.temp_c is not None:
+        ticket.temp_c = orphan.temp_c
+    if ticket.litres_weighbridge is None and orphan.litres_weighbridge is not None:
+        ticket.litres_weighbridge = orphan.litres_weighbridge
+        ticket.weighbridge_confirmed = bool(
+            getattr(orphan, "weighbridge_confirmed", False)
+        )
+    if not ticket.nml_matched and orphan.nml_matched:
+        ticket.nml_matched = True
+    session.delete(orphan)
+
+
 def _claim_blank_by_size(
     blanks: list[dict[str, Any]],
     tickets: list[NmlMilkResult],
-    claimed: dict[int, list[tuple[dict[str, Any], NmlMilkResult, bool]]],
+    claimed: dict[int, list[Claim]],
     unmatched: list[dict[str, Any]],
 ) -> None:
     """Match blank Müller rows to tickets of the same size class within 1000 L.
@@ -280,13 +409,13 @@ def _claim_blank_by_size(
         if chosen is None or chosen.id is None:
             unmatched.append(_row_brief(record))
             continue
-        claimed[chosen.id].append((record, chosen, False))
+        claimed[chosen.id].append((record, chosen, False, False))
 
 
 def _match_blank_records(
     blank: list[dict[str, Any]],
     rows: list[NmlMilkResult],
-    claimed: dict[int, list[tuple[dict[str, Any], NmlMilkResult, bool]]],
+    claimed: dict[int, list[Claim]],
     unmatched: list[dict[str, Any]],
 ) -> None:
     """Provisional match for Müller rows with no sample number."""
@@ -312,6 +441,154 @@ def _match_blank_records(
         # Small first so Load 4 is taken before big rows fill Loads 1–3.
         _claim_blank_by_size(small_blanks, day_tickets, claimed, unmatched)
         _claim_blank_by_size(big_blanks, day_tickets, claimed, unmatched)
+
+
+def _volume_distance(ticket_litres: Any, bridge_litres: Any) -> int | None:
+    left = _litres_key(ticket_litres)
+    right = _litres_key(bridge_litres)
+    if left is None or right is None:
+        return None
+    return abs(left - right)
+
+
+def _claim_sampled_records(
+    sampled: list[dict[str, Any]],
+    rows: list[NmlMilkResult],
+    index: dict[str, list[NmlMilkResult]],
+    claimed: dict[int, list[Claim]],
+    *,
+    session: Any,
+    farm: str,
+    source_file: str,
+    fill_temp: bool,
+    unmatched: list[dict[str, Any]],
+    ambiguous: list[dict[str, Any]],
+) -> int:
+    """Match portal rows that have a sample number. Returns insert count.
+
+    Closest volume fit wins when Müller reuses a sample ID. That ticket adopts
+    the sample; any poorer second hit on another ticket stays provisional.
+    """
+    inserted = 0
+    # score, record, ticket, adopt_sample (override farm sample to Müller's)
+    pairs: list[tuple[int, dict[str, Any], NmlMilkResult, bool]] = []
+
+    for record in sampled:
+        sample_hits = index.get(record["sample_id"], [])
+        chosen, status = _match_row(
+            sample_hits, record["actual_date"], record["payment_date"]
+        )
+        if status == "ambiguous":
+            ambiguous.append(_row_brief(record, sample_hits))
+            continue
+
+        if (
+            status == "matched"
+            and chosen is not None
+            and chosen.id is not None
+            and not _is_orphan_bridge_row(chosen)
+            and _within_tolerance(chosen.litres_load, record["litres"])
+        ):
+            dist = _volume_distance(chosen.litres_load, record["litres"])
+            if dist is not None:
+                # Closest litres win sample ownership; sample match wins ties.
+                pairs.append((dist * 2, record, chosen, False))
+
+        volume_hit = _volume_match_ticket(rows, record, {})
+        if volume_hit is not None and volume_hit.id is not None:
+            dist = _volume_distance(volume_hit.litres_load, record["litres"])
+            if dist is not None:
+                already = any(
+                    item[1] is record and item[2].id == volume_hit.id for item in pairs
+                )
+                if not already:
+                    pairs.append((dist * 2 + 1, record, volume_hit, True))
+
+    pairs.sort(key=lambda item: (item[0], _sort_datetime(item[1])))
+    used_records: set[int] = set()
+    samples_owned: set[tuple[dt.date, str]] = set()
+
+    for _score, record, ticket, adopt in pairs:
+        if ticket.id is None or ticket.id in claimed:
+            continue
+        if id(record) in used_records:
+            continue
+
+        day = ticket.sample_date or _primary_date(record)
+        sample_key = (
+            (day, normalize_sample_id(record["sample_id"]))
+            if day and record["sample_id"]
+            else None
+        )
+        sample_taken = sample_key is not None and sample_key in samples_owned
+
+        if adopt:
+            if sample_taken:
+                claimed[ticket.id].append((record, ticket, False, False))
+            else:
+                claimed[ticket.id].append((record, ticket, True, True))
+                if sample_key is not None:
+                    samples_owned.add(sample_key)
+        else:
+            if sample_taken:
+                # Better volume fit already owns this sample — provisional.
+                claimed[ticket.id].append((record, ticket, False, False))
+            else:
+                claimed[ticket.id].append((record, ticket, True, False))
+                if sample_key is not None:
+                    samples_owned.add(sample_key)
+        used_records.add(id(record))
+
+    for record in sampled:
+        if id(record) in used_records:
+            continue
+        # Ticket taken by a better pair — try another free volume match.
+        chosen = _volume_match_ticket(rows, record, claimed)
+        if chosen is not None and chosen.id is not None:
+            claimed[chosen.id].append((record, chosen, False, False))
+            used_records.add(id(record))
+            continue
+
+        litres = _litres_key(record["litres"])
+        if litres is None or litres < _MIN_INSERT_LITRES:
+            unmatched.append(_row_brief(record))
+            continue
+        day = _primary_date(record)
+        sample_key = (
+            (day, normalize_sample_id(record["sample_id"]))
+            if day and record["sample_id"]
+            else None
+        )
+        if sample_key is not None and (
+            sample_key in samples_owned
+            or _sample_taken(
+                rows,
+                farm=farm,
+                day=day,
+                sample_id=record["sample_id"],
+                except_id=None,
+            )
+        ):
+            unmatched.append(_row_brief(record))
+            continue
+
+        created = _insert_weighbridge_row(
+            session,
+            farm,
+            record,
+            list(rows),
+            source_file=source_file,
+            fill_temp=fill_temp,
+        )
+        if created is None:
+            unmatched.append(_row_brief(record))
+            continue
+        rows.append(created)
+        index.setdefault(record["sample_id"], []).append(created)
+        inserted += 1
+        used_records.add(id(record))
+
+    return inserted
 
 
 def _row_brief(record: dict[str, Any], rows: list[NmlMilkResult] | None = None) -> dict[str, Any]:
@@ -386,72 +663,114 @@ def apply_muller_records(
     """Write Müller litres onto tickets. A sample with no ticket is added as a new line."""
     updated_ids: set[int] = set()
     inserted = 0
+    merged_orphans = 0
     temp_filled = 0
     unmatched: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     date_gaps: list[dict[str, Any]] = []
 
     with get_session() as session:
-        rows = session.scalars(
-            select(NmlMilkResult).where(NmlMilkResult.farm == farm)
-        ).all()
+        rows = list(
+            session.scalars(select(NmlMilkResult).where(NmlMilkResult.farm == farm)).all()
+        )
         index: dict[str, list[NmlMilkResult]] = {}
         for row in rows:
-            if not _is_real_sample(row):
+            if not _is_real_sample(row) or _is_orphan_bridge_row(row):
                 continue
             index.setdefault(normalize_sample_id(row.sample_id), []).append(row)
 
-        # (record, row, confirmed) — confirmed when Müller had a sample number.
-        claimed: dict[int, list[tuple[dict[str, Any], NmlMilkResult, bool]]] = defaultdict(list)
+        claimed: dict[int, list[Claim]] = defaultdict(list)
         sampled = [record for record in records if record["sample_id"]]
         blank = [record for record in records if not record["sample_id"]]
-        for record in sampled:
-            candidates = index.get(record["sample_id"], [])
-            chosen, status = _match_row(
-                candidates, record["actual_date"], record["payment_date"]
-            )
-            if status == "unmatched":
-                created = _insert_weighbridge_row(
-                    session,
-                    farm,
-                    record,
-                    list(rows),
-                    source_file=source_file,
-                    fill_temp=fill_temp,
-                )
-                if created is None:
-                    unmatched.append(_row_brief(record))
-                    continue
-                rows.append(created)
-                index.setdefault(record["sample_id"], []).append(created)
-                inserted += 1
-                continue
-            if status == "ambiguous" or chosen is None:
-                ambiguous.append(_row_brief(record, candidates))
-                continue
-            claimed[chosen.id].append((record, chosen, True))
-
-        _match_blank_records(blank, list(rows), claimed, unmatched)
+        inserted = _claim_sampled_records(
+            sampled,
+            rows,
+            index,
+            claimed,
+            session=session,
+            farm=farm,
+            source_file=source_file,
+            fill_temp=fill_temp,
+            unmatched=unmatched,
+            ambiguous=ambiguous,
+        )
+        _match_blank_records(blank, rows, claimed, unmatched)
 
         for claims in claimed.values():
             row = claims[0][1]
-            litres = {record["litres"] for record, _row, _ok in claims}
+            litres = {record["litres"] for record, _row, _ok, _ov in claims}
             if len(litres) > 1:
-                for record, _row, _ok in claims:
-                    ambiguous.append(_row_brief(record, [row]))
-                if repair_conflicts and row.litres_load is None and row.litres_weighbridge in litres:
-                    row.litres_weighbridge = None
-                    row.weighbridge_confirmed = False
-                    if fill_temp:
-                        temps = {record["temp_c"] for record, _row, _ok in claims}
-                        if row.temp_c in temps:
-                            row.temp_c = None
-                continue
-            record, _chosen, confirmed = claims[-1]
-            # Sample-confirmed claim wins over a provisional one on the same ticket.
-            if any(ok for _rec, _row, ok in claims):
+                # Prefer the claim that fits the ticket litres when Müller reused a sample.
+                fitting = [
+                    item
+                    for item in claims
+                    if row.litres_load is None
+                    or _within_tolerance(row.litres_load, item[0]["litres"])
+                ]
+                if len(fitting) == 1:
+                    claims = fitting
+                else:
+                    for record, _row, _ok, _ov in claims:
+                        ambiguous.append(_row_brief(record, [row]))
+                    if (
+                        repair_conflicts
+                        and row.litres_load is None
+                        and row.litres_weighbridge in litres
+                    ):
+                        row.litres_weighbridge = None
+                        row.weighbridge_confirmed = False
+                        if fill_temp:
+                            temps = {record["temp_c"] for record, _row, _ok, _ov in claims}
+                            if row.temp_c in temps:
+                                row.temp_c = None
+                    continue
+
+            # Confirmed sample claim wins over a provisional one on the same ticket.
+            confirmed_claims = [item for item in claims if item[2]]
+            record, _chosen, confirmed, override = (
+                confirmed_claims[-1] if confirmed_claims else claims[-1]
+            )
+            if confirmed_claims:
                 confirmed = True
-                record = next(rec for rec, _row, ok in claims if ok)
+                override = any(item[3] for item in confirmed_claims)
+                record = confirmed_claims[-1][0]
+
+            # Fold Müller-only duplicates into this ticket before adopting the sample.
+            day = row.sample_date
+            if day is not None and record["sample_id"]:
+                target = normalize_sample_id(record["sample_id"])
+                orphans = [
+                    other
+                    for other in list(rows)
+                    if other.id != row.id
+                    and other.sample_date == day
+                    and _is_orphan_bridge_row(other)
+                    and (
+                        normalize_sample_id(other.sample_id) == target
+                        or _within_tolerance(row.litres_load, other.litres_weighbridge)
+                    )
+                ]
+                for orphan in orphans:
+                    _merge_orphan_into(session, row, orphan)
+                    if orphan in rows:
+                        rows.remove(orphan)
+                    merged_orphans += 1
+
+            if override and record["sample_id"]:
+                target = normalize_sample_id(record["sample_id"])
+                # Free the sample on any other ticket so the unique key allows the override.
+                for other in list(rows):
+                    if (
+                        other.id != row.id
+                        and other.sample_date == row.sample_date
+                        and not _is_orphan_bridge_row(other)
+                        and normalize_sample_id(other.sample_id) == target
+                    ):
+                        other.sample_id = f"L{other.load_number or other.id}"
+                        other.sample_missing = True
+                row.sample_id = record["sample_id"]
+                row.sample_missing = False
+
             row.litres_weighbridge = record["litres"]
             row.weighbridge_confirmed = confirmed
             updated_ids.add(row.id)
@@ -477,6 +796,7 @@ def apply_muller_records(
         "rows_parsed": len(records),
         "rows_updated": len(updated_ids),
         "rows_inserted": inserted,
+        "rows_merged": merged_orphans,
         "temps_filled": temp_filled,
         "rows_unmatched": len(unmatched),
         "rows_ambiguous": len(ambiguous),

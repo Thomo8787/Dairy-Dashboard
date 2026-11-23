@@ -1416,6 +1416,7 @@ def milk_quality_api_collections_update(row_id: int):
                 litres_load=payload.get("litres_load", payload.get("volume_litres")),
                 temp_c=payload.get("temp_c"),
                 sample_id=payload.get("sample_id"),
+                load_number=payload.get("load_number"),
             )
         )
     except ValueError as exc:

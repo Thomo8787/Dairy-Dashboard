@@ -280,6 +280,7 @@ def update_collection_load(
     litres_load: Any,
     temp_c: Any,
     sample_id: Any,
+    load_number: Any = None,
 ) -> dict[str, Any]:
     volume = _parse_volume(litres_load)
     if volume is None:
@@ -287,14 +288,29 @@ def update_collection_load(
     temp = _parse_temp(temp_c)
     typed_sample = str(sample_id or "").strip()
     sample_missing = not bool(typed_sample)
+    new_load: int | None
+    if load_number is None or load_number == "":
+        new_load = None  # leave unchanged — resolved below from row
+        load_provided = False
+    else:
+        load_provided = True
+        try:
+            new_load = int(load_number)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Load must be a whole number.") from exc
+        if new_load < 1:
+            raise ValueError("Load must be 1 or higher.")
 
     with get_session() as session:
         row = session.get(NmlMilkResult, row_id)
         if row is None:
             raise ValueError("Collection not found.")
 
+        if not load_provided:
+            new_load = row.load_number
+
         stored_sample = typed_sample or (row.sample_id if row.sample_missing else "") or (
-            f"L{row.load_number}" if row.load_number else f"L{row.id}"
+            f"L{new_load}" if new_load else f"L{row.id}"
         )
         old_date = row.sample_date
 
@@ -309,23 +325,28 @@ def update_collection_load(
         if clash is not None and _has_volume(clash):
             raise ValueError("Another load already uses that sample number on that date.")
 
+        same_day = list(
+            session.scalars(
+                select(NmlMilkResult).where(
+                    NmlMilkResult.farm == row.farm,
+                    NmlMilkResult.sample_date == sample_date,
+                    NmlMilkResult.id != row.id,
+                )
+            ).all()
+        )
+        taken_loads = {
+            other.load_number for other in same_day if other.load_number is not None
+        }
+        if new_load is not None and new_load in taken_loads:
+            raise ValueError(f"Load {new_load} is already used on that date.")
+
         if old_date != sample_date:
-            taken = {
-                other.load_number
-                for other in session.scalars(
-                    select(NmlMilkResult).where(
-                        NmlMilkResult.farm == row.farm,
-                        NmlMilkResult.sample_date == sample_date,
-                        NmlMilkResult.id != row.id,
-                    )
-                ).all()
-                if other.load_number is not None
-            }
-            if row.load_number in taken:
-                row.load_number = (max(taken) if taken else 0) + 1
+            if new_load is None or new_load in taken_loads:
+                new_load = (max(taken_loads) if taken_loads else 0) + 1
             row.report_month = f"{calendar.month_name[sample_date.month]} {sample_date.year}"
 
         row.sample_date = sample_date
+        row.load_number = new_load
         row.litres_load = volume
         row.temp_c = temp
         row.sample_id = stored_sample

@@ -485,6 +485,10 @@
           <input type="date" class="add-date-input" id="edit-date" required>
         </label>
         <label>
+          Load
+          <input type="number" id="edit-load" min="1" step="1" inputmode="numeric">
+        </label>
+        <label>
           Volume (L)
           <input type="number" id="edit-volume" min="1" step="1" inputmode="numeric" required>
         </label>
@@ -1476,13 +1480,14 @@
     document.getElementById("edit-collection-title").textContent = "Edit Collection";
     document.getElementById("edit-collection-farm").textContent = farmLabel + loadLabel;
     document.getElementById("edit-date").value = row.sample_date || "";
+    document.getElementById("edit-load").value = row.load_number != null ? row.load_number : "";
     document.getElementById("edit-volume").value = row.litres_load != null ? row.litres_load : "";
     document.getElementById("edit-temp").value = formatTemp(row.temp_c);
     document.getElementById("edit-sample").value = row.sample_id || "";
     showEditError("");
     editModal.classList.add("open");
     editModal.setAttribute("aria-hidden", "false");
-    document.getElementById("edit-volume").focus();
+    document.getElementById("edit-load").focus();
   }
 
   document.getElementById("table-body").addEventListener("click", (e) => {
@@ -1533,6 +1538,7 @@
     showEditError("");
     const rowId = document.getElementById("edit-row-id").value;
     const date = document.getElementById("edit-date").value;
+    const loadRaw = document.getElementById("edit-load").value;
     const volumeRaw = document.getElementById("edit-volume").value;
     const tempRaw = document.getElementById("edit-temp").value;
     const sample = document.getElementById("edit-sample").value;
@@ -1542,8 +1548,13 @@
     }
     const litresLoad = volumeRaw === "" ? null : Number(volumeRaw);
     const tempC = tempRaw === "" ? null : Math.round(Number(tempRaw) * 100) / 100;
+    const loadNumber = loadRaw === "" ? null : Number(loadRaw);
     if (litresLoad == null || Number.isNaN(litresLoad) || litresLoad <= 0) {
       showEditError("Enter a volume greater than zero.");
+      return;
+    }
+    if (loadNumber != null && (!Number.isInteger(loadNumber) || loadNumber < 1)) {
+      showEditError("Load must be a whole number of 1 or higher.");
       return;
     }
     if (Number.isNaN(tempC)) {
@@ -1558,6 +1569,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date,
+          load_number: loadNumber,
           litres_load: litresLoad,
           temp_c: tempC,
           sample_id: sample,
