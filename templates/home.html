@@ -207,15 +207,15 @@
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="services" aria-label="{{ farm.code }} services">
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="services" aria-label="{{ farm.code }} services in the last 30 days">
           <p class="widget-kicker">Services</p>
           <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
+          <p class="widget-sub" title="120-day services ÷ 4 (average per 30 days)">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="days_to_first_service" aria-label="{{ farm.code }} days to first service">
           <p class="widget-kicker">Days to first service</p>
           <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
+          <p class="widget-sub" title="Average days to first service over the last 120 days">—</p>
         </a>
       </div>
     </div>
@@ -307,11 +307,27 @@
   const tiles = [...document.querySelectorAll("#home-fertility [data-metric], #home-health [data-metric]")];
   if (!tiles.length) return;
 
+  const comparisonMetrics = {
+    services: "services_avg_30d_120",
+    days_to_first_service: "days_to_first_service_avg_120",
+  };
+
+  function formatWhole(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(n).toLocaleString("en-GB") : "—";
+  }
+
   function leaveDash() {
     tiles.forEach((tile) => {
       tile.className = "home-widget";
       const title = tile.querySelector(".widget-title");
       if (title) title.textContent = "—";
+      if (!comparisonMetrics[tile.dataset.metric]) return;
+      const sub = tile.querySelector(".widget-sub");
+      if (!sub) return;
+      sub.textContent = "—";
+      sub.className = "widget-sub";
     });
   }
 
@@ -329,16 +345,18 @@
       }
       tiles.forEach((tile) => {
         const row = byFarm[tile.dataset.farm];
-        const value = row ? row[tile.dataset.metric] : null;
+        const metric = tile.dataset.metric;
+        const value = row ? row[metric] : null;
         const title = tile.querySelector(".widget-title");
-        tile.className = "home-widget status-unknown";
-        if (!title) return;
-        if (value === null || value === undefined || value === "") {
-          title.textContent = "—";
-          return;
-        }
-        const n = Number(value);
-        title.textContent = Number.isFinite(n) ? Math.round(n).toLocaleString("en-GB") : "—";
+        const subKey = comparisonMetrics[metric];
+        const status = subKey && row ? (row[`${metric}_status`] || "unknown") : "unknown";
+        tile.className = subKey ? `home-widget status-${status}` : "home-widget status-unknown";
+        if (title) title.textContent = formatWhole(value);
+        if (!subKey) return;
+        const sub = tile.querySelector(".widget-sub");
+        if (!sub) return;
+        sub.textContent = formatWhole(row ? row[subKey] : null);
+        sub.className = `widget-sub tone-${status}`;
       });
     } catch (_err) {
       leaveDash();

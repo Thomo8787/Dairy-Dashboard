@@ -2001,6 +2001,7 @@ def build_events_page_report(
 
 
 def _semen_status_band(value: float, average: float) -> str:
+    """Higher recent figure is better. Matches the Dairy Semen tile."""
     if average <= 0:
         return "unknown" if value <= 0 else "green"
     ratio = value / average
@@ -2009,6 +2010,49 @@ def _semen_status_band(value: float, average: float) -> str:
     if ratio >= 0.9:
         return "yellow"
     return "red"
+
+
+def _lower_is_better_band(value: float, average: float) -> str:
+    """Mirror of the Dairy Semen bands. A lower recent figure is better."""
+    if average <= 0:
+        return "green" if value <= 0 else "red"
+    ratio = value / average
+    if ratio <= 1.0:
+        return "green"
+    if ratio <= 1.1:
+        return "yellow"
+    return "red"
+
+
+def _remember_earliest_service(
+    earliest: dict[tuple, tuple],
+    key: tuple,
+    event_day: dt.date,
+    dim: Any,
+) -> None:
+    current = earliest.get(key)
+    if current is None or event_day < current[0] or (
+        event_day == current[0] and current[1] is None and dim is not None
+    ):
+        earliest[key] = (event_day, dim)
+
+
+def _mean_rounded_dim(earliest: dict[tuple, tuple], farms: list[str]) -> dict[str, int | None]:
+    buckets: dict[str, list[float]] = {code: [] for code in farms}
+    for (farm, _animal, _lact), (_event_day, dim) in earliest.items():
+        if farm not in buckets or dim is None:
+            continue
+        try:
+            number = float(dim)
+        except (TypeError, ValueError):
+            continue
+        if number != number:
+            continue
+        buckets[farm].append(number)
+    return {
+        farm: int(round(sum(dims) / len(dims))) if dims else None
+        for farm, dims in buckets.items()
+    }
 
 
 def build_dairy_semen_30d(db: Session) -> dict[str, Any]:
@@ -2058,7 +2102,11 @@ def _empty_home_herd_row(farm: str) -> dict[str, Any]:
     return {
         "farm": farm,
         "services": 0,
+        "services_avg_30d_120": 0.0,
+        "services_status": "unknown",
         "days_to_first_service": None,
+        "days_to_first_service_avg_120": None,
+        "days_to_first_service_status": "unknown",
         "mortality": 0,
         "mastitis": 0,
         "lameness": 0,
@@ -2067,11 +2115,17 @@ def _empty_home_herd_row(farm: str) -> dict[str, Any]:
 
 
 def build_home_herd_summary(db: Session) -> dict[str, Any]:
-    """Home Fertility and Health tiles: counts for the last 30 days through today."""
+    """Home Fertility and Health tiles.
+
+    Services and days to first service compare the last 30 days with the last
+    120 days. Health tiles stay as counts for the last 30 days through today.
+    """
     today = dt.date.today()
     start_30 = today - dt.timedelta(days=30)
+    start_120 = today - dt.timedelta(days=120)
     farms = list(HERD_FARM_OPTIONS)
     rows = {code: _empty_home_herd_row(code) for code in farms}
+    services_120 = {code: 0 for code in farms}
 
     bred_rows = db.execute(
         select(
@@ -2084,7 +2138,7 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
         )
         .where(CowEvent.event == "BRED")
         .where(CowEvent.event_date.isnot(None))
-        .where(CowEvent.event_date >= start_30)
+        .where(CowEvent.event_date >= start_120)
         .where(CowEvent.event_date <= today)
         .where(CowEvent.farm.in_(farms))
     ).all()
@@ -2092,49 +2146,61 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
         select(CowEvent.farm, CowEvent.cow_id, CowEvent.etag, CowEvent.lact)
         .where(CowEvent.event == "BRED")
         .where(CowEvent.event_date.isnot(None))
-        .where(CowEvent.event_date < start_30)
+        .where(CowEvent.event_date < start_120)
         .where(CowEvent.farm.in_(farms))
         .distinct()
     ).all()
-    prior_services = set()
+    prior_before_120: set[tuple] = set()
     for farm, cow_id, etag, lact in prior_rows:
         animal = _animal_identifier(cow_id, etag)
         if farm in rows and animal:
-            prior_services.add((farm, animal, lact))
+            prior_before_120.add((farm, animal, lact))
 
-    earliest_first: dict[tuple, tuple] = {}
+    served_before_30 = set(prior_before_120)
+    window_30: list[tuple] = []
+    earliest_120: dict[tuple, tuple] = {}
     for farm, cow_id, etag, lact, dim, event_date in bred_rows:
         if farm not in rows:
             continue
-        rows[farm]["services"] += 1
         event_day = _coerce_date(event_date)
+        services_120[farm] += 1
+        if isinstance(event_day, dt.date) and event_day >= start_30:
+            rows[farm]["services"] += 1
         animal = _animal_identifier(cow_id, etag)
         # Days to first service is days after calving. Lact 0 is a heifer service.
-        if event_day is None or animal is None or not lact or lact < 1:
+        if not isinstance(event_day, dt.date) or animal is None or not lact or lact < 1:
             continue
         key = (farm, animal, lact)
-        if key in prior_services:
-            continue
-        current = earliest_first.get(key)
-        if current is None or event_day < current[0] or (
-            event_day == current[0] and current[1] is None and dim is not None
-        ):
-            earliest_first[key] = (event_day, dim)
+        if key not in prior_before_120:
+            _remember_earliest_service(earliest_120, key, event_day, dim)
+        if event_day < start_30:
+            served_before_30.add(key)
+        else:
+            window_30.append((key, event_day, dim))
 
-    first_dims: dict[str, list[float]] = {code: [] for code in farms}
-    for (farm, _animal, _lact), (_event_day, dim) in earliest_first.items():
-        if dim is None:
+    earliest_30: dict[tuple, tuple] = {}
+    for key, event_day, dim in window_30:
+        if key in served_before_30:
             continue
-        try:
-            number = float(dim)
-        except (TypeError, ValueError):
-            continue
-        if number != number:
-            continue
-        first_dims[farm].append(number)
-    for farm, dims in first_dims.items():
-        if dims:
-            rows[farm]["days_to_first_service"] = int(round(sum(dims) / len(dims)))
+        _remember_earliest_service(earliest_30, key, event_day, dim)
+
+    means_30 = _mean_rounded_dim(earliest_30, farms)
+    means_120 = _mean_rounded_dim(earliest_120, farms)
+    for farm in farms:
+        average = services_120[farm] / 4.0
+        rows[farm]["services_avg_30d_120"] = round(average, 1)
+        rows[farm]["services_status"] = _semen_status_band(rows[farm]["services"], average)
+        rows[farm]["days_to_first_service"] = means_30[farm]
+        rows[farm]["days_to_first_service_avg_120"] = means_120[farm]
+        recent_days = means_30[farm]
+        baseline_days = means_120[farm]
+        if recent_days is None or baseline_days is None:
+            rows[farm]["days_to_first_service_status"] = "unknown"
+        else:
+            rows[farm]["days_to_first_service_status"] = _lower_is_better_band(
+                recent_days,
+                baseline_days,
+            )
 
     death_rows = db.execute(
         select(
