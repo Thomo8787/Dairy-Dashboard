@@ -2097,17 +2097,20 @@ _HOME_HERD_DISEASE_KEYS = {
     "METR": "metritis",
 }
 
-_HOME_HEALTH_METRICS = (
+_HOME_FARM_HEALTH_METRICS = (
     "mortality",
     "mastitis",
     "lameness",
     "metritis",
     "certs",
+)
+_HOME_YOUNGSTOCK_METRICS = (
     "ys_0_2",
     "ys_2_6",
     "ys_6_12",
     "ys_12_plus",
 )
+_HOME_HEALTH_METRICS = _HOME_FARM_HEALTH_METRICS + _HOME_YOUNGSTOCK_METRICS
 
 
 def _is_cow_lact(lact: int | None) -> bool:
@@ -2163,6 +2166,54 @@ def _apply_lower_count(row: dict[str, Any], metric: str, count_30: int, count_12
     row[f"{metric}_status"] = _lower_is_better_band(float(count_30), average)
 
 
+def _trim_animal_key(farm: str, cow_id: str | None, etag: str | None, event_id: int | None) -> str | None:
+    animal = _animal_identifier(cow_id, etag)
+    if animal:
+        return animal
+    if event_id is None:
+        return None
+    return f"event:{event_id}"
+
+
+def _trimmed_animal_counts(
+    events: list[tuple],
+    farms: list[str],
+    start_30: dt.date,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Cows with a FOOTRIM, plus cows with a LAME and no FOOTRIM in that window."""
+    footrim_30 = {code: set() for code in farms}
+    lame_30 = {code: set() for code in farms}
+    footrim_120 = {code: set() for code in farms}
+    lame_120 = {code: set() for code in farms}
+    for farm, cow_id, etag, lact, event, event_date, event_id in events:
+        if farm not in footrim_120 or not _is_cow_lact(lact):
+            continue
+        event_day = _coerce_date(event_date)
+        if not isinstance(event_day, dt.date):
+            continue
+        animal = _trim_animal_key(farm, cow_id, etag, event_id)
+        if animal is None:
+            continue
+        in_30 = event_day >= start_30
+        if event == "FOOTRIM":
+            footrim_120[farm].add(animal)
+            if in_30:
+                footrim_30[farm].add(animal)
+        elif event == "LAME":
+            lame_120[farm].add(animal)
+            if in_30:
+                lame_30[farm].add(animal)
+    counts_30 = {
+        farm: len(footrim_30[farm] | (lame_30[farm] - footrim_30[farm]))
+        for farm in farms
+    }
+    counts_120 = {
+        farm: len(footrim_120[farm] | (lame_120[farm] - footrim_120[farm]))
+        for farm in farms
+    }
+    return counts_30, counts_120
+
+
 def _empty_home_herd_row(farm: str) -> dict[str, Any]:
     return {
         "farm": farm,
@@ -2179,8 +2230,8 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
     """Home Fertility and Health tiles.
 
     Each compared tile shows the last 30 days against the last 120 days.
-    Health counts are cows (lactation 1 and above), except the youngstock
-    mortality bands, which are lactation 0.
+    Health counts are cows (lactation 1 and above). Youngstock mortality is
+    one herd total, split by age, for lactation 0.
     """
     today = dt.date.today()
     start_30 = today - dt.timedelta(days=30)
@@ -2356,8 +2407,36 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
         if event_day >= start_30:
             health_30[farm][metric] += 1
 
-    for farm in farms:
-        for metric in _HOME_HEALTH_METRICS:
-            _apply_lower_count(rows[farm], metric, health_30[farm][metric], health_120[farm][metric])
+    trim_rows = db.execute(
+        select(
+            CowEvent.farm,
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.lact,
+            CowEvent.event,
+            CowEvent.event_date,
+            CowEvent.id,
+        )
+        .where(CowEvent.event.in_(("FOOTRIM", "LAME")))
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.event_date >= start_120)
+        .where(CowEvent.event_date <= today)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    trim_30, trim_120 = _trimmed_animal_counts(trim_rows, farms, start_30)
 
-    return {"farms": [rows[code] for code in farms]}
+    for farm in farms:
+        for metric in _HOME_FARM_HEALTH_METRICS:
+            _apply_lower_count(rows[farm], metric, health_30[farm][metric], health_120[farm][metric])
+        _apply_lower_count(rows[farm], "foot_trim", trim_30[farm], trim_120[farm])
+
+    youngstock: dict[str, Any] = {}
+    for metric in _HOME_YOUNGSTOCK_METRICS:
+        _apply_lower_count(
+            youngstock,
+            metric,
+            sum(health_30[farm][metric] for farm in farms),
+            sum(health_120[farm][metric] for farm in farms),
+        )
+
+    return {"farms": [rows[code] for code in farms], "youngstock": youngstock}
