@@ -68,6 +68,10 @@ services:
         sync: false
       - key: RENDER_HERD_CRON_ID
         sync: false
+      # Collections "Import Müller" starts the fetch-muller-collections cron.
+      # RENDER_MULLER_CRON_ID is the crn- id from that cron's Render URL.
+      - key: RENDER_MULLER_CRON_ID
+        sync: false
 
   # Daily Müller weighbridge download. Render cron is UTC:
   # 06:00 UTC is 6am GMT and 7am BST. Chromium lives in Dockerfile.muller.

@@ -207,6 +207,7 @@ from services.nml_statements import list_nml_statements
 from services.nml_sync import get_nml_import_status, start_nml_import_job
 from services.milk_per_cow import list_milk_per_cow
 from services.muller_collections_import import import_muller_uploads
+from services.muller_sync import get_muller_portal_status, start_muller_portal_import
 from services.nml_manual import (
     delete_collection_load,
     get_collection_day,
@@ -1559,6 +1560,25 @@ def milk_quality_api_import():
     if not started:
         return jsonify({"error": message}), 400
     return jsonify({"status": "started", "message": message})
+
+
+@app.route("/milk-quality/api/collections/muller/portal/status")
+def milk_quality_api_muller_portal_status():
+    _user, error = _milk_quality_json_user()
+    if error:
+        return error
+    return jsonify(get_muller_portal_status())
+
+
+@app.route("/milk-quality/api/collections/muller/portal", methods=["POST"])
+def milk_quality_api_muller_portal():
+    _user, error = _milk_quality_json_user()
+    if error:
+        return error
+    started, message, status = start_muller_portal_import()
+    if not started:
+        return jsonify({"error": message}), 400
+    return jsonify({"status": status, "message": message})
 
 
 @app.route("/milk-quality/api/collections/muller", methods=["POST"])

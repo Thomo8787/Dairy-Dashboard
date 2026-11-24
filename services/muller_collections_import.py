@@ -145,6 +145,35 @@ def _within_tolerance(ticket_litres: Any, bridge_litres: Any) -> bool:
     return abs(left - right) <= limit
 
 
+def weighbridge_fits(ticket_litres: Any, bridge_litres: Any) -> bool:
+    """True when a weighbridge can stay on this ticket.
+
+    Same size class (small load under 10,000 L, or a full tanker) and within
+    the usual tolerance. A missing side is not a clash.
+    """
+    if _litres_key(ticket_litres) is None or _litres_key(bridge_litres) is None:
+        return True
+    if _is_small_litres(ticket_litres) != _is_small_litres(bridge_litres):
+        return False
+    return _within_tolerance(ticket_litres, bridge_litres)
+
+
+def clear_unfit_weighbridges(rows: list[Any]) -> int:
+    """Drop a weighbridge that no longer belongs on its ticket litres."""
+    cleared = 0
+    for row in rows:
+        ticket = getattr(row, "litres_load", None)
+        bridge = getattr(row, "litres_weighbridge", None)
+        if ticket is None or bridge is None:
+            continue
+        if weighbridge_fits(ticket, bridge):
+            continue
+        row.litres_weighbridge = None
+        row.weighbridge_confirmed = False
+        cleared += 1
+    return cleared
+
+
 def parse_muller_rows(filename: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     farm = farm_from_filename(filename)
     if farm is None:
@@ -791,6 +820,7 @@ def apply_muller_records(
     inserted = 0
     merged_orphans = 0
     temp_filled = 0
+    cleared = 0
     unmatched: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     date_gaps: list[dict[str, Any]] = []
@@ -802,6 +832,7 @@ def apply_muller_records(
                     select(NmlMilkResult).where(NmlMilkResult.farm == farm)
                 ).all()
             )
+            cleared = clear_unfit_weighbridges(rows)
             index: dict[str, list[NmlMilkResult]] = {}
             for row in rows:
                 if not _is_real_sample(row) or _is_orphan_bridge_row(row):
@@ -917,6 +948,9 @@ def apply_muller_records(
                     row.sample_missing = False
                     session.flush()
 
+                if not weighbridge_fits(row.litres_load, record["litres"]):
+                    unmatched.append(_row_brief(record, [row]))
+                    continue
                 row.litres_weighbridge = record["litres"]
                 row.weighbridge_confirmed = confirmed
                 updated_ids.add(row.id)
@@ -952,6 +986,7 @@ def apply_muller_records(
         "farm": farm,
         "rows_parsed": len(records),
         "rows_updated": len(updated_ids),
+        "rows_cleared": cleared,
         "rows_inserted": inserted,
         "rows_merged": merged_orphans,
         "temps_filled": temp_filled,
@@ -1040,6 +1075,7 @@ def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
                 "farm": item["farm"],
                 "rows_parsed": item["rows_parsed"],
                 "rows_updated": item["rows_updated"],
+                "rows_cleared": item.get("rows_cleared", 0),
                 "rows_unmatched": item["rows_unmatched"],
                 "rows_ambiguous": item["rows_ambiguous"],
             }
@@ -1047,6 +1083,7 @@ def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
         ],
         "errors": errors,
         "rows_updated": sum(item["rows_updated"] for item in results),
+        "rows_cleared": sum(item.get("rows_cleared", 0) for item in results),
         "rows_unmatched": sum(item["rows_unmatched"] for item in results),
         "rows_ambiguous": sum(item["rows_ambiguous"] for item in results),
     }

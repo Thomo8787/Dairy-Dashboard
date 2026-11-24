@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from services.database import NmlMilkResult, get_session
 from services.farms import HERD_FARM_OPTIONS
+from services.muller_collections_import import clear_unfit_weighbridges
 from services.nml_pdf import FARM_PRODUCER_REF, normalize_sample_id
 
 MANUAL_SOURCE = "manual"
@@ -187,6 +188,7 @@ def save_collection_day(
                 row.sample_id = sample_id
                 row.sample_missing = sample_missing
                 row.litres_load = item["litres_load"]
+                clear_unfit_weighbridges([row])
                 row.temp_c = item["temp_c"]
                 row.source = MANUAL_SOURCE
                 row.source_file = MANUAL_SOURCE
@@ -194,6 +196,7 @@ def save_collection_day(
                 continue
 
             row.litres_load = item["litres_load"]
+            clear_unfit_weighbridges([row])
             row.temp_c = item["temp_c"]
             if item["sample_id"]:
                 row.sample_id = sample_id
@@ -348,6 +351,7 @@ def update_collection_load(
         row.sample_date = sample_date
         row.load_number = new_load
         row.litres_load = volume
+        clear_unfit_weighbridges([row])
         row.temp_c = temp
         row.sample_id = stored_sample
         row.sample_missing = sample_missing
