@@ -137,9 +137,18 @@ def current_cows_in_milk(
 def _intervals_from_events(
     evs: list[tuple[dt.date, str]],
 ) -> list[tuple[dt.date, dt.date | None]]:
+    """Milking stretches from FRESH until DRY, SOLD, or DIED.
+
+    A fresh and a sale or death on the same day are taken in that order.
+    She cannot freshen after she has left the herd.
+    """
+    ordered = sorted(
+        evs,
+        key=lambda item: (item[0], 0 if item[1] == "FRESH" else 1),
+    )
     intervals: list[tuple[dt.date, dt.date | None]] = []
     open_start: dt.date | None = None
-    for event_date, event in evs:
+    for event_date, event in ordered:
         if event == "FRESH":
             if open_start is not None and open_start < event_date:
                 intervals.append((open_start, event_date))
