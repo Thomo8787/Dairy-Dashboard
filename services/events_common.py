@@ -2097,6 +2097,71 @@ _HOME_HERD_DISEASE_KEYS = {
     "METR": "metritis",
 }
 
+_HOME_HEALTH_METRICS = (
+    "mortality",
+    "mastitis",
+    "lameness",
+    "metritis",
+    "certs",
+    "ys_0_2",
+    "ys_2_6",
+    "ys_6_12",
+    "ys_12_plus",
+)
+
+
+def _is_cow_lact(lact: int | None) -> bool:
+    return lact is not None and lact >= 1
+
+
+def _clean_code(value: str | None) -> str:
+    return (value or "").strip().upper()
+
+
+def _is_tb_death(remark: str | None) -> bool:
+    return _clean_code(remark) in SALES_TB_REMARKS
+
+
+def _is_cert_or_ofs_death(remark: str | None, dest: str | None) -> bool:
+    """Certificate remarks, OFS remarks, and fallen-stock collector destinations."""
+    remark_text = _clean_code(remark)
+    dest_text = _clean_code(dest)
+    if remark_text.startswith("CERT") or remark_text == "OFS":
+        return True
+    return any(dest_text.startswith(prefix) for prefix in OFS_DEST_PREFIXES)
+
+
+def _completed_age_months(born: dt.date, died: dt.date) -> int | None:
+    """Whole months from birth to death. Matches the Fallen Stock invoice ages."""
+    months = (died.year - born.year) * 12 + (died.month - born.month)
+    if died.day < born.day:
+        months -= 1
+    if months < 0:
+        return None
+    return months
+
+
+def _youngstock_mortality_band(born: dt.date | None, died: dt.date | None) -> str | None:
+    if born is None or died is None:
+        return None
+    months = _completed_age_months(born, died)
+    if months is None:
+        return None
+    if months < 2:
+        return "ys_0_2"
+    if months < 6:
+        return "ys_2_6"
+    if months < 12:
+        return "ys_6_12"
+    return "ys_12_plus"
+
+
+def _apply_lower_count(row: dict[str, Any], metric: str, count_30: int, count_120: int) -> None:
+    average = count_120 / 4.0
+    row[metric] = count_30
+    row[f"{metric}_avg_30d_120"] = round(average, 1)
+    row[f"{metric}_status"] = _lower_is_better_band(float(count_30), average)
+
 
 def _empty_home_herd_row(farm: str) -> dict[str, Any]:
     return {
@@ -2107,18 +2172,15 @@ def _empty_home_herd_row(farm: str) -> dict[str, Any]:
         "days_to_first_service": None,
         "days_to_first_service_avg_120": None,
         "days_to_first_service_status": "unknown",
-        "mortality": 0,
-        "mastitis": 0,
-        "lameness": 0,
-        "metritis": 0,
     }
 
 
 def build_home_herd_summary(db: Session) -> dict[str, Any]:
     """Home Fertility and Health tiles.
 
-    Services and days to first service compare the last 30 days with the last
-    120 days. Health tiles stay as counts for the last 30 days through today.
+    Each compared tile shows the last 30 days against the last 120 days.
+    Health counts are cows (lactation 1 and above), except the youngstock
+    mortality bands, which are lactation 0.
     """
     today = dt.date.today()
     start_30 = today - dt.timedelta(days=30)
@@ -2202,28 +2264,54 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
                 baseline_days,
             )
 
+    health_30 = {code: {metric: 0 for metric in _HOME_HEALTH_METRICS} for code in farms}
+    health_120 = {code: {metric: 0 for metric in _HOME_HEALTH_METRICS} for code in farms}
+
     death_rows = db.execute(
         select(
             CowEvent.farm,
             CowEvent.lact,
             CowEvent.remark,
+            CowEvent.dest,
             CowEvent.event_date,
             CowEvent.bdat,
         )
-        .where(death_report_event_clause())
+        .where(CowEvent.event == "DIED")
         .where(CowEvent.event_date.isnot(None))
-        .where(CowEvent.event_date >= start_30)
+        .where(CowEvent.event_date >= start_120)
         .where(CowEvent.event_date <= today)
         .where(CowEvent.farm.in_(farms))
     ).all()
-    for farm, lact, remark, event_date, bdat in death_rows:
-        if farm not in rows:
+    for farm, lact, remark, dest, event_date, bdat in death_rows:
+        if farm not in health_30:
             continue
-        if lact == 0 and _exclude_youngstock_death(remark, event_date, bdat):
+        event_day = _coerce_date(event_date)
+        if not isinstance(event_day, dt.date):
             continue
-        rows[farm]["mortality"] += 1
+        in_30 = event_day >= start_30
+        if _is_cert_or_ofs_death(remark, dest):
+            if _is_cow_lact(lact):
+                health_120[farm]["certs"] += 1
+                if in_30:
+                    health_30[farm]["certs"] += 1
+            continue
+        if _is_tb_death(remark):
+            continue
+        if _is_cow_lact(lact):
+            health_120[farm]["mortality"] += 1
+            if in_30:
+                health_30[farm]["mortality"] += 1
+            continue
+        if lact != 0 or _exclude_youngstock_death(remark, event_date, bdat):
+            continue
+        band = _youngstock_mortality_band(_coerce_date(bdat), event_day)
+        if band is None:
+            continue
+        health_120[farm][band] += 1
+        if in_30:
+            health_30[farm][band] += 1
 
-    lookback = start_30 - dt.timedelta(days=DEFAULT_DISEASE_EPISODE_GAP_DAYS)
+    lookback = start_120 - dt.timedelta(days=DEFAULT_DISEASE_EPISODE_GAP_DAYS)
     disease_rows = db.execute(
         select(
             CowEvent.cow_id,
@@ -2231,6 +2319,7 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
             CowEvent.event,
             CowEvent.event_date,
             CowEvent.farm,
+            CowEvent.lact,
         )
         .where(CowEvent.event.in_(tuple(_HOME_HERD_DISEASE_KEYS)))
         .where(CowEvent.event_date.isnot(None))
@@ -2246,16 +2335,29 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
                 "event": event,
                 "event_date": event_date,
                 "farm": farm,
+                "lact": lact,
             }
-            for cow_id, etag, event, event_date, farm in disease_rows
+            for cow_id, etag, event, event_date, farm, lact in disease_rows
         ]
     )
     for record in kept:
         event_day = _disease_event_date(record)
         farm = record.get("farm")
         metric = _HOME_HERD_DISEASE_KEYS.get(record.get("event"))
-        if event_day is None or farm not in rows or metric is None or event_day < start_30:
+        if (
+            not isinstance(event_day, dt.date)
+            or farm not in health_30
+            or metric is None
+            or event_day < start_120
+            or not _is_cow_lact(record.get("lact"))
+        ):
             continue
-        rows[farm][metric] += 1
+        health_120[farm][metric] += 1
+        if event_day >= start_30:
+            health_30[farm][metric] += 1
+
+    for farm in farms:
+        for metric in _HOME_HEALTH_METRICS:
+            _apply_lower_count(rows[farm], metric, health_30[farm][metric], health_120[farm][metric])
 
     return {"farms": [rows[code] for code in farms]}

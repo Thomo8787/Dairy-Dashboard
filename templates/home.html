@@ -230,27 +230,36 @@
         <h3 class="home-farm-label">{{ farm.code }}</h3>
         <span class="home-herd-file-mark {{ 'ok' if file_ok else 'bad' }}" title="{{ file_status.title if file_status else 'No herd file imported' }}" aria-label="{{ file_status.aria if file_status else farm.code ~ ' has no herd file' }}">{% if file_ok %}✓{% else %}✕{% endif %}</span>
       </div>
+      <p class="home-row-label">Cows</p>
       <div class="home-widgets">
-        <a href="{{ url_for('events_deaths') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="mortality" aria-label="{{ farm.code }} mortality">
-          <p class="widget-kicker">Mortality</p>
+        {% for metric, label, href in [
+          ('mortality', 'Mortality', url_for('events_deaths') ~ '?farm=' ~ farm.code),
+          ('mastitis', 'Mastitis', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=MAST'),
+          ('lameness', 'Lameness', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=LAME'),
+          ('metritis', 'Metritis', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=METR'),
+          ('certs', 'Certs', url_for('events_sales') ~ '?farm=' ~ farm.code ~ '&reason=OFS'),
+        ] %}
+        <a href="{{ href }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="{{ metric }}" aria-label="{{ farm.code }} cow {{ label }}">
+          <p class="widget-kicker">{{ label }}</p>
           <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
+          <p class="widget-sub" title="120-day count ÷ 4 (average per 30 days)">—</p>
         </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=MAST" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="mastitis" aria-label="{{ farm.code }} mastitis">
-          <p class="widget-kicker">Mastitis</p>
+        {% endfor %}
+      </div>
+      <p class="home-row-label">Youngstock mortality</p>
+      <div class="home-widgets">
+        {% for metric, label in [
+          ('ys_0_2', '0-2 months'),
+          ('ys_2_6', '2-6 months'),
+          ('ys_6_12', '6-12 months'),
+          ('ys_12_plus', '12+ months'),
+        ] %}
+        <a href="{{ url_for('events_deaths') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="{{ metric }}" aria-label="{{ farm.code }} youngstock mortality {{ label }}">
+          <p class="widget-kicker">{{ label }}</p>
           <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
+          <p class="widget-sub" title="120-day count ÷ 4 (average per 30 days)">—</p>
         </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=LAME" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="lameness" aria-label="{{ farm.code }} lameness">
-          <p class="widget-kicker">Lameness</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
-        </a>
-        <a href="{{ url_for('events_disease') }}?farm={{ farm.code }}&amp;disease=METR" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="metritis" aria-label="{{ farm.code }} metritis">
-          <p class="widget-kicker">Metritis</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
-        </a>
+        {% endfor %}
       </div>
     </div>
     {% endfor %}
@@ -310,6 +319,15 @@
   const comparisonMetrics = {
     services: "services_avg_30d_120",
     days_to_first_service: "days_to_first_service_avg_120",
+    mortality: "mortality_avg_30d_120",
+    mastitis: "mastitis_avg_30d_120",
+    lameness: "lameness_avg_30d_120",
+    metritis: "metritis_avg_30d_120",
+    certs: "certs_avg_30d_120",
+    ys_0_2: "ys_0_2_avg_30d_120",
+    ys_2_6: "ys_2_6_avg_30d_120",
+    ys_6_12: "ys_6_12_avg_30d_120",
+    ys_12_plus: "ys_12_plus_avg_30d_120",
   };
 
   function formatWhole(value) {
