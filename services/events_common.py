@@ -2109,7 +2109,17 @@ _HOME_YOUNGSTOCK_METRICS = (
     "ys_2_6",
     "ys_6_12",
     "ys_12_plus",
+    "ys_cert_0_2",
+    "ys_cert_2_6",
+    "ys_cert_6_12",
+    "ys_cert_12_plus",
 )
+_YOUNGSTOCK_CERT_METRIC = {
+    "ys_0_2": "ys_cert_0_2",
+    "ys_2_6": "ys_cert_2_6",
+    "ys_6_12": "ys_cert_6_12",
+    "ys_12_plus": "ys_cert_12_plus",
+}
 _HOME_HEALTH_METRICS = _HOME_FARM_HEALTH_METRICS + _HOME_YOUNGSTOCK_METRICS
 
 
@@ -2345,6 +2355,13 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
                 health_120[farm]["certs"] += 1
                 if in_30:
                     health_30[farm]["certs"] += 1
+            elif lact == 0:
+                band = _youngstock_mortality_band(_coerce_date(bdat), event_day)
+                cert_metric = _YOUNGSTOCK_CERT_METRIC.get(band or "")
+                if cert_metric is not None:
+                    health_120[farm][cert_metric] += 1
+                    if in_30:
+                        health_30[farm][cert_metric] += 1
             continue
         if _is_tb_death(remark):
             continue

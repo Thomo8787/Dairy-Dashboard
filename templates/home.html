@@ -234,10 +234,10 @@
       <div class="home-widgets">
         {% for metric, label, href in [
           ('mortality', 'Mortality', url_for('events_deaths') ~ '?farm=' ~ farm.code),
+          ('certs', 'Certs', url_for('events_sales') ~ '?farm=' ~ farm.code ~ '&reason=OFS'),
           ('mastitis', 'Mastitis', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=MAST'),
           ('lameness', 'Lameness', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=LAME'),
           ('metritis', 'Metritis', url_for('events_disease') ~ '?farm=' ~ farm.code ~ '&disease=METR'),
-          ('certs', 'Certs', url_for('events_sales') ~ '?farm=' ~ farm.code ~ '&reason=OFS'),
           ('foot_trim', 'Foot trim', url_for('events_hooftrimming') ~ '?farm=' ~ farm.code),
         ] %}
         <a href="{{ href }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="{{ metric }}" aria-label="{{ farm.code }} cow {{ label }}">
@@ -250,7 +250,8 @@
     </div>
     {% endfor %}
     <div class="home-farm-block">
-      <h3 class="home-farm-label">Youngstock mortality</h3>
+      <h3 class="home-farm-label">Youngstock</h3>
+      <p class="home-row-label">Mortality</p>
       <div class="home-widgets">
         {% for metric, label in [
           ('ys_0_2', '0-2 months'),
@@ -259,6 +260,21 @@
           ('ys_12_plus', '12+ months'),
         ] %}
         <a href="{{ url_for('events_deaths') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="{{ metric }}" aria-label="Youngstock mortality {{ label }}">
+          <p class="widget-kicker">{{ label }}</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="120-day count ÷ 4 (average per 30 days)">—</p>
+        </a>
+        {% endfor %}
+      </div>
+      <p class="home-row-label">Certs</p>
+      <div class="home-widgets">
+        {% for metric, label in [
+          ('ys_cert_0_2', '0-2 months'),
+          ('ys_cert_2_6', '2-6 months'),
+          ('ys_cert_6_12', '6-12 months'),
+          ('ys_cert_12_plus', '12+ months'),
+        ] %}
+        <a href="{{ url_for('events_sales') }}?reason=OFS" class="home-widget status-loading" data-scope="youngstock" data-metric="{{ metric }}" aria-label="Youngstock certs {{ label }}">
           <p class="widget-kicker">{{ label }}</p>
           <p class="widget-title">—</p>
           <p class="widget-sub" title="120-day count ÷ 4 (average per 30 days)">—</p>
@@ -332,6 +348,10 @@
     ys_2_6: "ys_2_6_avg_30d_120",
     ys_6_12: "ys_6_12_avg_30d_120",
     ys_12_plus: "ys_12_plus_avg_30d_120",
+    ys_cert_0_2: "ys_cert_0_2_avg_30d_120",
+    ys_cert_2_6: "ys_cert_2_6_avg_30d_120",
+    ys_cert_6_12: "ys_cert_6_12_avg_30d_120",
+    ys_cert_12_plus: "ys_cert_12_plus_avg_30d_120",
   };
 
   function formatWhole(value) {
