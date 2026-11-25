@@ -1,0 +1,707 @@
+{% extends "base.html" %}
+
+{% block page_heading %}{{ page_heading }}{% endblock %}
+
+{% block extra_styles %}
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 2.5rem; padding: 0.45rem 0.4rem;
+      border: 2px solid var(--border); border-radius: 8px;
+      background: #f3f4f6; color: var(--muted);
+      font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+    }
+    .slicer-btn.selected { background: #e8eef5; border-color: #6b8cae; color: #1e3a5f; }
+    .slicer-btn[data-value="ALH"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="BNK"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .slicer-btn[data-value="SFR"].selected { background: #e8f5e9; border-color: #66bb6a; color: #1b5e20; }
+    .slicer-btn[data-value="PRK"].selected { background: #f3e5f5; border-color: #ab47bc; color: #6a1b9a; }
+    .slicer-btn[data-value="COF"].selected { background: #fff8e1; border-color: #ffb300; color: #e65100; }
+    .sync-btn {
+      width: 100%;
+      margin-top: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .sync-btn:disabled { opacity: 0.6; cursor: wait; }
+    .sync-meta {
+      margin: 0.35rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.5rem; }
+    .status-banner {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-size: 0.875rem;
+    }
+    .status-banner.warn { background: #fff7ed; border-color: #fdba74; color: #9a3412; }
+    .status-banner.error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+    .status-banner.ok { background: #f0fdf4; border-color: #86efac; color: #166534; }
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      gap: 0.75rem;
+    }
+    .count-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+      background: #fff;
+    }
+    .count-card .label { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+    .count-card .value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 0.15rem; }
+    .section-block h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+    .search-row { margin-bottom: 0.5rem; }
+    .search-row input {
+      width: 100%;
+      max-width: 22rem;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.875rem;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: min(40vh, 28rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .cts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+    .cts-table th,
+    .cts-table td {
+      padding: 0.4rem 0.55rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      white-space: nowrap;
+    }
+    .cts-table thead th {
+      position: sticky;
+      top: 0;
+      background: #f8fafc;
+      font-weight: 600;
+      color: var(--muted);
+      z-index: 1;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cts-table thead th:hover { color: var(--text); }
+    .cts-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    .cts-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    .cts-table tbody tr.row-overdue td {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .cts-table tbody tr.row-awaiting-cts td {
+      background: #f0fdf4;
+      color: #166534;
+    }
+    .pending-event-pill {
+      display: inline-block;
+      padding: 0.12rem 0.55rem;
+      border: 1px solid #93c5fd;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1e40af;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.35;
+      pointer-events: none;
+      cursor: default;
+      user-select: none;
+    }
+    .cts-table tbody tr.row-overdue td .pending-event-pill {
+      box-shadow: inset 0 0 0 1px #fca5a5;
+    }
+    .empty-state { color: var(--muted); padding: 1rem 0.25rem; font-size: 0.875rem; }
+    .help-note {
+      margin: 0.75rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+{% endblock %}
+
+{% block content %}
+<div class="page-layout">
+  <aside class="sidebar-column">
+    <div class="filter-panel">
+      <h2>Filters</h2>
+      <div class="filter-section">
+        <span class="section-label">Farm</span>
+        <div class="farm-slicer" id="farm-slicer">
+          {% for farm in farm_options %}
+          <button type="button" class="slicer-btn{% if loop.first %} selected{% endif %}" data-value="{{ farm }}">{{ farm }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="filter-section">
+        <span class="section-label">CTS sync</span>
+        {% if can_sync %}
+        <button type="button" class="sync-btn" id="sync-btn">Sync from CTS</button>
+        <p class="help-note">Pulls cattle on holding from BCMS, then shows only mismatches vs herd inventory.</p>
+        {% endif %}
+        <p class="sync-meta" id="cts-sync-meta">Last sync: —</p>
+      </div>
+      <div class="filter-section">
+        <span class="section-label">DC305 sync</span>
+        {% if can_dc305_sync %}
+        <button type="button" class="sync-btn" id="dc305-sync-btn">DC305 sync</button>
+        <p class="help-note">Imports the latest herd inventory CSVs from OneDrive (same as the inventory cron).</p>
+        {% endif %}
+        <p class="sync-meta" id="dc305-sync-meta">Last sync: —</p>
+      </div>
+    </div>
+  </aside>
+
+  <div class="content-panel">
+    <div id="status-banner" class="status-banner" hidden></div>
+    <p class="meta-line" id="meta-line">Loading…</p>
+    <div class="counts" id="counts"></div>
+
+    <section class="section-block">
+      <h3>On CTS, not in inventory <span id="cts-only-heading"></span></h3>
+      <div class="search-row">
+        <input type="search" id="search-cts-only" placeholder="Search ear tag…" autocomplete="off">
+      </div>
+      <div class="table-wrap">
+        <table class="cts-table">
+          <thead>
+            <tr id="cts-only-head">
+              <th data-sort="farm">Farm</th>
+              <th data-sort="etag_tail">Ear tag</th>
+              <th data-sort="breed">Breed</th>
+              <th data-sort="sex">Sex</th>
+              <th data-sort="dob">DOB</th>
+              <th data-sort="on_date">On date</th>
+              <th data-sort="age_months">Age (m)</th>
+              <th data-sort="age_days">Age (d)</th>
+              <th data-sort="exit_event">Exit</th>
+              <th data-sort="days_since_exit">Days since exit</th>
+            </tr>
+          </thead>
+          <tbody id="cts-only-body"></tbody>
+        </table>
+      </div>
+      <p class="empty-state" id="cts-only-empty" hidden>No CTS-only animals.</p>
+      <p class="help-note">Green rows are already accepted on Record Movements and awaiting CTS holding refresh. Red rows are overdue.</p>
+    </section>
+
+    <section class="section-block">
+      <h3>In inventory, not on CTS <span id="inv-only-heading"></span></h3>
+      <div class="search-row">
+        <input type="search" id="search-inv-only" placeholder="Search ear tag or cow ID…" autocomplete="off">
+      </div>
+      <div class="table-wrap">
+        <table class="cts-table">
+          <thead>
+            <tr id="inv-only-head">
+              <th data-sort="farm">Farm</th>
+              <th data-sort="etag_tail">Ear tag</th>
+              <th data-sort="cow_id">Cow ID</th>
+              <th data-sort="breed">Breed</th>
+              <th data-sort="gender">Gender</th>
+              <th data-sort="category">Category</th>
+              <th data-sort="dob">DOB</th>
+              <th data-sort="age_months">Age (m)</th>
+              <th data-sort="age_days">Age (d)</th>
+            </tr>
+          </thead>
+          <tbody id="inv-only-body"></tbody>
+        </table>
+      </div>
+      <p class="empty-state" id="inv-only-empty" hidden>No inventory-only animals.</p>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const CAN_SYNC = {{ can_sync | tojson }};
+  const CAN_DC305_SYNC = {{ can_dc305_sync | tojson }};
+  const FARM_OPTIONS = {{ farm_options | tojson }};
+  let farm = FARM_OPTIONS[0] || "ALH";
+  let payload = null;
+
+  const farmSlicer = document.getElementById("farm-slicer");
+  const syncBtn = document.getElementById("sync-btn");
+  const dc305SyncBtn = document.getElementById("dc305-sync-btn");
+  const ctsSyncMeta = document.getElementById("cts-sync-meta");
+  const dc305SyncMeta = document.getElementById("dc305-sync-meta");
+  const statusBanner = document.getElementById("status-banner");
+  const metaLine = document.getElementById("meta-line");
+  const countsEl = document.getElementById("counts");
+
+  const searchCts = document.getElementById("search-cts-only");
+  const searchInv = document.getElementById("search-inv-only");
+
+  const sortState = {
+    cts: { key: "etag_tail", dir: 1 },
+    inv: { key: "etag_tail", dir: 1 },
+  };
+
+  function farmParams() {
+    return `farm=${encodeURIComponent(farm)}`;
+  }
+
+  function setBanner(kind, text) {
+    if (!text) {
+      statusBanner.hidden = true;
+      statusBanner.textContent = "";
+      return;
+    }
+    statusBanner.hidden = false;
+    statusBanner.className = `status-banner ${kind || ""}`.trim();
+    statusBanner.textContent = text;
+  }
+
+  function esc(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function fmtDateUk(iso) {
+    if (!iso) return "";
+    const part = String(iso).split("T")[0];
+    const [y, m, d] = part.split("-");
+    if (!y || !m || !d) return String(iso);
+    return `${d}/${m}/${y.slice(-2)}`;
+  }
+
+  function pendingEventPill() {
+    return '<span class="pending-event-pill">Pending event</span>';
+  }
+
+  function cellValue(row, key) {
+    if (key === "exit_event") {
+      if (row.awaiting_cts) {
+        const base = row.exit_event
+          ? esc(row.exit_event)
+          : (row.awaiting_events ? pendingEventPill() : "");
+        return base ? `${base} · awaiting CTS` : "awaiting CTS";
+      }
+      if (row.awaiting_events && !row.exit_event) return pendingEventPill();
+      return row.exit_event == null ? "" : esc(row.exit_event);
+    }
+    if (key === "dob" || key === "on_date") return fmtDateUk(row[key]);
+    if (row[key] == null) return "";
+    return row[key];
+  }
+
+  function formatSyncStamp(iso) {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+      return String(iso).replace("T", " ").slice(0, 19);
+    }
+    return d.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function selectedFarmResult() {
+    const results = (payload && payload.results) || [];
+    return results.find((r) => r.farm === farm) || results[0] || null;
+  }
+
+  function updateSyncMeta() {
+    const row = selectedFarmResult();
+    if (ctsSyncMeta) {
+      ctsSyncMeta.textContent = `Last sync: ${formatSyncStamp(row && row.synced_at)}`;
+    }
+    if (dc305SyncMeta) {
+      dc305SyncMeta.textContent = `Last sync: ${formatSyncStamp(
+        row && row.inventory_imported_at
+      )}`;
+    }
+  }
+
+  function aggregate() {
+    const results = (payload && payload.results) || [];
+    const agg = {
+      cts_count: 0,
+      inventory_count: 0,
+      matched_count: 0,
+      cts_only_count: 0,
+      inventory_only_count: 0,
+      synced_at: null,
+      inventory_imported_at: null,
+      cts_only: [],
+      inventory_only: [],
+    };
+    for (const r of results) {
+      agg.cts_count += r.cts_count || 0;
+      agg.inventory_count += r.inventory_count || 0;
+      agg.matched_count += r.matched_count || 0;
+      agg.cts_only_count += r.cts_only_count || 0;
+      agg.inventory_only_count += r.inventory_only_count || 0;
+      if (r.synced_at && (!agg.synced_at || r.synced_at > agg.synced_at)) {
+        agg.synced_at = r.synced_at;
+      }
+      if (
+        r.inventory_imported_at &&
+        (!agg.inventory_imported_at || r.inventory_imported_at > agg.inventory_imported_at)
+      ) {
+        agg.inventory_imported_at = r.inventory_imported_at;
+      }
+      for (const row of r.cts_only || []) agg.cts_only.push({ ...row, farm: r.farm });
+      for (const row of r.inventory_only || []) agg.inventory_only.push({ ...row, farm: r.farm });
+    }
+    return agg;
+  }
+
+  function renderCounts(agg) {
+    const cards = [
+      ["On CTS only", agg.cts_only_count],
+      ["Inventory only", agg.inventory_only_count],
+      ["Matched", agg.matched_count],
+    ];
+    countsEl.innerHTML = cards.map(([label, value]) => `
+      <div class="count-card">
+        <div class="label">${esc(label)}</div>
+        <div class="value">${esc(value)}</div>
+      </div>
+    `).join("");
+  }
+
+  function filterRows(rows, q, fields) {
+    const needle = (q || "").trim().toUpperCase();
+    if (!needle) return rows;
+    return rows.filter((row) =>
+      fields.some((f) => String(row[f] || "").toUpperCase().includes(needle))
+    );
+  }
+
+  function etagTail(etag) {
+    const digits = String(etag ?? "").replace(/\D/g, "");
+    if (!digits) return Number.POSITIVE_INFINITY;
+    return Number(digits.slice(-5));
+  }
+
+  function sortRows(rows, state) {
+    const { key, dir } = state;
+    const numeric = key === "age_months" || key === "age_days" || key === "days_since_exit" || key === "etag_tail";
+    return [...rows].sort((a, b) => {
+      let av;
+      let bv;
+      if (key === "etag_tail") {
+        av = etagTail(a.etag);
+        bv = etagTail(b.etag);
+      } else {
+        av = a[key];
+        bv = b[key];
+      }
+      if (numeric) {
+        av = av == null || av === "" ? Number.NEGATIVE_INFINITY : Number(av);
+        bv = bv == null || bv === "" ? Number.NEGATIVE_INFINITY : Number(bv);
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        return 0;
+      }
+      av = String(av ?? "").toUpperCase();
+      bv = String(bv ?? "").toUpperCase();
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+
+  function updateSortHeaders(headId, state) {
+    const head = document.getElementById(headId);
+    if (!head) return;
+    head.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.classList.remove("sorted-asc", "sorted-desc");
+      if (th.dataset.sort === state.key) {
+        th.classList.add(state.dir > 0 ? "sorted-asc" : "sorted-desc");
+      }
+    });
+  }
+
+  function isCtsOnlyOverdue(row) {
+    if (row.awaiting_cts) return false;
+    // Pending event: no SOLD/DIED yet — not red for ≤1 day.
+    if (row.awaiting_events) {
+      const lag = row.awaiting_events_days;
+      if (lag == null || lag === "") return false;
+      return Number(lag) >= 2;
+    }
+    const days = row.days_since_exit;
+    if (days == null || days === "") return true;
+    return Number(days) >= 3;
+  }
+
+  function isInventoryOnlyOverdue(row) {
+    if (row.awaiting_cts) return false;
+    const days = row.age_days;
+    if (days == null || days === "") return false;
+    return Number(days) > 3;
+  }
+
+  function rowClass(row, isOverdue) {
+    if (row && row.awaiting_cts) return "row-awaiting-cts";
+    if (typeof isOverdue === "function" && isOverdue(row)) return "row-overdue";
+    return "";
+  }
+
+  function cellHtml(row, key) {
+    if (key === "exit_event") return cellValue(row, key);
+    return esc(cellValue(row, key));
+  }
+
+  function renderTable(tbodyId, emptyId, headingId, rows, columns, count, isOverdue) {
+    const tbody = document.getElementById(tbodyId);
+    const empty = document.getElementById(emptyId);
+    const heading = document.getElementById(headingId);
+    heading.textContent = `(${count})`;
+    if (!rows.length) {
+      tbody.innerHTML = "";
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    tbody.innerHTML = rows.map((row) => {
+      const clsName = rowClass(row, isOverdue);
+      const cls = clsName ? ` class="${clsName}"` : "";
+      return `<tr${cls}>${columns.map((c) => `<td>${cellHtml(row, c)}</td>`).join("")}</tr>`;
+    }).join("");
+  }
+
+  function renderTables() {
+    const agg = aggregate();
+    updateSyncMeta();
+    renderCounts(agg);
+    const syncBit = agg.synced_at
+      ? `Last CTS snapshot: ${formatSyncStamp(agg.synced_at)}`
+      : "No CTS snapshot stored yet — run Sync from CTS.";
+    metaLine.textContent = `${syncBit} · CTS ${agg.cts_count} · Inventory ${agg.inventory_count}`;
+
+    const ctsRows = sortRows(
+      filterRows(agg.cts_only, searchCts.value, ["etag", "breed", "farm"]),
+      sortState.cts
+    );
+    updateSortHeaders("cts-only-head", sortState.cts);
+    renderTable(
+      "cts-only-body", "cts-only-empty", "cts-only-heading",
+      ctsRows,
+      ["farm", "etag", "breed", "sex", "dob", "on_date", "age_months", "age_days", "exit_event", "days_since_exit"],
+      agg.cts_only_count,
+      isCtsOnlyOverdue
+    );
+
+    const invRows = sortRows(
+      filterRows(agg.inventory_only, searchInv.value, ["etag", "cow_id", "farm", "breed", "category"]),
+      sortState.inv
+    );
+    updateSortHeaders("inv-only-head", sortState.inv);
+    renderTable(
+      "inv-only-body", "inv-only-empty", "inv-only-heading",
+      invRows,
+      ["farm", "etag", "cow_id", "breed", "gender", "category", "dob", "age_months", "age_days"],
+      agg.inventory_only_count,
+      isInventoryOnlyOverdue
+    );
+  }
+
+  function bindSortHeaders(headId, stateKey) {
+    const head = document.getElementById(headId);
+    if (!head) return;
+    head.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        const state = sortState[stateKey];
+        if (state.key === key) state.dir *= -1;
+        else {
+          state.key = key;
+          state.dir = 1;
+        }
+        renderTables();
+      });
+    });
+  }
+
+  async function loadReconcile() {
+    metaLine.textContent = "Loading…";
+    try {
+      const qs = farmParams();
+      const res = await fetch(`/api/cts/reconcile${qs ? `?${qs}` : ""}`);
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        setBanner("error", detail.detail || `Failed to load reconcile (${res.status})`);
+        metaLine.textContent = "Could not load reconcile data.";
+        return;
+      }
+      payload = await res.json();
+      const status = payload.status || {};
+      const warnings = [];
+      if (!status.ddts_configured) {
+        warnings.push("CTS DDTS credentials are not configured.");
+      }
+      const farms = status.farms || {};
+      if (farms[farm] === false) {
+        const parts = (status.farm_parts && status.farm_parts[farm]) || {};
+        const missing = ["username", "password", "holding"].filter((k) => !parts[k]);
+        warnings.push(
+          missing.length
+            ? `${farm}: missing ${missing.join(", ")} in env (CTS_CTWS_*_${farm} / CTS_HOLDING_${farm}). Redeploy after setting.`
+            : `${farm}: CTWS / holding not configured.`
+        );
+      }
+      if (warnings.length) setBanner("warn", warnings.join(" "));
+      else setBanner("", "");
+      renderTables();
+    } catch (err) {
+      setBanner("error", err.message || "Failed to load reconcile");
+      metaLine.textContent = "Could not load reconcile data.";
+    }
+  }
+
+  async function runSync() {
+    if (!CAN_SYNC || !syncBtn) return;
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Syncing…";
+    setBanner("", "");
+    try {
+      const qs = farmParams();
+      const res = await fetch(`/api/cts/sync${qs ? `?${qs}` : ""}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner("error", data.detail || `Sync failed (${res.status})`);
+        return;
+      }
+      payload = data;
+      const warn = (data.warnings || []).join(" ");
+      if (!data.ok) {
+        setBanner("error", warn || "Sync completed with errors.");
+      } else if (warn) {
+        setBanner("warn", warn);
+      } else {
+        setBanner("ok", "CTS sync complete.");
+      }
+      renderTables();
+    } catch (err) {
+      setBanner("error", err.message || "Sync failed");
+    } finally {
+      syncBtn.disabled = false;
+      syncBtn.textContent = "Sync from CTS";
+    }
+  }
+
+  function formatDc305Result(data) {
+    const imported = data.farms_imported || [];
+    const skipped = data.farms_skipped || [];
+    const counts = data.farm_counts || {};
+    if (data.message) return data.message;
+    const imported = data.farms_imported || [];
+    const skipped = data.farms_skipped || [];
+    const counts = data.farm_counts || {};
+    const countBit = FARM_OPTIONS.map((f) => `${f} ${counts[f] ?? 0}`).join(", ");
+    if (data.skipped) {
+      return `DC305 inventory unchanged (${countBit}).`;
+    }
+    const bits = [];
+    if (imported.length) bits.push(`updated ${imported.join(", ")}`);
+    if (skipped.length) bits.push(`skipped ${skipped.join(", ")}`);
+    if (data.rows_imported != null) {
+      bits.push(`${Number(data.rows_imported).toLocaleString("en-GB")} rows`);
+    }
+    if (countBit) bits.push(countBit);
+    return bits.length
+      ? `DC305 sync complete — ${bits.join(" · ")}.`
+      : "DC305 sync started.";
+  }
+
+  async function runDc305Sync() {
+    if (!CAN_DC305_SYNC || !dc305SyncBtn) return;
+    dc305SyncBtn.disabled = true;
+    dc305SyncBtn.textContent = "Syncing…";
+    if (syncBtn) syncBtn.disabled = true;
+    setBanner("", "");
+    try {
+      const res = await fetch("/api/cts/dc305-sync", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data.detail || data.message || `DC305 sync failed (${res.status})`;
+        setBanner("error", typeof detail === "string" ? detail : JSON.stringify(detail));
+        return;
+      }
+      setBanner("ok", formatDc305Result(data));
+      await loadReconcile();
+    } catch (err) {
+      setBanner("error", err.message || "DC305 sync failed");
+    } finally {
+      dc305SyncBtn.disabled = false;
+      dc305SyncBtn.textContent = "DC305 sync";
+      if (syncBtn) syncBtn.disabled = false;
+    }
+  }
+
+  farmSlicer.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".slicer-btn");
+    if (!btn) return;
+    farm = btn.dataset.value;
+    farmSlicer.querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.toggle("selected", b === btn);
+    });
+    loadReconcile();
+  });
+
+  if (syncBtn) syncBtn.addEventListener("click", runSync);
+  if (dc305SyncBtn) dc305SyncBtn.addEventListener("click", runDc305Sync);
+  searchCts.addEventListener("input", renderTables);
+  searchInv.addEventListener("input", renderTables);
+  bindSortHeaders("cts-only-head", "cts");
+  bindSortHeaders("inv-only-head", "inv");
+
+  loadReconcile();
+})();
+</script>
+{% endblock %}

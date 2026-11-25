@@ -170,6 +170,26 @@ NAV_ITEMS = [
         ],
     },
     {
+        "id": "bcms",
+        "label": "BCMS",
+        "endpoint": "bcms_cts_reconcile",
+        "permission": "perm_bcms",
+        "children": [
+            {
+                "id": "bcms_cts_reconcile",
+                "label": "CTS Reconcile",
+                "endpoint": "bcms_cts_reconcile",
+                "permission": "perm_bcms",
+            },
+            {
+                "id": "bcms_record_movements",
+                "label": "Record Movements",
+                "endpoint": "bcms_record_movements",
+                "permission": "perm_bcms",
+            },
+        ],
+    },
+    {
         "id": "sensehub",
         "label": "SenseHub",
         "endpoint": "sensehub",

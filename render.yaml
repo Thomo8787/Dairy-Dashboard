@@ -58,6 +58,23 @@ services:
         sync: false
       - key: SENSEHUB_FARM_ID
         sync: false
+      # BCMS CTS / DEFRA DDTS + per-farm CTWS (set holdings for farms that report)
+      - key: CTS_DDTS_USERNAME
+        sync: false
+      - key: CTS_DDTS_PASSWORD
+        sync: false
+      - key: CTS_CTWS_USERNAME_ALH
+        sync: false
+      - key: CTS_CTWS_PASSWORD_ALH
+        sync: false
+      - key: CTS_HOLDING_ALH
+        sync: false
+      - key: CTS_CTWS_USERNAME_BNK
+        sync: false
+      - key: CTS_CTWS_PASSWORD_BNK
+        sync: false
+      - key: CTS_HOLDING_BNK
+        sync: false
       - key: MULLER_USERNAME
         sync: false
       - key: MULLER_PASSWORD

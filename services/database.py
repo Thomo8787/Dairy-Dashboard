@@ -92,11 +92,13 @@ class User(Base):
     perm_genetics = Column(Boolean, nullable=False, default=False)
     perm_milk_quality = Column(Boolean, nullable=False, default=False)
     perm_sensehub = Column(Boolean, nullable=False, default=False)
+    perm_bcms = Column(Boolean, nullable=False, default=False)
     perm_sync_outlook = Column(Boolean, nullable=False, default=False)
     perm_sync_onedrive = Column(Boolean, nullable=False, default=False)
     perm_sync_dataflow = Column(Boolean, nullable=False, default=False)
     perm_sync_sensehub = Column(Boolean, nullable=False, default=False)
     perm_sync_sensehub_cull = Column(Boolean, nullable=False, default=False)
+    perm_sync_cts = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -535,6 +537,70 @@ class StockPurchaseAnimal(Base):
     )
 
 
+class CtsSyncRun(Base):
+    """One CTS GetHolding sync attempt for a farm."""
+
+    __tablename__ = "cts_sync_runs"
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), index=True)
+    status = Column(String(32), default="running", index=True)
+    animal_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    source = Column(String(32), default="manual")
+    started_at = Column(DateTime, server_default=func.now(), index=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class CtsOnHolding(Base):
+    """Latest CTS cattle-on-holding snapshot row for a farm."""
+
+    __tablename__ = "cts_on_holding"
+    __table_args__ = (
+        UniqueConstraint("farm", "etag", name="uq_cts_on_holding_farm_etag"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), index=True)
+    etag = Column(String(64), index=True)
+    breed = Column(String(16), default="")
+    sex = Column(String(8), default="")
+    dob = Column(Date, nullable=True)
+    on_date = Column(Date, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), index=True)
+    sync_run_id = Column(
+        Integer,
+        ForeignKey("cts_sync_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+
+class CtsReportedMovement(Base):
+    """Movements/births already submitted (or acknowledged) to BCMS."""
+
+    __tablename__ = "cts_reported_movements"
+    __table_args__ = (
+        UniqueConstraint(
+            "farm",
+            "movement_type",
+            "etag",
+            "event_date",
+            name="uq_cts_reported_movement",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), index=True)
+    movement_type = Column(String(16), index=True)
+    etag = Column(String(64), index=True)
+    event_date = Column(Date, index=True)
+    status = Column(String(32), default="sent", index=True)
+    receipt = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    reported_at = Column(DateTime, server_default=func.now(), index=True)
+
+
 class SenseHubReportSnapshot(Base):
     """Latest SenseHub report snapshot imported from st.scrdairy.com."""
 
@@ -950,8 +1016,10 @@ def _ensure_user_permission_columns(engine) -> None:
         "perm_genetics": "ALTER TABLE users ADD COLUMN perm_genetics BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_milk_quality": "ALTER TABLE users ADD COLUMN perm_milk_quality BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_sensehub": "ALTER TABLE users ADD COLUMN perm_sensehub BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_bcms": "ALTER TABLE users ADD COLUMN perm_bcms BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_sync_sensehub": "ALTER TABLE users ADD COLUMN perm_sync_sensehub BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_sync_sensehub_cull": "ALTER TABLE users ADD COLUMN perm_sync_sensehub_cull BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_sync_cts": "ALTER TABLE users ADD COLUMN perm_sync_cts BOOLEAN NOT NULL DEFAULT FALSE",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():

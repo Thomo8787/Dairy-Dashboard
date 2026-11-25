@@ -215,6 +215,7 @@ from services.nml_manual import (
     update_collection_load,
 )
 from services.navigation import filter_nav_items, parent_nav_id
+from services.bcms_routes import register_bcms_routes
 from services.sensehub_routes import register_sensehub_routes
 from services.parlour_scheduler import start_parlour_hourly_sync
 from services.parlour_sync import (
@@ -351,6 +352,7 @@ def require_login():
             or request.endpoint.startswith("milk_quality_api")
             or request.endpoint.startswith("stock_api")
             or request.endpoint.startswith("api_sensehub")
+            or request.endpoint.startswith("api_cts")
             or request.endpoint.startswith("genetics_api")
         ):
             return jsonify({"error": "Authentication required."}), 401
@@ -2833,6 +2835,7 @@ def sync_herd_exports():
 
 
 register_sensehub_routes(app, _page_context)
+register_bcms_routes(app, _page_context)
 
 
 @app.route("/health")

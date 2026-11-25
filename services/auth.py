@@ -23,11 +23,13 @@ PERMISSION_KEYS = (
     "perm_genetics",
     "perm_milk_quality",
     "perm_sensehub",
+    "perm_bcms",
     "perm_sync_outlook",
     "perm_sync_onedrive",
     "perm_sync_dataflow",
     "perm_sync_sensehub",
     "perm_sync_sensehub_cull",
+    "perm_sync_cts",
 )
 
 PERMISSION_LABELS = {
@@ -39,11 +41,13 @@ PERMISSION_LABELS = {
     "perm_genetics": "Genetics",
     "perm_milk_quality": "Milk Quality",
     "perm_sensehub": "SenseHub",
+    "perm_bcms": "BCMS",
     "perm_sync_outlook": "Sync Outlook",
     "perm_sync_onedrive": "Sync OneDrive",
     "perm_sync_dataflow": "Sync DataFlow",
     "perm_sync_sensehub": "SenseHub — refresh reports",
     "perm_sync_sensehub_cull": "SenseHub — cull Tags To Remove",
+    "perm_sync_cts": "CTS — sync / send movements",
 }
 
 PUBLIC_ENDPOINTS = {
@@ -305,6 +309,7 @@ def first_allowed_endpoint(user: User) -> str:
         ("perm_genetics", "genetics"),
         ("perm_milk_quality", "milk_quality"),
         ("perm_sensehub", "sensehub"),
+        ("perm_bcms", "bcms_cts_reconcile"),
     )
     for perm, endpoint in mapping:
         if user_has_permission(user, perm):
@@ -363,9 +368,11 @@ class PermissionContext:
         "sensehub.import": "perm_sync_sensehub",
         "sensehub.cull": "perm_sync_sensehub_cull",
         "office_admin.sales_payment": "perm_office",
+        "cts.sync": "perm_sync_cts",
     }
     _PAGE_MAP = {
         "sensehub": "perm_sensehub",
+        "bcms": "perm_bcms",
     }
 
     def __init__(self, user: User | None) -> None:

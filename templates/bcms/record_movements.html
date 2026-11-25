@@ -1,0 +1,871 @@
+{% extends "base.html" %}
+
+{% block page_heading %}{{ page_heading }}{% endblock %}
+
+{% block extra_styles %}
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .content-panel { min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+    .filter-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .slicer-btn {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 2.5rem; padding: 0.45rem 0.4rem;
+      border: 2px solid var(--border); border-radius: 8px;
+      background: #f3f4f6; color: var(--muted);
+      font-size: 0.8125rem; font-weight: 600; cursor: pointer;
+    }
+    .slicer-btn.selected { background: #e8eef5; border-color: #6b8cae; color: #1e3a5f; }
+    .slicer-btn[data-value="ALH"].selected { background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f; }
+    .slicer-btn[data-value="BNK"].selected { background: #ffecd9; border-color: #ffb366; color: #b45309; }
+    .slicer-btn[data-value="SFR"].selected { background: #e8f5e9; border-color: #66bb6a; color: #1b5e20; }
+    .slicer-btn[data-value="PRK"].selected { background: #f3e5f5; border-color: #ab47bc; color: #6a1b9a; }
+    .slicer-btn[data-value="COF"].selected { background: #fff8e1; border-color: #ffb300; color: #e65100; }
+    .send-btn {
+      width: 100%;
+      margin-top: 0.5rem;
+      padding: 0.65rem 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .send-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .preview-btn {
+      width: 100%;
+      margin-top: 0.45rem;
+      padding: 0.5rem 0.65rem;
+      font-weight: 600;
+      font-size: 0.8125rem;
+      cursor: pointer;
+    }
+    .preview-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.5rem; }
+    .status-banner {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-size: 0.875rem;
+    }
+    .status-banner.warn { background: #fff7ed; border-color: #fdba74; color: #9a3412; }
+    .status-banner.error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+    .status-banner.ok { background: #f0fdf4; border-color: #86efac; color: #166534; }
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+      gap: 0.75rem;
+    }
+    .count-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+      background: #fff;
+    }
+    .count-card .label { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+    .count-card .value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 0.15rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .search-row input {
+      width: 100%;
+      max-width: 22rem;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.875rem;
+    }
+    .select-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .select-actions button {
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: min(70vh, 40rem);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .cts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+    .cts-table th,
+    .cts-table td {
+      padding: 0.4rem 0.55rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      white-space: nowrap;
+    }
+    .cts-table thead th {
+      position: sticky;
+      top: 0;
+      background: #f8fafc;
+      font-weight: 600;
+      color: var(--muted);
+      z-index: 1;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cts-table thead th:hover { color: var(--text); }
+    .cts-table thead th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    .cts-table thead th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    .cts-table thead th.col-check,
+    .cts-table td.col-check {
+      width: 2rem;
+      cursor: default;
+    }
+    .type-pill {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .type-birth { background: #dcfce7; color: #166534; }
+    .type-sale { background: #dbeafe; color: #1e40af; }
+    .type-death { background: #fee2e2; color: #991b1b; }
+    .type-move_on { background: #ffedd5; color: #9a3412; }
+    .cts-table tbody tr.row-overdue td {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .cts-table tbody tr.row-overdue td .type-pill {
+      box-shadow: inset 0 0 0 1px #fca5a5;
+    }
+    .cts-table tbody tr.row-warning td {
+      background: #fefce8;
+      color: #854d0e;
+    }
+    .cts-table tbody tr.row-warning td .type-pill {
+      box-shadow: inset 0 0 0 1px #fde68a;
+    }
+    .cts-table tbody tr.row-compliant td {
+      background: #ecfdf5;
+      color: #166534;
+    }
+    .cts-table tbody tr.row-compliant td .type-pill {
+      box-shadow: inset 0 0 0 1px #6ee7b7;
+    }
+    .empty-state { color: var(--muted); padding: 1rem 0.25rem; font-size: 0.875rem; }
+    .help-note {
+      margin: 0.75rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .view-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+    .view-tab {
+      padding: 0.45rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .view-tab.active {
+      background: #1e3a5f;
+      border-color: #1e3a5f;
+      color: #fff;
+    }
+{% endblock %}
+
+{% block content %}
+<div class="page-layout">
+  <aside class="sidebar-column">
+    <div class="filter-panel">
+      <h2>Filters</h2>
+      <div class="filter-section">
+        <span class="section-label">Farm</span>
+        <div class="farm-slicer" id="farm-slicer">
+          {% for farm in farm_options %}
+          <button type="button" class="slicer-btn" data-value="{{ farm }}">{{ farm }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="filter-section" id="bcms-actions">
+        <span class="section-label">BCMS</span>
+        {% if can_send %}
+        <button type="button" class="send-btn" id="send-btn" disabled>Send To BCMS</button>
+        {% endif %}
+        <button type="button" class="preview-btn" id="preview-births-btn" disabled>Preview Births XML</button>
+        <button type="button" class="preview-btn" id="preview-movements-btn" disabled>Preview Movements XML</button>
+        <p class="help-note" id="help-note">Preview downloads RegBirths / RegMovs XML for the selection (password redacted). Accepted sends move to Awaiting CTS, then to Archive once CTS cattle-on-holding confirms them. If still unmatched after the next UK-day CTS sync, they are marked failed and return here to retry.</p>
+      </div>
+    </div>
+  </aside>
+
+  <div class="content-panel">
+    <div id="status-banner" class="status-banner" hidden></div>
+    <div class="view-tabs" role="tablist" aria-label="Record movements list">
+      <button type="button" class="view-tab active" data-mode="pending" role="tab" aria-selected="true">Pending</button>
+      <button type="button" class="view-tab" data-mode="awaiting" role="tab" aria-selected="false">Awaiting CTS</button>
+      <button type="button" class="view-tab" data-mode="archive" role="tab" aria-selected="false">Archive</button>
+    </div>
+    <p class="meta-line" id="meta-line">Loading…</p>
+    <div class="counts" id="counts"></div>
+
+    <div class="toolbar">
+      <div class="search-row">
+        <input type="search" id="search-rows" placeholder="Search Ear Tag, Cow ID, Type…" autocomplete="off">
+      </div>
+      <div class="select-actions" id="select-actions">
+        <button type="button" id="select-all-btn">Select all</button>
+        <button type="button" id="select-none-btn">Clear</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="cts-table">
+        <thead>
+          <tr id="movements-head"></tr>
+        </thead>
+        <tbody id="movements-body"></tbody>
+      </table>
+    </div>
+    <p class="empty-state" id="movements-empty" hidden>No pending movements for this farm.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const CAN_SEND = {{ can_send | tojson }};
+  const FARM_OPTIONS = {{ farm_options | tojson }};
+  const farmParam = (new URLSearchParams(window.location.search).get("farm") || "").toUpperCase();
+  let farm = FARM_OPTIONS.includes(farmParam) ? farmParam : (FARM_OPTIONS[0] || "ALH");
+  let mode = "pending"; // pending | awaiting | archive
+  let payload = null;
+  const selected = new Set();
+  const sortState = { key: "event_date", dir: 1 };
+
+  const TYPE_LABELS = {
+    birth: "Birth",
+    sale: "Sale",
+    death: "Death",
+    move_on: "Move On",
+  };
+
+  const farmSlicer = document.getElementById("farm-slicer");
+  const bcmsActions = document.getElementById("bcms-actions");
+  const selectActions = document.getElementById("select-actions");
+  const helpNote = document.getElementById("help-note");
+  const sendBtn = document.getElementById("send-btn");
+  const previewBirthsBtn = document.getElementById("preview-births-btn");
+  const previewMovementsBtn = document.getElementById("preview-movements-btn");
+  const statusBanner = document.getElementById("status-banner");
+  const metaLine = document.getElementById("meta-line");
+  const countsEl = document.getElementById("counts");
+  const searchInput = document.getElementById("search-rows");
+  const headRow = document.getElementById("movements-head");
+  const tbody = document.getElementById("movements-body");
+  const emptyEl = document.getElementById("movements-empty");
+
+  function isPending() {
+    return mode === "pending";
+  }
+
+  function isAwaiting() {
+    return mode === "awaiting";
+  }
+
+  function isArchive() {
+    return mode === "archive";
+  }
+
+  function isReadOnlyList() {
+    return !isPending();
+  }
+
+  function setBanner(kind, text) {
+    if (!text) {
+      statusBanner.hidden = true;
+      statusBanner.textContent = "";
+      return;
+    }
+    statusBanner.hidden = false;
+    statusBanner.className = `status-banner ${kind || ""}`.trim();
+    statusBanner.textContent = text;
+  }
+
+  function esc(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function fmtDateUk(iso) {
+    if (!iso) return "";
+    const part = String(iso).split("T")[0].split(" ")[0];
+    const [y, m, d] = part.split("-");
+    if (!y || !m || !d) return String(iso);
+    return `${d}/${m}/${y.slice(-2)}`;
+  }
+
+  function typeLabel(type) {
+    return TYPE_LABELS[type] || type || "";
+  }
+
+  // UK BCMS: births within 17 days; sales / on-movements within 3 days; deaths within 7 days.
+  const REPORTING_DEADLINE_DAYS = {
+    birth: 17,
+    sale: 3,
+    death: 7,
+    move_on: 3,
+  };
+
+  function isOverdue(row) {
+    const days = row.days_since_event;
+    if (days == null || days === "") return false;
+    const limit = REPORTING_DEADLINE_DAYS[row.movement_type];
+    if (limit == null) return false;
+    return Number(days) > limit;
+  }
+
+  function isWarning(row) {
+    if (isOverdue(row)) return false;
+    const days = row.days_since_event;
+    if (days == null || days === "") return false;
+    const n = Number(days);
+    if (!Number.isFinite(n)) return false;
+    if (row.movement_type === "birth") return n >= 7;
+    if (row.movement_type === "sale" || row.movement_type === "move_on") return n === 3;
+    if (row.movement_type === "death") return n === 6 || n === 7;
+    return false;
+  }
+
+  function rowUrgency(row) {
+    if (isOverdue(row)) {
+      return {
+        className: "row-overdue",
+        title: "Past UK BCMS reporting deadline",
+      };
+    }
+    if (isWarning(row)) {
+      return {
+        className: "row-warning",
+        title: "Approaching UK BCMS reporting deadline",
+      };
+    }
+    return null;
+  }
+
+  function parseIsoDateOnly(value) {
+    if (!value) return null;
+    const part = String(value).split("T")[0].split(" ")[0];
+    const [y, m, d] = part.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+
+  /** Days from event date to BCMS send date (archive compliance). */
+  function reportingLagDays(row) {
+    const eventDate = parseIsoDateOnly(row.event_date);
+    const sentDate = parseIsoDateOnly(row.reported_at);
+    if (!eventDate || !sentDate) return null;
+    const ms = sentDate.getTime() - eventDate.getTime();
+    return Math.round(ms / 86400000);
+  }
+
+  /** Archive: "ok" within deadline, "late" if over, null if unknown. */
+  function archiveCompliance(row) {
+    const lag = reportingLagDays(row);
+    const limit = REPORTING_DEADLINE_DAYS[row.movement_type];
+    if (lag == null || limit == null) return null;
+    return lag > limit ? "late" : "ok";
+  }
+
+  function filterRows(rows) {
+    const needle = (searchInput.value || "").trim().toUpperCase();
+    if (!needle) return rows;
+    return rows.filter((row) => {
+      const hay = [
+        row.movement_type,
+        typeLabel(row.movement_type),
+        row.etag,
+        row.cow_id,
+        row.breed,
+        row.dreg,
+        row.sreg,
+        row.receipt,
+        row.error_message,
+        row.reported_at,
+      ].join(" ").toUpperCase();
+      return hay.includes(needle);
+    });
+  }
+
+  function sortRows(rows) {
+    const { key, dir } = sortState;
+    const dateKeys = new Set(["event_date", "dob", "reported_at"]);
+    const numericKeys = new Set(["age_days", "days_since_event"]);
+    return [...rows].sort((a, b) => {
+      let av = a[key];
+      let bv = b[key];
+      if (numericKeys.has(key)) {
+        av = av == null || av === "" ? Number.NEGATIVE_INFINITY : Number(av);
+        bv = bv == null || bv === "" ? Number.NEGATIVE_INFINITY : Number(bv);
+      } else if (dateKeys.has(key)) {
+        av = av || "";
+        bv = bv || "";
+      } else {
+        av = String(av ?? "").toUpperCase();
+        bv = String(bv ?? "").toUpperCase();
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+
+  function bindSortHeaders() {
+    headRow.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortState.key === key) sortState.dir *= -1;
+        else {
+          sortState.key = key;
+          sortState.dir = 1;
+        }
+        renderTable();
+      });
+    });
+  }
+
+  function renderHead() {
+    if (isReadOnlyList()) {
+      headRow.innerHTML = `
+        <th data-sort="movement_type">Type</th>
+        <th data-sort="etag">Ear Tag</th>
+        <th data-sort="cow_id">Cow ID</th>
+        <th data-sort="event_date">Event Date</th>
+        <th data-sort="days_since_event">Days Since Event</th>
+        <th data-sort="dob">DOB</th>
+        <th data-sort="age_days">Age (D)</th>
+        <th data-sort="sex">Sex</th>
+        <th data-sort="breed">Breed</th>
+        <th data-sort="dreg">Dam Ear Tag</th>
+        <th data-sort="sreg">Sire Ear Tag</th>
+        <th data-sort="receipt">Receipt</th>
+        <th data-sort="reported_at">Sent</th>
+      `;
+    } else {
+      headRow.innerHTML = `
+        <th class="col-check"><input type="checkbox" id="check-all" title="Select all visible"></th>
+        <th data-sort="movement_type">Type</th>
+        <th data-sort="etag">Ear Tag</th>
+        <th data-sort="cow_id">Cow ID</th>
+        <th data-sort="event_date">Event Date</th>
+        <th data-sort="days_since_event">Days Since Event</th>
+        <th data-sort="dob">DOB</th>
+        <th data-sort="age_days">Age (D)</th>
+        <th data-sort="sex">Sex</th>
+        <th data-sort="breed">Breed</th>
+        <th data-sort="dreg">Dam Ear Tag</th>
+        <th data-sort="sreg">Sire Ear Tag</th>
+      `;
+      const checkAll = document.getElementById("check-all");
+      if (checkAll) {
+        checkAll.addEventListener("change", () => {
+          const rows = visibleRows();
+          if (checkAll.checked) rows.forEach((r) => selected.add(r.id));
+          else rows.forEach((r) => selected.delete(r.id));
+          renderTable();
+        });
+      }
+    }
+    bindSortHeaders();
+  }
+
+  function syncModeUi() {
+    const readOnly = isReadOnlyList();
+    if (bcmsActions) bcmsActions.hidden = readOnly;
+    if (selectActions) selectActions.hidden = readOnly;
+    searchInput.placeholder = readOnly
+      ? "Search Ear Tag, Cow ID, Type, Receipt…"
+      : "Search Ear Tag, Cow ID, Type…";
+    if (helpNote) {
+      if (isAwaiting()) {
+        helpNote.textContent =
+          "Accepted BCMS submissions not yet reflected in cattle-on-holding. Births/move-ons stay until they appear on CTS; sales/deaths until they drop off — then they move to Archive. After the next UK-day CTS sync, anything still unmatched is marked failed and moved back to Pending.";
+      } else if (isArchive()) {
+        helpNote.textContent =
+          "Confirmed on CTS after BCMS acceptance. Rows are green if reported within the UK deadline (births 17 days; sales/move-ons 3 days; deaths 7 days from the event), red if reported late.";
+      } else {
+        helpNote.textContent =
+          "Preview downloads RegBirths / RegMovs XML for the selection (password redacted). Accepted sends move to Awaiting CTS, then to Archive once CTS confirms them. If still unmatched after the next UK-day CTS sync, they are marked failed and return here to retry. Yellow = approaching deadline (births from 7 days; sales/move-ons at 3 days; deaths at 6–7 days). Red = past deadline (births 17 days; sales/move-ons 3 days; deaths 7 days). Overdue rows are left unselected. A 9pm UK cron sends remaining deadline-day animals automatically.";
+      }
+    }
+    if (isAwaiting()) {
+      emptyEl.textContent = "No accepted movements awaiting CTS refresh for this farm.";
+    } else if (isArchive()) {
+      emptyEl.textContent = "No archived CTS-confirmed movements for this farm.";
+    } else {
+      emptyEl.textContent = "No pending movements for this farm.";
+    }
+    renderHead();
+  }
+
+  function updateSortHeaders() {
+    headRow.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.classList.remove("sorted-asc", "sorted-desc");
+      if (th.dataset.sort === sortState.key) {
+        th.classList.add(sortState.dir > 0 ? "sorted-asc" : "sorted-desc");
+      }
+    });
+  }
+
+  function selectedRows() {
+    const all = (payload && payload.rows) || [];
+    return all.filter((row) => selected.has(row.id));
+  }
+
+  function updateActionButtons() {
+    if (isReadOnlyList()) return;
+    const rows = selectedRows();
+    const birthCount = rows.filter((r) => r.movement_type === "birth").length;
+    const movCount = rows.filter((r) =>
+      r.movement_type === "sale" || r.movement_type === "death" || r.movement_type === "move_on"
+    ).length;
+    const n = selected.size;
+    if (sendBtn) {
+      sendBtn.disabled = !CAN_SEND || n === 0;
+      sendBtn.textContent = n > 0 ? `Send To BCMS (${n})` : "Send To BCMS";
+    }
+    if (previewBirthsBtn) {
+      previewBirthsBtn.disabled = birthCount === 0;
+      previewBirthsBtn.textContent = birthCount > 0
+        ? `Preview Births XML (${birthCount})`
+        : "Preview Births XML";
+    }
+    if (previewMovementsBtn) {
+      previewMovementsBtn.disabled = movCount === 0;
+      previewMovementsBtn.textContent = movCount > 0
+        ? `Preview Movements XML (${movCount})`
+        : "Preview Movements XML";
+    }
+  }
+
+  function renderCounts() {
+    const counts = (payload && payload.counts) || {};
+    const cards = [
+      ["Births", counts.birth || 0],
+      ["Sales", counts.sale || 0],
+      ["Deaths", counts.death || 0],
+      ["Move On", counts.move_on || 0],
+      ["Total", (payload && payload.total) || 0],
+    ];
+    countsEl.innerHTML = cards.map(([label, value]) => `
+      <div class="count-card">
+        <div class="label">${esc(label)}</div>
+        <div class="value">${esc(value)}</div>
+      </div>
+    `).join("");
+  }
+
+  function visibleRows() {
+    return sortRows(filterRows((payload && payload.rows) || []));
+  }
+
+  function renderTable() {
+    renderCounts();
+    const holding = (payload && payload.holding) || "";
+    const total = (payload && payload.total) || 0;
+    if (isAwaiting()) {
+      metaLine.textContent = holding
+        ? `${farm} · Holding ${holding} · ${total} awaiting CTS refresh`
+        : `${farm} · Holding not configured · ${total} awaiting CTS refresh`;
+    } else if (isArchive()) {
+      metaLine.textContent = holding
+        ? `${farm} · Holding ${holding} · ${total} archived`
+        : `${farm} · Holding not configured · ${total} archived`;
+    } else {
+      metaLine.textContent = holding
+        ? `${farm} · Holding ${holding} · ${total} pending · ${selected.size} selected`
+        : `${farm} · Holding not configured · ${total} pending`;
+    }
+
+    const rows = visibleRows();
+    updateSortHeaders();
+    if (!rows.length) {
+      tbody.innerHTML = "";
+      emptyEl.hidden = false;
+      const checkAll = document.getElementById("check-all");
+      if (checkAll) checkAll.checked = false;
+      updateActionButtons();
+      return;
+    }
+    emptyEl.hidden = true;
+
+    if (isReadOnlyList()) {
+      tbody.innerHTML = rows.map((row) => {
+        const typeClass = `type-${esc(row.movement_type || "")}`;
+        let rowClass = "";
+        let title = "";
+        if (row.error_message) {
+          title = ` title="${esc(row.error_message)}"`;
+        } else if (isArchive()) {
+          const compliance = archiveCompliance(row);
+          const lag = reportingLagDays(row);
+          const limit = REPORTING_DEADLINE_DAYS[row.movement_type];
+          if (compliance === "ok") {
+            rowClass = ' class="row-compliant"';
+            title = ` title="Reported in ${lag} day(s) — within ${limit}-day deadline"`;
+          } else if (compliance === "late") {
+            rowClass = ' class="row-overdue"';
+            title = ` title="Reported in ${lag} day(s) — over ${limit}-day deadline"`;
+          }
+        }
+        return `
+          <tr${rowClass}${title}>
+            <td><span class="type-pill ${typeClass}">${esc(typeLabel(row.movement_type))}</span></td>
+            <td>${esc(row.etag)}</td>
+            <td>${esc(row.cow_id)}</td>
+            <td>${esc(fmtDateUk(row.event_date))}</td>
+            <td>${esc(row.days_since_event == null ? "" : row.days_since_event)}</td>
+            <td>${esc(fmtDateUk(row.dob))}</td>
+            <td>${esc(row.age_days == null ? "" : row.age_days)}</td>
+            <td>${esc(row.sex)}</td>
+            <td>${esc(row.breed)}</td>
+            <td>${esc(row.dreg)}</td>
+            <td>${esc(row.sreg)}</td>
+            <td>${esc(row.receipt || row.error_message || "")}</td>
+            <td>${esc(fmtDateUk(row.reported_at))}</td>
+          </tr>
+        `;
+      }).join("");
+    } else {
+      tbody.innerHTML = rows.map((row) => {
+        const checked = selected.has(row.id) ? " checked" : "";
+        const typeClass = `type-${esc(row.movement_type || "")}`;
+        const urgency = rowUrgency(row);
+        const rowClass = urgency ? ` class="${urgency.className}"` : "";
+        const title = urgency ? ` title="${urgency.title}"` : "";
+        return `
+          <tr data-id="${esc(row.id)}"${rowClass}${title}>
+            <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(row.id)}"${checked}></td>
+            <td><span class="type-pill ${typeClass}">${esc(typeLabel(row.movement_type))}</span></td>
+            <td>${esc(row.etag)}</td>
+            <td>${esc(row.cow_id)}</td>
+            <td>${esc(fmtDateUk(row.event_date))}</td>
+            <td>${esc(row.days_since_event == null ? "" : row.days_since_event)}</td>
+            <td>${esc(fmtDateUk(row.dob))}</td>
+            <td>${esc(row.age_days == null ? "" : row.age_days)}</td>
+            <td>${esc(row.sex)}</td>
+            <td>${esc(row.breed)}</td>
+            <td>${esc(row.dreg)}</td>
+            <td>${esc(row.sreg)}</td>
+          </tr>
+        `;
+      }).join("");
+      const checkAll = document.getElementById("check-all");
+      const visibleIds = rows.map((r) => r.id);
+      if (checkAll) {
+        checkAll.checked = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+      }
+    }
+    updateActionButtons();
+  }
+
+  async function loadList() {
+    metaLine.textContent = "Loading…";
+    selected.clear();
+    const endpoint = isAwaiting()
+      ? `/api/cts/movements/awaiting-cts?farm=${encodeURIComponent(farm)}`
+      : isArchive()
+        ? `/api/cts/movements/archive?farm=${encodeURIComponent(farm)}`
+        : `/api/cts/movements/pending?farm=${encodeURIComponent(farm)}`;
+    try {
+      const res = await fetch(endpoint);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner("error", data.detail || `Failed to load movements (${res.status})`);
+        payload = { counts: {}, total: 0, rows: [] };
+        renderTable();
+        return;
+      }
+      payload = data;
+      setBanner("", "");
+      if (isPending()) {
+        for (const row of payload.rows || []) {
+          if (!isOverdue(row)) selected.add(row.id);
+        }
+      }
+      renderTable();
+    } catch (err) {
+      setBanner("error", err.message || "Failed to load movements");
+      payload = { counts: {}, total: 0, rows: [] };
+      renderTable();
+    }
+  }
+
+  async function downloadPreview(kind) {
+    if (!isPending()) return;
+    const ids = [...selected];
+    if (!ids.length) return;
+    setBanner("", "");
+    try {
+      const res = await fetch("/api/cts/movements/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ farm, ids, kind }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setBanner("error", data.detail || `Preview failed (${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = /filename="([^"]+)"/i.exec(disposition);
+      const filename = match
+        ? match[1]
+        : (kind === "births" ? `RegBirths-${farm}.xml` : `RegMovs-${farm}.xml`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setBanner("ok", `Downloaded ${filename} (preview only — not sent to BCMS).`);
+    } catch (err) {
+      setBanner("error", err.message || "Preview failed");
+    }
+  }
+
+  async function sendSelected() {
+    if (!isPending() || !CAN_SEND || !sendBtn || selected.size === 0) return;
+    const ids = [...selected];
+    if (!window.confirm(`Send ${ids.length} movement(s) for ${farm} to BCMS?`)) return;
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending…";
+    setBanner("", "");
+    try {
+      const res = await fetch("/api/cts/movements/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ farm, ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBanner(res.status === 501 ? "warn" : "error", data.detail || `Send failed (${res.status})`);
+        return;
+      }
+      const tone = (data.rejected_count || 0) > 0 ? "warn" : "ok";
+      setBanner(tone, data.message || "Sent to BCMS.");
+      await loadList();
+    } catch (err) {
+      setBanner("error", err.message || "Send failed");
+    } finally {
+      updateActionButtons();
+    }
+  }
+
+  function setMode(nextMode) {
+    if (nextMode !== "pending" && nextMode !== "awaiting" && nextMode !== "archive") return;
+    mode = nextMode;
+    document.querySelectorAll(".view-tab").forEach((tab) => {
+      const active = tab.dataset.mode === mode;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    syncModeUi();
+    loadList();
+  }
+
+  farmSlicer.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".slicer-btn");
+    if (!btn) return;
+    farm = btn.dataset.value;
+    farmSlicer.querySelectorAll(".slicer-btn").forEach((b) => {
+      b.classList.toggle("selected", b === btn);
+    });
+    const url = new URL(window.location.href);
+    url.searchParams.set("farm", farm);
+    window.history.replaceState({}, "", url);
+    loadList();
+  });
+
+  document.querySelectorAll(".view-tab").forEach((tab) => {
+    tab.addEventListener("click", () => setMode(tab.dataset.mode));
+  });
+
+  tbody.addEventListener("change", (ev) => {
+    if (isAwaiting()) return;
+    const box = ev.target.closest(".row-check");
+    if (!box) return;
+    if (box.checked) selected.add(box.dataset.id);
+    else selected.delete(box.dataset.id);
+    renderTable();
+  });
+
+  document.getElementById("select-all-btn").addEventListener("click", () => {
+    if (isAwaiting()) return;
+    ((payload && payload.rows) || []).forEach((r) => selected.add(r.id));
+    renderTable();
+  });
+  document.getElementById("select-none-btn").addEventListener("click", () => {
+    if (isAwaiting()) return;
+    selected.clear();
+    renderTable();
+  });
+  searchInput.addEventListener("input", renderTable);
+  if (sendBtn) sendBtn.addEventListener("click", sendSelected);
+  if (previewBirthsBtn) {
+    previewBirthsBtn.addEventListener("click", () => downloadPreview("births"));
+  }
+  if (previewMovementsBtn) {
+    previewMovementsBtn.addEventListener("click", () => downloadPreview("movements"));
+  }
+
+  farmSlicer.querySelectorAll(".slicer-btn").forEach((b) => {
+    b.classList.toggle("selected", b.dataset.value === farm);
+  });
+  syncModeUi();
+  loadList();
+})();
+</script>
+{% endblock %}
