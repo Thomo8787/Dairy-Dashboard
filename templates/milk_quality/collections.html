@@ -260,8 +260,7 @@
           average of the other loads that day, or the nearest day for that farm that has
           results. The cross stays, and a later NML file replaces the estimate.
           Upload Müller writes the tanker litres from a Müller CSV onto the weighbridge
-          column. Import Müller downloads this month from the portal and does the same.
-          A weighbridge that is a different size from the ticket, or more than about
+          column. A weighbridge that is a different size from the ticket, or more than about
           1,000 L away, is cleared so the next import can place it on the right load.
           A load with a sample number and no ticket is added as a new line.
           When that ticket is entered, its litres fill the same line. The farm litres
@@ -392,7 +391,6 @@
         <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
         <button type="button" class="btn" id="upload-muller-btn">Upload Müller</button>
         <input type="file" id="upload-muller-input" accept=".csv,text/csv" multiple hidden>
-        <button type="button" class="btn" id="import-muller-btn">Import Müller</button>
         <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
       </div>
 
@@ -1223,40 +1221,6 @@
         ).join(" ");
       }
       showMessage(message, fileErrors.length > 0 && !(data.rows_updated > 0));
-      loadResults();
-    } catch (err) {
-      showMessage(err.message || String(err), true);
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  document.getElementById("import-muller-btn").addEventListener("click", async function () {
-    const btn = this;
-    btn.disabled = true;
-    showMessage("Downloading this month's Müller collections…");
-    try {
-      const res = await fetch("/milk-quality/api/collections/muller/portal", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Müller import failed");
-      showMessage(data.message || "Import started…");
-      if (data.status !== "started") {
-        return;
-      }
-      let finished = false;
-      for (let i = 0; i < 240; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const st = await fetch("/milk-quality/api/collections/muller/portal/status");
-        const payload = await st.json().catch(() => ({}));
-        if (payload.running) continue;
-        if (payload.error) throw new Error(payload.error);
-        showMessage("Müller portal import finished.");
-        finished = true;
-        break;
-      }
-      if (!finished) {
-        showMessage("Müller import is still running. Refresh in a minute.", true);
-      }
       loadResults();
     } catch (err) {
       showMessage(err.message || String(err), true);
