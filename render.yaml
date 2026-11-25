@@ -416,6 +416,110 @@ services:
           name: dairy-dashboard
           envVarKey: SENSEHUB_FARM_ID
 
+  # CTS cattle-on-holding sync once a day at 2am UK for all ready farms.
+  # Render cron is UTC-only, so run hourly and gate on Europe/London hour 2.
+  # ALH/BNK share one holding and are synced once.
+  - type: cron
+    name: sync-cts-holdings
+    runtime: python
+    plan: starter
+    branch: main
+    schedule: "5 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/sync_cts_holdings.py --only-at-uk-hours 2
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dairy-dashboard-db
+          property: connectionString
+      - key: CTS_DDTS_USERNAME
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_DDTS_USERNAME
+      - key: CTS_DDTS_PASSWORD
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_DDTS_PASSWORD
+      - key: CTS_CTWS_USERNAME_ALH
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_USERNAME_ALH
+      - key: CTS_CTWS_PASSWORD_ALH
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_PASSWORD_ALH
+      - key: CTS_HOLDING_ALH
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_HOLDING_ALH
+      - key: CTS_CTWS_USERNAME_BNK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_USERNAME_BNK
+      - key: CTS_CTWS_PASSWORD_BNK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_PASSWORD_BNK
+      - key: CTS_HOLDING_BNK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_HOLDING_BNK
+      - key: CTS_CTWS_USERNAME_COF
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_USERNAME_COF
+      - key: CTS_CTWS_PASSWORD_COF
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_PASSWORD_COF
+      - key: CTS_HOLDING_COF
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_HOLDING_COF
+      - key: CTS_CTWS_USERNAME_SFR
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_USERNAME_SFR
+      - key: CTS_CTWS_PASSWORD_SFR
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_PASSWORD_SFR
+      - key: CTS_HOLDING_SFR
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_HOLDING_SFR
+      - key: CTS_CTWS_USERNAME_PRK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_USERNAME_PRK
+      - key: CTS_CTWS_PASSWORD_PRK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_CTWS_PASSWORD_PRK
+      - key: CTS_HOLDING_PRK
+        fromService:
+          type: web
+          name: dairy-dashboard
+          envVarKey: CTS_HOLDING_PRK
+
 databases:
   - name: dairy-dashboard-db
     plan: 0.1c-256mb
