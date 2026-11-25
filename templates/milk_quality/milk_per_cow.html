@@ -77,24 +77,31 @@
     .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; color: var(--text); }
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.4; margin: 0; }
+    .month-block { margin-bottom: 1.5rem; }
+    .month-block h2 { margin: 0 0 0.45rem; font-size: 1.05rem; }
     .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-    #mpc-table {
+    .mpc-table {
       width: max-content;
       min-width: 100%;
       border-collapse: collapse;
       table-layout: auto;
     }
-    #mpc-table th, #mpc-table td {
+    .mpc-table th, .mpc-table td {
       padding: 0.45rem 0.75rem;
       text-align: right;
       border-bottom: 1px solid var(--line);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
     }
-    #mpc-table th:nth-child(1), #mpc-table td:nth-child(1),
-    #mpc-table th:nth-child(2), #mpc-table td:nth-child(2) { text-align: left; }
-    #mpc-table thead th { background: #1e3a5f; color: #fff; font-weight: 600; }
-    #mpc-table tbody tr:hover { background: #f8fafc; }
+    .mpc-table th:nth-child(1), .mpc-table td:nth-child(1),
+    .mpc-table th:nth-child(2), .mpc-table td:nth-child(2) { text-align: left; }
+    .mpc-table thead th { background: #1e3a5f; color: #fff; font-weight: 600; }
+    .mpc-table tbody tr:hover { background: #f8fafc; }
+    .mpc-table tfoot td {
+      background: #eef6ea;
+      font-weight: 700;
+      border-top: 2px solid #8aa888;
+    }
     .empty-state { padding: 1.5rem; color: var(--muted); text-align: left; }
   </style>
 {% endblock %}
@@ -130,38 +137,25 @@
           </div>
         </div>
         <p class="help-text">
-          One row per farm and day. Total milk is that day’s ticket litres.
+          One row per farm and day, with a table for each month.
+          Total milk prefers the weighbridge, otherwise the ticket.
           The 4-day average is the mean of this farm’s last up to four days with milk.
           Milk per cow is that average divided by cows in milk on that day.
-          Fat %, protein %, SCC, Bactoscan, and urea are litre-weighted when there is
-          more than one collection. Double-click a farm to show only that one.
+          The total row adds up Total milk for the month.
+          Cows, the 4-day average, and milk per cow are averages of those days.
+          Fat %, protein %, SCC, Bactoscan, and urea are weighted by that day’s milk.
         </p>
       </aside>
     </div>
 
     <section class="content-panel">
       <p class="meta-line" id="meta-line">Loading…</p>
-      <div class="table-wrap">
-        <table id="mpc-table">
-          <thead>
-            <tr>
-              <th>Farm</th>
-              <th>Date</th>
-              <th>Total milk</th>
-              <th>4 day average</th>
-              <th>Total cows</th>
-              <th>Milk per cow</th>
-              <th>Fat %</th>
-              <th>Prot %</th>
-              <th>SCC</th>
-              <th>Bactoscan</th>
-              <th>Urea</th>
-            </tr>
-          </thead>
-          <tbody id="table-body">
-            <tr><td colspan="11" class="empty-state">Loading…</td></tr>
-          </tbody>
-        </table>
+      <div id="month-tables">
+        <div class="table-wrap">
+          <table class="mpc-table">
+            <tbody><tr><td class="empty-state">Loading…</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </div>
@@ -174,7 +168,7 @@
   const minRange = document.getElementById("min-date-range");
   const maxRange = document.getElementById("max-date-range");
   const meta = document.getElementById("meta-line");
-  const tbody = document.getElementById("table-body");
+  const host = document.getElementById("month-tables");
   const MONTH_COUNT = 36;
   let monthList = [];
 
@@ -246,29 +240,115 @@
     return Number.isNaN(n) ? "—" : Math.round(n).toLocaleString();
   }
 
+  function esc(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[ch]));
+  }
+
+  function monthHeading(key) {
+    const [y, m] = key.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+  }
+
+  function numbers(rows, field) {
+    return rows
+      .map((row) => row[field])
+      .filter((value) => value != null && value !== "")
+      .map(Number)
+      .filter((value) => !Number.isNaN(value));
+  }
+
+  function mean(rows, field) {
+    const values = numbers(rows, field);
+    if (!values.length) return null;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
+
+  function weighted(rows, field) {
+    let total = 0;
+    let weight = 0;
+    rows.forEach((row) => {
+      const value = row[field];
+      const litres = Number(row.total_milk);
+      if (value == null || value === "" || !litres) return;
+      total += Number(value) * litres;
+      weight += litres;
+    });
+    return weight ? total / weight : null;
+  }
+
+  const HEADERS = [
+    "Farm", "Date", "Total milk", "4 day average", "Total cows", "Milk per cow",
+    "Fat %", "Prot %", "SCC", "Bactoscan", "Urea",
+  ];
+
+  function rowCells(row) {
+    return [
+      esc(row.farm || ""),
+      esc(row.sample_date || ""),
+      intFmt(row.total_milk),
+      intFmt(row.four_day_avg),
+      intFmt(row.total_cows),
+      num(row.milk_per_cow, 1),
+      num(row.butterfat_pct, 2),
+      num(row.protein_pct, 2),
+      intFmt(row.scc),
+      intFmt(row.bactoscan),
+      num(row.urea_pct, 3),
+    ];
+  }
+
+  function summaryCells(rows, farm) {
+    return [
+      esc(farm),
+      "Total",
+      intFmt(numbers(rows, "total_milk").reduce((sum, value) => sum + value, 0) || null),
+      intFmt(mean(rows, "four_day_avg")),
+      intFmt(mean(rows, "total_cows")),
+      num(mean(rows, "milk_per_cow"), 1),
+      num(weighted(rows, "butterfat_pct"), 2),
+      num(weighted(rows, "protein_pct"), 2),
+      intFmt(weighted(rows, "scc")),
+      intFmt(weighted(rows, "bactoscan")),
+      num(weighted(rows, "urea_pct"), 3),
+    ];
+  }
+
+  function tableHtml(rows, footRows) {
+    const head = "<thead><tr>" + HEADERS.map((label) => `<th>${label}</th>`).join("") + "</tr></thead>";
+    const body = "<tbody>" + rows.map((row) =>
+      "<tr>" + rowCells(row).map((cell) => `<td>${cell}</td>`).join("") + "</tr>"
+    ).join("") + "</tbody>";
+    const foot = "<tfoot>" + footRows.map((cells) =>
+      "<tr>" + cells.map((cell) => `<td>${cell}</td>`).join("") + "</tr>"
+    ).join("") + "</tfoot>";
+    return `<div class="table-wrap"><table class="mpc-table">${head}${body}${foot}</table></div>`;
+  }
+
   function render(data) {
     const rows = data.rows || [];
-    const farms = selectedFarms().join(", ") || "All farms";
-    meta.textContent = farms + " · " + rows.length + " day(s)";
+    const farms = selectedFarms();
+    meta.textContent = (farms.join(", ") || "All farms") + " · " + rows.length + " day(s)";
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="empty-state">No collections in this date range.</td></tr>';
+      host.innerHTML = '<div class="table-wrap"><table class="mpc-table"><tbody><tr><td class="empty-state">No collections in this date range.</td></tr></tbody></table></div>';
       return;
     }
-    tbody.innerHTML = rows.map((row) =>
-      "<tr>" +
-        `<td>${row.farm || ""}</td>` +
-        `<td>${row.sample_date || ""}</td>` +
-        `<td>${intFmt(row.total_milk)}</td>` +
-        `<td>${intFmt(row.four_day_avg)}</td>` +
-        `<td>${intFmt(row.total_cows)}</td>` +
-        `<td>${num(row.milk_per_cow, 1)}</td>` +
-        `<td>${num(row.butterfat_pct, 2)}</td>` +
-        `<td>${num(row.protein_pct, 2)}</td>` +
-        `<td>${intFmt(row.scc)}</td>` +
-        `<td>${intFmt(row.bactoscan)}</td>` +
-        `<td>${num(row.urea_pct, 3)}</td>` +
-      "</tr>"
-    ).join("");
+    const byMonth = new Map();
+    rows.forEach((row) => {
+      const key = String(row.sample_date || "").slice(0, 7);
+      if (!byMonth.has(key)) byMonth.set(key, []);
+      byMonth.get(key).push(row);
+    });
+    host.innerHTML = [...byMonth.keys()].sort().reverse().map((key) => {
+      const monthRows = byMonth.get(key).slice().sort((a, b) => {
+        if (a.sample_date !== b.sample_date) return a.sample_date < b.sample_date ? -1 : 1;
+        return farms.indexOf(a.farm) - farms.indexOf(b.farm);
+      });
+      const monthFarms = farms.filter((farm) => monthRows.some((row) => row.farm === farm));
+      const foot = monthFarms.map((farm) => summaryCells(monthRows.filter((row) => row.farm === farm), farm));
+      return `<section class="month-block"><h2>${esc(monthHeading(key))}</h2>${tableHtml(monthRows, foot)}</section>`;
+    }).join("");
   }
 
   async function load() {
@@ -292,7 +372,7 @@
       render(data);
     } catch (err) {
       meta.textContent = err.message || "Failed to load milk per cow";
-      tbody.innerHTML = '<tr><td colspan="11" class="empty-state">Could not load the table.</td></tr>';
+      host.innerHTML = '<div class="table-wrap"><table class="mpc-table"><tbody><tr><td class="empty-state">Could not load the table.</td></tr></tbody></table></div>';
     }
   }
 
