@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.cts_config import cts_farm_credentials
+from services.cts_config import (
+    cts_farm_credentials,
+    cts_herd_farms_for,
+    cts_is_ui_farm,
+    cts_normalize_farm_key,
+)
 from services.database import (
     CowEvent,
     CtsOnHolding,
@@ -19,7 +24,6 @@ from services.database import (
     HerdInventory,
     StockPurchaseAnimal,
 )
-from services.farms import HERD_FARM_OPTIONS
 from services.cts_client import normalize_cts_etag
 from services.bcms_breeds import bcms_breed_from_cbrd
 
@@ -64,7 +68,7 @@ def _inventory_is_move_on(inv: HerdInventory) -> bool:
 
 
 def _holding_for(farm: str) -> str:
-    creds = cts_farm_credentials(farm)
+    creds = cts_farm_credentials(cts_normalize_farm_key(farm))
     return (creds or {}).get("holding") or ""
 
 
@@ -96,13 +100,14 @@ def _uk_calendar_date(when: dt.datetime | None) -> dt.date | None:
 
 
 def _reported_keys(db: Session, farm: str) -> set[tuple[str, str, dt.date]]:
+    herd_farms = cts_herd_farms_for(farm)
     rows = db.execute(
         select(
             CtsReportedMovement.movement_type,
             CtsReportedMovement.etag,
             CtsReportedMovement.event_date,
         ).where(
-            CtsReportedMovement.farm == farm.upper(),
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status.in_(_SUPPRESS_PENDING_STATUSES),
         )
     ).all()
@@ -121,9 +126,10 @@ def active_awaiting_cts_etags(db: Session, farm: str) -> set[str]:
     Statuses ``sent`` / ``ok`` / ``accepted`` mean the farm has already reported
     the movement; overnight holding sync has not confirmed it yet.
     """
+    herd_farms = cts_herd_farms_for(farm)
     rows = db.execute(
         select(CtsReportedMovement.etag).where(
-            CtsReportedMovement.farm == farm.upper(),
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status.in_(_ACTIVE_REPORT_STATUSES),
         )
     ).all()
@@ -153,14 +159,15 @@ def archive_confirmed_movements(db: Session, farm: str) -> dict[str, Any]:
     - birth / move_on: ear tag now present on ``cts_on_holding``
     - sale / death: ear tag no longer present on ``cts_on_holding``
     """
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise ValueError(f"Unsupported farm: {farm}")
+    herd_farms = cts_herd_farms_for(farm_key)
 
     on_cts = _cts_etag_set(db, farm_key)
     reported_rows = db.scalars(
         select(CtsReportedMovement).where(
-            CtsReportedMovement.farm == farm_key,
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status.in_(_ACTIVE_REPORT_STATUSES),
         )
     ).all()
@@ -217,15 +224,16 @@ def requeue_stale_awaiting_movements(
     today is treated as failed. Status becomes ``failed``, which removes the row
     from Awaiting CTS and from the reported suppress-list used by Pending.
     """
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise ValueError(f"Unsupported farm: {farm}")
+    herd_farms = cts_herd_farms_for(farm_key)
 
     today_uk = as_of or dt.datetime.now(_UK).date()
     on_cts = _cts_etag_set(db, farm_key)
     reported_rows = db.scalars(
         select(CtsReportedMovement).where(
-            CtsReportedMovement.farm == farm_key,
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status.in_(_ACTIVE_REPORT_STATUSES),
         )
     ).all()
@@ -270,19 +278,21 @@ def requeue_stale_awaiting_movements(
 
 
 def _cts_etag_set(db: Session, farm: str) -> set[str]:
+    farm_key = cts_normalize_farm_key(farm)
     return {
         key
         for etag in db.scalars(
-            select(CtsOnHolding.etag).where(CtsOnHolding.farm == farm.upper())
+            select(CtsOnHolding.etag).where(CtsOnHolding.farm == farm_key)
         ).all()
         if (key := normalize_cts_etag(etag))
     }
 
 
 def _inventory_by_etag(db: Session, farm: str) -> dict[str, HerdInventory]:
+    herd_farms = cts_herd_farms_for(farm)
     out: dict[str, HerdInventory] = {}
     for row in db.scalars(
-        select(HerdInventory).where(HerdInventory.farm == farm.upper())
+        select(HerdInventory).where(HerdInventory.farm.in_(herd_farms))
     ):
         key = normalize_cts_etag(row.etag)
         if key:
@@ -292,6 +302,7 @@ def _inventory_by_etag(db: Session, farm: str) -> dict[str, HerdInventory]:
 
 def _pedigree_tags_by_etag(db: Session, farm: str) -> dict[str, dict[str, str]]:
     """Dam/sire ear tags (DREG/SREG) from inventory when those columns exist."""
+    herd_farms = cts_herd_farms_for(farm)
     out: dict[str, dict[str, str]] = {}
 
     def _set(etag: str | None, *, dreg: str | None = None, sreg: str | None = None) -> None:
@@ -307,7 +318,7 @@ def _pedigree_tags_by_etag(db: Session, farm: str) -> dict[str, dict[str, str]]:
             slot["sreg"] = sreg_val
 
     for row in db.scalars(
-        select(HerdInventory).where(HerdInventory.farm == farm.upper())
+        select(HerdInventory).where(HerdInventory.farm.in_(herd_farms))
     ):
         _set(
             row.etag,
@@ -323,10 +334,11 @@ def _exit_events_by_etag(db: Session, farm: str) -> dict[str, CowEvent]:
     Uses DairyComp event type as stored (DIED stays DIED). Import no longer
     rewrites DIED+TB/OFS to SOLD; those remain deaths for BCMS.
     """
+    herd_farms = cts_herd_farms_for(farm)
     rows = db.scalars(
         select(CowEvent)
         .where(
-            CowEvent.farm == farm.upper(),
+            CowEvent.farm.in_(herd_farms),
             CowEvent.event.in_(("SOLD", "DIED")),
             CowEvent.event_date.isnot(None),
         )
@@ -383,10 +395,11 @@ def _row(
 
 
 def _births_by_etag(db: Session, farm: str) -> dict[str, HerdBirth]:
+    herd_farms = cts_herd_farms_for(farm)
     out: dict[str, HerdBirth] = {}
     rows = db.scalars(
         select(HerdBirth)
-        .where(HerdBirth.farm == farm.upper(), HerdBirth.bdat.isnot(None))
+        .where(HerdBirth.farm.in_(herd_farms), HerdBirth.bdat.isnot(None))
         .order_by(HerdBirth.bdat.desc())
     ).all()
     for row in rows:
@@ -397,10 +410,11 @@ def _births_by_etag(db: Session, farm: str) -> dict[str, HerdBirth]:
 
 
 def _purchases_by_etag(db: Session, farm: str) -> dict[str, StockPurchaseAnimal]:
+    herd_farms = cts_herd_farms_for(farm)
     out: dict[str, StockPurchaseAnimal] = {}
     rows = db.scalars(
         select(StockPurchaseAnimal)
-        .where(StockPurchaseAnimal.farm == farm.upper())
+        .where(StockPurchaseAnimal.farm.in_(herd_farms))
         .order_by(StockPurchaseAnimal.edat.desc())
     ).all()
     for row in rows:
@@ -477,8 +491,8 @@ def list_pending_movements(db: Session, farm: str) -> dict[str, Any]:
     - A calf that died or was sold before BCMS registration is not queued.
       BCMS has no record of the animal, so the exit is archived instead.
     """
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise ValueError(f"Unsupported farm: {farm}")
 
     holding = _holding_for(farm_key)
@@ -661,17 +675,18 @@ def list_pending_movements(db: Session, farm: str) -> dict[str, Any]:
 
 
 def _reported_list_context(db: Session, farm_key: str) -> dict[str, Any]:
+    logical = cts_normalize_farm_key(farm_key)
     return {
-        "on_cts": _cts_etag_set(db, farm_key),
-        "inventory": _inventory_by_etag(db, farm_key),
-        "pedigree_tags": _pedigree_tags_by_etag(db, farm_key),
-        "exits": _exit_events_by_etag(db, farm_key),
-        "births": _births_by_etag(db, farm_key),
-        "purchases": _purchases_by_etag(db, farm_key),
+        "on_cts": _cts_etag_set(db, logical),
+        "inventory": _inventory_by_etag(db, logical),
+        "pedigree_tags": _pedigree_tags_by_etag(db, logical),
+        "exits": _exit_events_by_etag(db, logical),
+        "births": _births_by_etag(db, logical),
+        "purchases": _purchases_by_etag(db, logical),
         "cts_by_etag": {
             key: row
             for row in db.scalars(
-                select(CtsOnHolding).where(CtsOnHolding.farm == farm_key)
+                select(CtsOnHolding).where(CtsOnHolding.farm == logical)
             ).all()
             if (key := normalize_cts_etag(row.etag))
         },
@@ -807,9 +822,10 @@ def list_awaiting_cts_movements(db: Session, farm: str) -> dict[str, Any]:
 
     Confirmed rows are promoted to Archive before this list is built.
     """
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise ValueError(f"Unsupported farm: {farm}")
+    herd_farms = cts_herd_farms_for(farm_key)
 
     archive_confirmed_movements(db, farm_key)
 
@@ -818,7 +834,7 @@ def list_awaiting_cts_movements(db: Session, farm: str) -> dict[str, Any]:
     reported_rows = db.scalars(
         select(CtsReportedMovement)
         .where(
-            CtsReportedMovement.farm == farm_key,
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status.in_(_ACTIVE_REPORT_STATUSES),
         )
         .order_by(CtsReportedMovement.reported_at.desc())
@@ -855,9 +871,10 @@ def list_awaiting_cts_movements(db: Session, farm: str) -> dict[str, Any]:
 
 def list_archived_movements(db: Session, farm: str) -> dict[str, Any]:
     """BCMS submissions confirmed against the CTS cattle-on-holding snapshot."""
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise ValueError(f"Unsupported farm: {farm}")
+    herd_farms = cts_herd_farms_for(farm_key)
 
     archive_confirmed_movements(db, farm_key)
 
@@ -866,7 +883,7 @@ def list_archived_movements(db: Session, farm: str) -> dict[str, Any]:
     reported_rows = db.scalars(
         select(CtsReportedMovement)
         .where(
-            CtsReportedMovement.farm == farm_key,
+            CtsReportedMovement.farm.in_(herd_farms),
             CtsReportedMovement.status == "archived",
         )
         .order_by(CtsReportedMovement.reported_at.desc())
@@ -908,7 +925,8 @@ def mark_movements_reported(
     error_message: str | None = None,
 ) -> int:
     """Record rows as reported so they drop out of the pending queue."""
-    farm_key = farm.upper()
+    farm_key = cts_normalize_farm_key(farm)
+    herd_farms = cts_herd_farms_for(farm_key)
     added = 0
     for item in items:
         movement_type = str(item.get("movement_type") or "").strip().lower()
@@ -922,7 +940,7 @@ def mark_movements_reported(
             event_date = dt.date.fromisoformat(str(raw_date)[:10])
         existing = db.scalar(
             select(CtsReportedMovement).where(
-                CtsReportedMovement.farm == farm_key,
+                CtsReportedMovement.farm.in_(herd_farms),
                 CtsReportedMovement.movement_type == movement_type,
                 CtsReportedMovement.etag == etag,
                 CtsReportedMovement.event_date == event_date,

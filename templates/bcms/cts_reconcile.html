@@ -171,7 +171,7 @@
         <span class="section-label">Farm</span>
         <div class="farm-slicer" id="farm-slicer">
           {% for farm in farm_options %}
-          <button type="button" class="slicer-btn{% if loop.first %} selected{% endif %}" data-value="{{ farm }}">{{ farm }}</button>
+          <button type="button" class="slicer-btn{% if loop.first %} selected{% endif %}" data-value="{{ farm }}">{{ (farm_labels or {}).get(farm, farm) }}</button>
           {% endfor %}
         </div>
       </div>
@@ -262,8 +262,11 @@
   const CAN_SYNC = {{ can_sync | tojson }};
   const CAN_DC305_SYNC = {{ can_dc305_sync | tojson }};
   const FARM_OPTIONS = {{ farm_options | tojson }};
+  const FARM_LABELS = {{ (farm_labels or {}) | tojson }};
   let farm = FARM_OPTIONS[0] || "ALH";
   let payload = null;
+  let reconcileAbort = null;
+  let reconcileSeq = 0;
 
   const farmSlicer = document.getElementById("farm-slicer");
   const syncBtn = document.getElementById("sync-btn");
@@ -282,8 +285,16 @@
     inv: { key: "etag_tail", dir: 1 },
   };
 
+  function farmLabel(code) {
+    return (FARM_LABELS && FARM_LABELS[code]) || code;
+  }
+
   function farmParams() {
     return `farm=${encodeURIComponent(farm)}`;
+  }
+
+  function isAbortError(err) {
+    return Boolean(err && (err.name === "AbortError" || err.code === 20));
   }
 
   function setBanner(kind, text) {
@@ -569,17 +580,27 @@
   }
 
   async function loadReconcile() {
+    const requestedFarm = farm;
+    const seq = ++reconcileSeq;
+    if (reconcileAbort) reconcileAbort.abort();
+    reconcileAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
     metaLine.textContent = "Loading…";
     try {
       const qs = farmParams();
-      const res = await fetch(`/api/cts/reconcile${qs ? `?${qs}` : ""}`);
+      const res = await fetch(`/api/cts/reconcile${qs ? `?${qs}` : ""}`, {
+        signal: reconcileAbort ? reconcileAbort.signal : undefined,
+      });
+      if (seq !== reconcileSeq || requestedFarm !== farm) return;
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         setBanner("error", detail.detail || `Failed to load reconcile (${res.status})`);
+        payload = { results: [], status: {} };
         metaLine.textContent = "Could not load reconcile data.";
+        renderTables();
         return;
       }
       payload = await res.json();
+      if (seq !== reconcileSeq || requestedFarm !== farm) return;
       const status = payload.status || {};
       const warnings = [];
       if (!status.ddts_configured) {
@@ -589,18 +610,22 @@
       if (farms[farm] === false) {
         const parts = (status.farm_parts && status.farm_parts[farm]) || {};
         const missing = ["username", "password", "holding"].filter((k) => !parts[k]);
+        const label = farmLabel(farm);
         warnings.push(
           missing.length
-            ? `${farm}: missing ${missing.join(", ")} in env (CTS_CTWS_*_${farm} / CTS_HOLDING_${farm}). Redeploy after setting.`
-            : `${farm}: CTWS / holding not configured.`
+            ? `${label}: missing ${missing.join(", ")} in env (CTS_CTWS_*_${farm} / CTS_HOLDING_${farm}). Redeploy after setting.`
+            : `${label}: CTWS / holding not configured.`
         );
       }
       if (warnings.length) setBanner("warn", warnings.join(" "));
       else setBanner("", "");
       renderTables();
     } catch (err) {
+      if (isAbortError(err) || seq !== reconcileSeq || requestedFarm !== farm) return;
       setBanner("error", err.message || "Failed to load reconcile");
+      payload = { results: [], status: {} };
       metaLine.textContent = "Could not load reconcile data.";
+      renderTables();
     }
   }
 
@@ -636,14 +661,11 @@
   }
 
   function formatDc305Result(data) {
-    const imported = data.farms_imported || [];
-    const skipped = data.farms_skipped || [];
-    const counts = data.farm_counts || {};
     if (data.message) return data.message;
     const imported = data.farms_imported || [];
     const skipped = data.farms_skipped || [];
     const counts = data.farm_counts || {};
-    const countBit = FARM_OPTIONS.map((f) => `${f} ${counts[f] ?? 0}`).join(", ");
+    const countBit = FARM_OPTIONS.map((f) => `${farmLabel(f)} ${counts[f] ?? 0}`).join(", ");
     if (data.skipped) {
       return `DC305 inventory unchanged (${countBit}).`;
     }

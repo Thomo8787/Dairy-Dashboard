@@ -9,8 +9,13 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from services.cts_config import (
+    cts_farm_option_values,
+    cts_herd_farms_for,
+    cts_is_ui_farm,
+    cts_normalize_farm_key,
+)
 from services.database import CowEvent, CtsOnHolding, CtsSyncRun, HerdInventory
-from services.farms import HERD_FARM_OPTIONS
 from services.cts_client import (
     CtsError,
     cts_status,
@@ -42,9 +47,10 @@ def _age_months(dob: dt.date | None, *, as_of: dt.date | None = None) -> int | N
     return days // 30
 
 
-def _latest_import_at(db: Session, model: type, farm: str) -> dt.datetime | None:
+def _latest_import_at(db: Session, model: type, farms: tuple[str, ...] | str) -> dt.datetime | None:
+    farm_keys = cts_herd_farms_for(farms) if isinstance(farms, str) else farms
     return db.scalar(
-        select(func.max(model.import_timestamp)).where(model.farm == farm.upper())
+        select(func.max(model.import_timestamp)).where(model.farm.in_(farm_keys))
     )
 
 
@@ -62,8 +68,9 @@ def cts_only_awaiting_events_days(
     Returns None when inventory has never been imported.
     """
     today = as_of or dt.date.today()
-    events_at = _latest_import_at(db, CowEvent, farm)
-    inventory_at = _latest_import_at(db, HerdInventory, farm)
+    herd_farms = cts_herd_farms_for(farm)
+    events_at = _latest_import_at(db, CowEvent, herd_farms)
+    inventory_at = _latest_import_at(db, HerdInventory, herd_farms)
     if inventory_at is None:
         return None
     if events_at is None or inventory_at > events_at:
@@ -74,8 +81,9 @@ def cts_only_awaiting_events_days(
 
 
 def _inventory_etags(db: Session, farm: str) -> dict[str, dict[str, Any]]:
-    """Map normalized etag -> inventory summary for a farm."""
+    """Map normalized etag -> inventory summary for a CTS farm (unions shared herds)."""
     as_of = dt.date.today()
+    herd_farms = cts_herd_farms_for(farm)
     rows = db.execute(
         select(
             HerdInventory.etag,
@@ -84,10 +92,11 @@ def _inventory_etags(db: Session, farm: str) -> dict[str, dict[str, Any]]:
             HerdInventory.gender,
             HerdInventory.bdat,
             HerdInventory.category,
-        ).where(HerdInventory.farm == farm.upper())
+            HerdInventory.farm,
+        ).where(HerdInventory.farm.in_(herd_farms))
     ).all()
     out: dict[str, dict[str, Any]] = {}
-    for etag, cow_id, sbrd, gender, bdat, category in rows:
+    for etag, cow_id, sbrd, gender, bdat, category, inv_farm in rows:
         key = normalize_cts_etag(etag)
         if not key:
             continue
@@ -103,27 +112,30 @@ def _inventory_etags(db: Session, farm: str) -> dict[str, dict[str, Any]]:
                 "category": category or "",
                 "age_months": _age_months(bdat, as_of=as_of),
                 "age_days": _age_days(bdat, as_of=as_of),
+                "farm": (inv_farm or "").strip().upper(),
             },
         )
     return out
 
 
 def _cts_rows(db: Session, farm: str) -> list[CtsOnHolding]:
+    farm_key = cts_normalize_farm_key(farm)
     return list(
         db.scalars(
             select(CtsOnHolding)
-            .where(CtsOnHolding.farm == farm.upper())
+            .where(CtsOnHolding.farm == farm_key)
             .order_by(CtsOnHolding.etag)
         )
     )
 
 
 def _exit_by_etag(db: Session, farm: str) -> dict[str, dict[str, Any]]:
-    """Latest SOLD/DIED event per normalized etag for a farm."""
+    """Latest SOLD/DIED event per normalized etag for a CTS farm (unions shared herds)."""
     as_of = dt.date.today()
+    herd_farms = cts_herd_farms_for(farm)
     rows = db.execute(
         select(CowEvent.etag, CowEvent.event, CowEvent.event_date).where(
-            CowEvent.farm == farm.upper(),
+            CowEvent.farm.in_(herd_farms),
             CowEvent.event.in_(_EXIT_EVENTS),
             CowEvent.event_date.isnot(None),
         )
@@ -150,8 +162,9 @@ def _exit_by_etag(db: Session, farm: str) -> dict[str, dict[str, Any]]:
 
 
 def reconcile_farm(db: Session, farm: str) -> dict[str, Any]:
-    """Compare latest CTS snapshot to herd_inventory for one farm."""
-    farm_key = farm.upper()
+    """Compare latest CTS snapshot to herd_inventory for one CTS UI farm."""
+    farm_key = cts_normalize_farm_key(farm)
+    herd_farms = cts_herd_farms_for(farm_key)
     cts_animals = _cts_rows(db, farm_key)
     inv = _inventory_etags(db, farm_key)
     exits = _exit_by_etag(db, farm_key)
@@ -185,7 +198,7 @@ def reconcile_farm(db: Session, farm: str) -> dict[str, Any]:
 
     inventory_imported_at = db.scalar(
         select(func.max(HerdInventory.import_timestamp)).where(
-            HerdInventory.farm == farm_key
+            HerdInventory.farm.in_(herd_farms)
         )
     )
 
@@ -292,8 +305,8 @@ def sync_farm(
     source: str = "manual",
 ) -> dict[str, Any]:
     """Pull cattle on holding from CTS and store snapshot, then reconcile."""
-    farm_key = farm.upper()
-    if farm_key not in set(HERD_FARM_OPTIONS):
+    farm_key = cts_normalize_farm_key(farm)
+    if not cts_is_ui_farm(farm_key):
         raise CtsError(f"Unsupported farm: {farm}")
 
     run = CtsSyncRun(
@@ -355,9 +368,20 @@ def sync_farms(
             "CTS DDTS is not configured. Set CTS_DDTS_USERNAME and CTS_DDTS_PASSWORD."
         )
 
-    requested = [f.upper() for f in (farms or list(status["ready_farms"]))]
+    requested = [
+        cts_normalize_farm_key(f) for f in (farms or list(status["ready_farms"]))
+    ]
+    # Deduplicate after ALH/BNK normalize so shared holding is synced once.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for farm in requested:
+        if farm in seen:
+            continue
+        seen.add(farm)
+        ordered.append(farm)
+    requested = ordered
     if not requested:
-        requested = list(HERD_FARM_OPTIONS)
+        requested = list(cts_farm_option_values())
 
     results: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -404,7 +428,14 @@ def reconcile_farms(
     farms: list[str] | None = None,
 ) -> dict[str, Any]:
     """Reconcile from stored snapshots only (no live CTS call)."""
-    targets = [f.upper() for f in (farms or list(HERD_FARM_OPTIONS))]
+    raw = [cts_normalize_farm_key(f) for f in (farms or list(cts_farm_option_values()))]
+    seen: set[str] = set()
+    targets: list[str] = []
+    for farm in raw:
+        if farm in seen:
+            continue
+        seen.add(farm)
+        targets.append(farm)
     results = [reconcile_farm(db, farm) for farm in targets]
     return {
         "status": cts_status(),

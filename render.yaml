@@ -75,6 +75,24 @@ services:
         sync: false
       - key: CTS_HOLDING_BNK
         sync: false
+      - key: CTS_CTWS_USERNAME_COF
+        sync: false
+      - key: CTS_CTWS_PASSWORD_COF
+        sync: false
+      - key: CTS_HOLDING_COF
+        sync: false
+      - key: CTS_CTWS_USERNAME_SFR
+        sync: false
+      - key: CTS_CTWS_PASSWORD_SFR
+        sync: false
+      - key: CTS_HOLDING_SFR
+        sync: false
+      - key: CTS_CTWS_USERNAME_PRK
+        sync: false
+      - key: CTS_CTWS_PASSWORD_PRK
+        sync: false
+      - key: CTS_HOLDING_PRK
+        sync: false
       - key: MULLER_USERNAME
         sync: false
       - key: MULLER_PASSWORD

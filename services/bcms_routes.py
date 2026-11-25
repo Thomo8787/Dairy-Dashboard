@@ -11,6 +11,12 @@ from services.auth import (
     user_has_permission,
 )
 from services.cts_client import CtsError, cts_status
+from services.cts_config import (
+    cts_farm_labels,
+    cts_farm_option_values,
+    cts_is_ui_farm,
+    cts_normalize_farm_key,
+)
 from services.cts_movements import (
     list_archived_movements,
     list_awaiting_cts_movements,
@@ -20,7 +26,6 @@ from services.cts_reconcile import reconcile_farms, sync_farms
 from services.cts_submit import CtsSubmitError, send_pending_movements
 from services.cts_submit_xml import CtsSubmitXmlError, build_preview_xml
 from services.database import get_session
-from services.farms import HERD_FARM_OPTIONS
 from services.herd_sync import start_herd_import_job
 
 
@@ -46,17 +51,45 @@ def _require_cts_sync():
     return None
 
 
+def _cts_farm_choices() -> tuple[str, ...]:
+    return cts_farm_option_values()
+
+
+def _cts_page_farm_context() -> dict:
+    return {
+        "farm_options": list(_cts_farm_choices()),
+        "farm_labels": cts_farm_labels(),
+    }
+
+
 def _normalize_farms(raw: list[str]) -> list[str] | None:
-    cleaned = [f.strip().upper() for f in raw if f and f.strip()]
+    cleaned = [cts_normalize_farm_key(f) for f in raw if f and str(f).strip()]
     if not cleaned:
         return None
-    invalid = [f for f in cleaned if f not in HERD_FARM_OPTIONS]
+    # Deduplicate after ALH/BNK collapse.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for farm in cleaned:
+        if farm in seen:
+            continue
+        seen.add(farm)
+        ordered.append(farm)
+    invalid = [f for f in ordered if not cts_is_ui_farm(f)]
     if invalid:
+        choices = ", ".join(_cts_farm_choices())
         raise ValueError(
-            f"Invalid farm(s): {', '.join(invalid)}. "
-            f"Use {', '.join(HERD_FARM_OPTIONS)}."
+            f"Invalid farm(s): {', '.join(invalid)}. Use {choices}."
         )
-    return cleaned
+    return ordered
+
+
+def _normalize_farm_key(raw: str) -> str:
+    farm_key = cts_normalize_farm_key(raw)
+    if not cts_is_ui_farm(farm_key):
+        raise ValueError(
+            f"Invalid farm. Use {', '.join(_cts_farm_choices())}."
+        )
+    return farm_key
 
 
 def _page_extras(page_context_fn, *, active_nav: str, page_heading: str, **extra):
@@ -91,7 +124,7 @@ def register_bcms_routes(app, page_context_fn):
                 page_context_fn,
                 active_nav="bcms_cts_reconcile",
                 page_heading="CTS Reconcile",
-                farm_options=list(HERD_FARM_OPTIONS),
+                **_cts_page_farm_context(),
                 can_sync=user_has_permission(current_user(), "perm_sync_cts"),
                 can_dc305_sync=user_has_permission(current_user(), "perm_sync_onedrive")
                 or user_has_permission(current_user(), "perm_sync_cts"),
@@ -107,7 +140,7 @@ def register_bcms_routes(app, page_context_fn):
                 page_context_fn,
                 active_nav="bcms_cts_reconcile",
                 page_heading="CTS Reconcile",
-                farm_options=list(HERD_FARM_OPTIONS),
+                **_cts_page_farm_context(),
                 can_sync=user_has_permission(current_user(), "perm_sync_cts"),
                 can_dc305_sync=user_has_permission(current_user(), "perm_sync_onedrive")
                 or user_has_permission(current_user(), "perm_sync_cts"),
@@ -123,7 +156,7 @@ def register_bcms_routes(app, page_context_fn):
                 page_context_fn,
                 active_nav="bcms_record_movements",
                 page_heading="Record Movements",
-                farm_options=list(HERD_FARM_OPTIONS),
+                **_cts_page_farm_context(),
                 can_send=user_has_permission(current_user(), "perm_sync_cts"),
             ),
         )
@@ -189,11 +222,10 @@ def register_bcms_routes(app, page_context_fn):
         denied = _require_bcms_page()
         if denied is not None:
             return denied
-        farm_key = (request.args.get("farm") or "").strip().upper()
-        if farm_key not in HERD_FARM_OPTIONS:
-            return _json_error(
-                f"Invalid farm. Use {', '.join(HERD_FARM_OPTIONS)}."
-            )
+        try:
+            farm_key = _normalize_farm_key(request.args.get("farm") or "")
+        except ValueError as exc:
+            return _json_error(str(exc))
         try:
             with get_session() as session:
                 return jsonify(list_pending_movements(session, farm_key))
@@ -205,11 +237,10 @@ def register_bcms_routes(app, page_context_fn):
         denied = _require_bcms_page()
         if denied is not None:
             return denied
-        farm_key = (request.args.get("farm") or "").strip().upper()
-        if farm_key not in HERD_FARM_OPTIONS:
-            return _json_error(
-                f"Invalid farm. Use {', '.join(HERD_FARM_OPTIONS)}."
-            )
+        try:
+            farm_key = _normalize_farm_key(request.args.get("farm") or "")
+        except ValueError as exc:
+            return _json_error(str(exc))
         try:
             with get_session() as session:
                 return jsonify(list_awaiting_cts_movements(session, farm_key))
@@ -221,11 +252,10 @@ def register_bcms_routes(app, page_context_fn):
         denied = _require_bcms_page()
         if denied is not None:
             return denied
-        farm_key = (request.args.get("farm") or "").strip().upper()
-        if farm_key not in HERD_FARM_OPTIONS:
-            return _json_error(
-                f"Invalid farm. Use {', '.join(HERD_FARM_OPTIONS)}."
-            )
+        try:
+            farm_key = _normalize_farm_key(request.args.get("farm") or "")
+        except ValueError as exc:
+            return _json_error(str(exc))
         try:
             with get_session() as session:
                 return jsonify(list_archived_movements(session, farm_key))
@@ -238,13 +268,12 @@ def register_bcms_routes(app, page_context_fn):
         if denied is not None:
             return denied
         body = request.get_json(silent=True) or {}
-        farm_key = str(body.get("farm") or "").strip().upper()
+        try:
+            farm_key = _normalize_farm_key(str(body.get("farm") or ""))
+        except ValueError as exc:
+            return _json_error(str(exc))
         kind = str(body.get("kind") or "").strip().lower()
         ids = body.get("ids") or []
-        if farm_key not in HERD_FARM_OPTIONS:
-            return _json_error(
-                f"Invalid farm. Use {', '.join(HERD_FARM_OPTIONS)}."
-            )
         if kind not in {"births", "movements"}:
             return _json_error("kind must be 'births' or 'movements'.")
         try:
@@ -271,12 +300,11 @@ def register_bcms_routes(app, page_context_fn):
         if denied is not None:
             return denied
         body = request.get_json(silent=True) or {}
-        farm_key = str(body.get("farm") or "").strip().upper()
+        try:
+            farm_key = _normalize_farm_key(str(body.get("farm") or ""))
+        except ValueError as exc:
+            return _json_error(str(exc))
         ids = body.get("ids") or []
-        if farm_key not in HERD_FARM_OPTIONS:
-            return _json_error(
-                f"Invalid farm. Use {', '.join(HERD_FARM_OPTIONS)}."
-            )
         try:
             with get_session() as session:
                 rows = _selected_pending_rows(

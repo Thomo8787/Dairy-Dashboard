@@ -9,7 +9,13 @@ from xml.etree import ElementTree as ET
 
 from sqlalchemy.orm import Session
 
-from services.cts_config import cts_ddts_is_configured, cts_farm_credentials
+from services.cts_config import (
+    cts_ddts_is_configured,
+    cts_farm_credentials,
+    cts_farm_option_values,
+    cts_is_ui_farm,
+    cts_normalize_farm_key,
+)
 from services.cts_client import (
     CtsError,
     cts_configured_farms,
@@ -18,7 +24,6 @@ from services.cts_client import (
     raise_if_ctws_exception,
     transfer_ctws,
 )
-from services.farms import HERD_FARM_OPTIONS
 from services.cts_movements import (
     deadline_day_rows,
     list_pending_movements,
@@ -462,10 +467,21 @@ def send_deadline_day_movements(
             "CTS is not configured. Set CTS_DDTS_USERNAME and CTS_DDTS_PASSWORD."
         )
 
-    requested = [f.strip().upper() for f in (farms or []) if f and f.strip()]
+    requested = [
+        cts_normalize_farm_key(f) for f in (farms or []) if f and str(f).strip()
+    ]
+    # Collapse ALH/BNK duplicates after normalize.
+    seen: set[str] = set()
+    ordered_requested: list[str] = []
+    for farm in requested:
+        if farm in seen:
+            continue
+        seen.add(farm)
+        ordered_requested.append(farm)
+    requested = ordered_requested
     ready = cts_configured_farms()
     if requested:
-        unknown = [f for f in requested if f not in set(HERD_FARM_OPTIONS)]
+        unknown = [f for f in requested if not cts_is_ui_farm(f)]
         if unknown:
             raise CtsSubmitError(f"Unsupported farm: {', '.join(unknown)}")
         farm_keys = [f for f in requested if f in ready]
@@ -552,8 +568,20 @@ def record_deadline_day_receipt(
     if not receipt_num:
         raise CtsSubmitError("Receipt number is required.")
 
-    requested = [f.strip().upper() for f in (farms or []) if f and f.strip()]
-    farm_keys = [f for f in (requested or list(HERD_FARM_OPTIONS)) if f in set(HERD_FARM_OPTIONS)]
+    requested = [
+        cts_normalize_farm_key(f) for f in (farms or []) if f and str(f).strip()
+    ]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for farm in requested:
+        if farm in seen:
+            continue
+        seen.add(farm)
+        ordered.append(farm)
+    option_values = set(cts_farm_option_values())
+    farm_keys = [
+        f for f in (ordered or list(cts_farm_option_values())) if f in option_values
+    ]
 
     results: list[dict[str, Any]] = []
     for farm_key in farm_keys:

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.farms import HERD_FARM_OPTIONS
+from services.cts_config import cts_farm_option_values, cts_is_ui_farm, cts_normalize_farm_key
 from services.database import StockPurchaseAnimal
 from services.cts_client import normalize_cts_etag
 from services.cts_movements import active_awaiting_cts_etags
@@ -196,8 +196,14 @@ def get_bcms_health(
 ) -> dict[str, Any]:
     """Aggregate BCMS reconcile health for the home dashboard widget."""
     today = as_of or dt.date.today()
-    farm_keys = [f.upper() for f in (farms or list(HERD_FARM_OPTIONS))]
-    farm_keys = [f for f in farm_keys if f in HERD_FARM_OPTIONS]
+    raw = [cts_normalize_farm_key(f) for f in (farms or list(cts_farm_option_values()))]
+    seen: set[str] = set()
+    farm_keys: list[str] = []
+    for farm in raw:
+        if farm in seen or not cts_is_ui_farm(farm):
+            continue
+        seen.add(farm)
+        farm_keys.append(farm)
 
     farm_summaries: list[dict[str, Any]] = []
     all_items: list[dict[str, Any]] = []

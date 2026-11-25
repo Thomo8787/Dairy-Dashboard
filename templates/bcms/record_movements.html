@@ -217,7 +217,7 @@
         <span class="section-label">Farm</span>
         <div class="farm-slicer" id="farm-slicer">
           {% for farm in farm_options %}
-          <button type="button" class="slicer-btn" data-value="{{ farm }}">{{ farm }}</button>
+          <button type="button" class="slicer-btn" data-value="{{ farm }}">{{ (farm_labels or {}).get(farm, farm) }}</button>
           {% endfor %}
         </div>
       </div>
@@ -271,12 +271,23 @@
 (() => {
   const CAN_SEND = {{ can_send | tojson }};
   const FARM_OPTIONS = {{ farm_options | tojson }};
+  const FARM_LABELS = {{ (farm_labels or {}) | tojson }};
   const farmParam = (new URLSearchParams(window.location.search).get("farm") || "").toUpperCase();
   let farm = FARM_OPTIONS.includes(farmParam) ? farmParam : (FARM_OPTIONS[0] || "ALH");
   let mode = "pending"; // pending | awaiting | archive
   let payload = null;
+  let listAbort = null;
+  let listSeq = 0;
   const selected = new Set();
   const sortState = { key: "event_date", dir: 1 };
+
+  function farmLabel(code) {
+    return (FARM_LABELS && FARM_LABELS[code]) || code;
+  }
+
+  function isAbortError(err) {
+    return Boolean(err && (err.name === "AbortError" || err.code === 20));
+  }
 
   const TYPE_LABELS = {
     birth: "Birth",
@@ -709,6 +720,11 @@
   }
 
   async function loadList() {
+    const requestedFarm = farm;
+    const requestedMode = mode;
+    const seq = ++listSeq;
+    if (listAbort) listAbort.abort();
+    listAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
     metaLine.textContent = "Loading…";
     selected.clear();
     const endpoint = isAwaiting()
@@ -717,11 +733,15 @@
         ? `/api/cts/movements/archive?farm=${encodeURIComponent(farm)}`
         : `/api/cts/movements/pending?farm=${encodeURIComponent(farm)}`;
     try {
-      const res = await fetch(endpoint);
+      const res = await fetch(endpoint, {
+        signal: listAbort ? listAbort.signal : undefined,
+      });
+      if (seq !== listSeq || requestedFarm !== farm || requestedMode !== mode) return;
       const data = await res.json().catch(() => ({}));
+      if (seq !== listSeq || requestedFarm !== farm || requestedMode !== mode) return;
       if (!res.ok) {
         setBanner("error", data.detail || `Failed to load movements (${res.status})`);
-        payload = { counts: {}, total: 0, rows: [] };
+        payload = { counts: {}, total: 0, rows: [], farm: requestedFarm };
         renderTable();
         return;
       }
@@ -734,8 +754,11 @@
       }
       renderTable();
     } catch (err) {
+      if (isAbortError(err) || seq !== listSeq || requestedFarm !== farm || requestedMode !== mode) {
+        return;
+      }
       setBanner("error", err.message || "Failed to load movements");
-      payload = { counts: {}, total: 0, rows: [] };
+      payload = { counts: {}, total: 0, rows: [], farm: requestedFarm };
       renderTable();
     }
   }

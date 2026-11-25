@@ -23,8 +23,10 @@ from services.cts_config import (
     cts_ddts_is_configured,
     cts_farm_credential_parts,
     cts_farm_credentials,
+    cts_farm_option_values,
+    cts_normalize_farm_key,
+    cts_ready_farms,
 )
-from services.farms import HERD_FARM_OPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +328,7 @@ def parse_holding_animals_xml(root: ET.Element) -> list[CtsAnimal]:
 
 def list_cattle_on_holding(farm: str) -> list[CtsAnimal]:
     """Fetch cattle currently on the farm's CTS holding."""
-    farm_key = (farm or "").strip().upper()
+    farm_key = cts_normalize_farm_key(farm)
     creds = cts_farm_credentials(farm_key)
     if creds is None:
         raise CtsError(
@@ -349,16 +351,13 @@ def list_cattle_on_holding(farm: str) -> list[CtsAnimal]:
 
 
 def cts_configured_farms() -> list[str]:
-    """Farms with complete CTWS + holding config (DDTS may still be missing)."""
-    return [
-        farm
-        for farm in HERD_FARM_OPTIONS
-        if cts_farm_credentials(farm) is not None
-    ]
+    """CTS UI farms with complete CTWS + holding config (DDTS may still be missing)."""
+    return cts_ready_farms()
 
 
 def cts_status() -> dict[str, Any]:
-    farm_parts = {farm: cts_farm_credential_parts(farm) for farm in HERD_FARM_OPTIONS}
+    option_values = cts_farm_option_values()
+    farm_parts = {farm: cts_farm_credential_parts(farm) for farm in option_values}
     return {
         "ddts_configured": cts_ddts_is_configured(),
         "farms": {
