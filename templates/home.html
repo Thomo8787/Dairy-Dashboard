@@ -204,33 +204,33 @@
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="conception_rate" data-suffix="%" aria-label="{{ farm.code }} conception rate">
           <p class="widget-kicker">Conception rate</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Services from 150 days ago to 30 days ago">—</p>
+          <p class="widget-title" title="Services in the 30 days ending 32–33 days before the last main PD">—</p>
+          <p class="widget-sub" title="Services in the 90 days before that window">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="services" aria-label="{{ farm.code }} services in the last 30 days">
           <p class="widget-kicker">Services</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="120-day services ÷ 4 (average per 30 days)">—</p>
+          <p class="widget-title" title="Cow services in the last 30 days">—</p>
+          <p class="widget-sub" title="120-day cow services ÷ 4 (average per 30 days)">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="days_to_first_service" aria-label="{{ farm.code }} days to first service">
           <p class="widget-kicker">Days to first service</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Average days to first service over the last 120 days">—</p>
+          <p class="widget-title" title="Average DIM at first service for cows first served in the last 30 days">—</p>
+          <p class="widget-sub" title="Average DIM at first service over the last 120 days">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="days_open" aria-label="{{ farm.code }} days open">
           <p class="widget-kicker">Days open</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Pregnancies confirmed over the last 120 days">—</p>
+          <p class="widget-title" title="Average days from calving to the conceiving service for pregnancies confirmed in the last 30 days">—</p>
+          <p class="widget-sub" title="Same average for pregnancies confirmed over the last 120 days">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="in_calf_100" data-suffix="%" aria-label="{{ farm.code }} 100 day in calf rate">
           <p class="widget-kicker">100 day in calf</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Cows reaching day 100 over the last 120 days">—</p>
+          <p class="widget-title" title="Share of cows whose day 100 fell in the last 30 days and who were in calf that day">—</p>
+          <p class="widget-sub" title="Same rate for cows whose day 100 fell in the 90 days before that">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="not_in_calf_200" data-suffix="%" aria-label="{{ farm.code }} 200 day not in calf">
           <p class="widget-kicker">200 day not in calf</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Cows reaching day 200 over the last 120 days">—</p>
+          <p class="widget-title" title="Share of cows whose day 200 fell in the last 30 days and who were not in calf that day">—</p>
+          <p class="widget-sub" title="Same rate for cows whose day 200 fell in the 90 days before that">—</p>
         </a>
       </div>
     </div>
@@ -245,23 +245,23 @@
         </a>
         <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="conception_rate" data-suffix="%" aria-label="Youngstock conception rate">
           <p class="widget-kicker">Conception rate</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Heifer services from 150 days ago to 30 days ago">—</p>
+          <p class="widget-title" title="Heifer services in the 30 days ending 33 days before the last main heifer PD">—</p>
+          <p class="widget-sub" title="Heifer services in the 90 days before that window">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="services" aria-label="Youngstock services in the last 30 days">
           <p class="widget-kicker">Services</p>
-          <p class="widget-title">—</p>
+          <p class="widget-title" title="Heifer services in the last 30 days">—</p>
           <p class="widget-sub" title="120-day heifer services ÷ 4 (average per 30 days)">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="days_to_first_service" aria-label="Youngstock days to first service">
           <p class="widget-kicker">Days to first service</p>
-          <p class="widget-title">—</p>
+          <p class="widget-title" title="Average age at first service for heifers first served in the last 30 days">—</p>
           <p class="widget-sub" title="Average age at first service over the last 120 days">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="age_at_first_calving" data-decimals="1" aria-label="Youngstock age at first calving">
           <p class="widget-kicker">Age at 1st calving</p>
-          <p class="widget-title">—</p>
-          <p class="widget-sub" title="Age at conception + 280 days, in months, over the last 120 days">—</p>
+          <p class="widget-title" title="Age at conception + 280 days, in months, for heifers confirmed in the last 30 days">—</p>
+          <p class="widget-sub" title="Same average for heifers confirmed over the last 120 days">—</p>
         </a>
       </div>
     </div>
@@ -454,12 +454,18 @@
         const suffix = tile.dataset.suffix || "";
         const decimals = tile.dataset.decimals || "";
         tile.className = subKey ? `home-widget status-${status}` : "home-widget status-unknown";
-        if (title) title.textContent = formatWhole(value, suffix, decimals);
+        if (title) {
+          title.textContent = formatWhole(value, suffix, decimals);
+          const topTip = row && row[`${metric}_title`];
+          if (topTip) title.title = topTip;
+        }
         if (!subKey) return;
         const sub = tile.querySelector(".widget-sub");
         if (!sub) return;
         sub.textContent = formatWhole(row ? row[subKey] : null, suffix, decimals);
         sub.className = `widget-sub tone-${status}`;
+        const subTip = row && (row[`${subKey}_title`] || row[`${metric}_avg_title`]);
+        if (subTip) sub.title = subTip;
       });
     } catch (_err) {
       leaveDash();
