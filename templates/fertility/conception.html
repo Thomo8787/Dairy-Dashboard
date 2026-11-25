@@ -231,6 +231,7 @@
         </div>
         <p class="help-text">
           Conception rate is pregnancies divided by pregnancies plus opens. SPC is those services divided by pregnancies. The 95% interval is blank below 20 diagnosed services.
+          A service is only included once it is old enough for a PD: 32 days before the last main PD on ALH, 33 days on the other farms and for heifers.
           {% if view == "monthly" %}
           Each farm table is cows, lactation 1 and above. WWF is WeaverWood Farm: heifer services, lactation 0, from every farm. Each table is a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first.
           {% elif view == "sire" %}
@@ -263,7 +264,7 @@
     ["conc", "%Conc", "Pregnancies divided by pregnancies plus opens."],
     ["preg", "#Preg", "Services with a pregnancy and no later open or abort."],
     ["open", "#Open", "Services diagnosed open, or followed by another service."],
-    ["other", "Other", "No pregnancy, open, or abort result."],
+    ["other", "Other", "Sold or died before a result, or no pregnancy check yet. Not counted in the conception rate."],
     ["abort", "Abort", "Services followed by an abort. Not counted in the conception rate."],
     ["total", "Total", "All services in the row."],
     ["share", "%Tot", "This row's share of the services in the table."],

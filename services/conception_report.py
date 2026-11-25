@@ -8,6 +8,10 @@ last pregnancy outcome before the next service:
 - abort: an abort after that service
 - other: sold, died, or no result
 
+Only services old enough for a PD are included: on or before each farm's last
+main PD day minus 32 days (ALH) or 33 days (other farms and heifers). That
+keeps the current month from filling with unchecked breedings.
+
 Conception rate and services per conception use pregnancies and opens only.
 Other and abort stay in the totals and out of the rate. The 95% interval is a
 Wilson interval and is blank below 20 diagnosed services.
@@ -27,7 +31,14 @@ from sqlalchemy.orm import Session
 from services.breeding_sires import load_sire_overrides, normalize_sire_code
 from services.conception_matches import active_spellings, load_matches, match_map
 from services.database import CowEvent
-from services.events_common import _animal_identifier, _coerce_date
+from services.events_common import (
+    _animal_identifier,
+    _coerce_date,
+    _conception_windows,
+    _last_main_pd_day,
+    _pd_lag_days,
+    _pd_session_min,
+)
 from services.farms import HERD_FARM_OPTIONS
 
 _FERTILITY_EVENTS = ("FRESH", "BRED", "PREG", "OPEN", "ABORT", "SOLD", "DIED")
@@ -45,6 +56,7 @@ Counts = tuple[int, int, int, int]
 _ZERO: Counts = (0, 0, 0, 0)
 
 _CACHE: dict[str, Any] = {"stamp": None, "cube": None}
+_CACHE_VERSION = 2
 _LOCK = threading.Lock()
 
 
@@ -276,6 +288,36 @@ def _shift_months(month: str, delta: int) -> str:
     return _format_month(_parse_month(month) + delta)
 
 
+def _pd_cutoffs(db: Session) -> tuple[dict[str, dt.date], dt.date]:
+    """Latest service date that is old enough for a PD, by farm and for heifers."""
+    today = dt.date.today()
+    farms = list(HERD_FARM_OPTIONS)
+    cow_cuts = {
+        farm: _conception_windows(
+            today,
+            _last_main_pd_day(
+                db,
+                farms=[farm],
+                lact_min=1,
+                min_checks=_pd_session_min(farm),
+            ),
+            _pd_lag_days(farm),
+        )[1]
+        for farm in farms
+    }
+    youngstock_cut = _conception_windows(
+        today,
+        _last_main_pd_day(
+            db,
+            farms=farms,
+            lact_eq=0,
+            min_checks=_pd_session_min(None),
+        ),
+        _pd_lag_days(None),
+    )[1]
+    return cow_cuts, youngstock_cut
+
+
 def _build_cube(db: Session) -> dict[str, Any]:
     rows = db.execute(
         select(
@@ -321,6 +363,7 @@ def _build_cube(db: Session) -> dict[str, Any]:
             if isinstance(fresh, dt.date):
                 fresh_dates.setdefault(key, fresh)
 
+    cow_cuts, youngstock_cut = _pd_cutoffs(db)
     by_month: dict[tuple[str, str, str], Counts] = {}
     by_sire: dict[tuple[str, str, str, str], Counts] = {}
     by_tech: dict[tuple[str, str, str, str], Counts] = {}
@@ -328,7 +371,10 @@ def _build_cube(db: Session) -> dict[str, Any]:
     for key, events in grouped.items():
         farm = key[0]
         parity = "youngstock" if key[2] == 0 else "cows"
+        cut_off = youngstock_cut if parity == "youngstock" else cow_cuts[farm]
         for day, sire, technician, outcome in lactation_services(events, fresh_dates.get(key)):
+            if day > cut_off:
+                continue
             month = _month_key(day)
             seen_months.add(month)
             by_month[(farm, parity, month)] = _add(by_month.get((farm, parity, month), _ZERO), outcome)
@@ -344,16 +390,21 @@ def _build_cube(db: Session) -> dict[str, Any]:
         "month": by_month,
         "sire": by_sire,
         "technician": by_tech,
+        "cutoffs": {
+            "cows": {farm: cut.isoformat() for farm, cut in cow_cuts.items()},
+            "youngstock": youngstock_cut.isoformat(),
+        },
     }
 
 
 def get_conception_cube(db: Session) -> dict[str, Any]:
     stamp = db.execute(select(func.max(CowEvent.import_timestamp))).scalar()
+    cache_key = (stamp, _CACHE_VERSION)
     with _LOCK:
-        if _CACHE["cube"] is not None and _CACHE["stamp"] == stamp:
+        if _CACHE["cube"] is not None and _CACHE["stamp"] == cache_key:
             return _CACHE["cube"]
         cube = _build_cube(db)
-        _CACHE["stamp"] = stamp
+        _CACHE["stamp"] = cache_key
         _CACHE["cube"] = cube
         return cube
 
