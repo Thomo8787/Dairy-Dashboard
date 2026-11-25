@@ -359,11 +359,19 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
             }
         )
 
+    from services.production_issues import build_production_issues
+
     return {
         "as_of": today.isoformat(),
         "completed_through": completed_through.isoformat(),
         "href": "/milk-quality/collections",
         "farms": farms_out,
+        "issues": build_production_issues(
+            farms=farms_out,
+            trend=trend,
+            loads=payload.get("rows") or [],
+            window_end=completed_through,
+        ),
         "bactoscan_chart": _build_quality_chart(
             trend, window_end=completed_through, key="bactoscan"
         ),

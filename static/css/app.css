@@ -618,6 +618,63 @@ html, body {
   color: #fff;
 }
 
+.home-issues-count {
+  display: inline-block;
+  margin-left: 0.35rem;
+  min-width: 1.15rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.home-issues-count[hidden] {
+  display: none;
+}
+
+.home-screen-btn.is-selected .home-issues-count {
+  background: #fff;
+  color: #991b1b;
+}
+
+.home-issue {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem 1.15rem;
+  margin: 0 0 0.75rem;
+}
+
+#home-issues .home-widget {
+  flex: 0 0 auto;
+  min-width: 8.75rem;
+  max-width: 11rem;
+  min-height: 5.6rem;
+}
+
+.home-issue-comment {
+  margin: 0;
+  flex: 1 1 16rem;
+  max-width: 46rem;
+  color: #1e3a5f;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.home-issues-empty {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .home-issue {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .home-screen-switch + .home-section {
   margin-top: 0;
 }

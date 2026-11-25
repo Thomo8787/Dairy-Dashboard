@@ -98,7 +98,14 @@ def _public(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def stored_production_summary(db: Session) -> dict[str, Any]:
-    return _public(_ensure(db, "production"))
+    found = _read(db, "production")
+    # Snapshots saved before the Issues tab have no comment list. Rebuild once.
+    if found is None or "issues" not in found:
+        _write(db, "production", get_production_summary())
+        found = _read(db, "production")
+    if found is None:
+        raise RuntimeError("Home tile production was not saved")
+    return _public(found)
 
 
 def stored_cows_in_milk(db: Session) -> dict[str, Any]:
