@@ -1641,8 +1641,18 @@ def milk_quality_api_collections_save():
     loads = payload.get("loads") or []
     if not isinstance(loads, list):
         return jsonify({"error": "loads must be a list."}), 400
+    meters = payload.get("meters")
+    if meters is not None and not isinstance(meters, dict):
+        return jsonify({"error": "meters must be an object."}), 400
     try:
-        return jsonify(save_collection_day(farm=farm, sample_date=sample_date, loads=loads))
+        return jsonify(
+            save_collection_day(
+                farm=farm,
+                sample_date=sample_date,
+                loads=loads,
+                meters=meters,
+            )
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from services.database import NmlMilkResult, get_session
+from services.database import MilkMeterReading, NmlMilkResult, get_session
 from services.farms import HERD_FARM_OPTIONS
 from services.muller_collections_import import clear_unfit_weighbridges
 from services.nml_pdf import FARM_PRODUCER_REF, normalize_sample_id
@@ -55,6 +55,37 @@ def _parse_temp(raw: Any) -> float | None:
         raise ValueError("Temperature must be a number.") from exc
 
 
+def _parse_meter(raw: Any, label: str) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a number.") from exc
+    if value < 0:
+        raise ValueError(f"{label} must be zero or greater.")
+    return round(value, 1)
+
+
+def _meter_out(value: float | None) -> float | int | None:
+    if value is None:
+        return None
+    number = float(value)
+    if number.is_integer():
+        return int(number)
+    return round(number, 1)
+
+
+def _meters_payload(row: MilkMeterReading | None) -> dict[str, float | int | None]:
+    if row is None:
+        return {"morning": None, "afternoon": None, "evening": None}
+    return {
+        "morning": _meter_out(row.morning_reading),
+        "afternoon": _meter_out(row.afternoon_reading),
+        "evening": _meter_out(row.evening_reading),
+    }
+
+
 def get_collection_day(*, farm: str, sample_date: dt.date) -> dict[str, Any]:
     farm_key = _farm_key(farm)
     with get_session() as session:
@@ -63,6 +94,14 @@ def get_collection_day(*, farm: str, sample_date: dt.date) -> dict[str, Any]:
             .where(NmlMilkResult.farm == farm_key, NmlMilkResult.sample_date == sample_date)
             .order_by(NmlMilkResult.load_number.asc(), NmlMilkResult.id.asc())
         ).all()
+        meters = _meters_payload(
+            session.scalar(
+                select(MilkMeterReading).where(
+                    MilkMeterReading.farm == farm_key,
+                    MilkMeterReading.sample_date == sample_date,
+                )
+            )
+        )
     loads = [
         {
             "load_number": row.load_number,
@@ -85,7 +124,46 @@ def get_collection_day(*, farm: str, sample_date: dt.date) -> dict[str, Any]:
         "has_existing": any(
             row.litres_load is not None and row.litres_load > 0 for row in rows
         ),
+        "meters": meters,
     }
+
+
+def _save_meter_readings(
+    session: Any,
+    farm: str,
+    sample_date: dt.date,
+    meters: dict[str, Any] | None,
+) -> None:
+    """ALH only. Readings are for the day's milkings, not for each tanker load."""
+    if farm != "ALH" or not isinstance(meters, dict):
+        return
+    morning = _parse_meter(meters.get("morning"), "Morning milking meter")
+    afternoon = _parse_meter(meters.get("afternoon"), "Afternoon milking meter")
+    evening = _parse_meter(meters.get("evening"), "Evening milking meter")
+    row = session.scalar(
+        select(MilkMeterReading).where(
+            MilkMeterReading.farm == farm,
+            MilkMeterReading.sample_date == sample_date,
+        )
+    )
+    if row is None:
+        if morning is None and afternoon is None and evening is None:
+            return
+        session.add(
+            MilkMeterReading(
+                farm=farm,
+                sample_date=sample_date,
+                morning_reading=morning,
+                afternoon_reading=afternoon,
+                evening_reading=evening,
+                updated_at=dt.datetime.now(dt.timezone.utc),
+            )
+        )
+        return
+    row.morning_reading = morning
+    row.afternoon_reading = afternoon
+    row.evening_reading = evening
+    row.updated_at = dt.datetime.now(dt.timezone.utc)
 
 
 def save_collection_day(
@@ -93,6 +171,7 @@ def save_collection_day(
     farm: str,
     sample_date: dt.date,
     loads: list[dict[str, Any]],
+    meters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     farm_key = _farm_key(farm)
     producer_ref = _producer_ref(farm_key)
@@ -204,11 +283,20 @@ def save_collection_day(
             row.imported_at = dt.datetime.now(dt.timezone.utc)
             updated += 1
 
+        _save_meter_readings(session, farm_key, sample_date, meters)
         session.flush()
         from services.nml_import import _merge_orphan_nml, _row_index
 
         merged = _merge_orphan_nml(
             session, _row_index(list(session.scalars(select(NmlMilkResult)).all()))
+        )
+        saved_meters = _meters_payload(
+            session.scalar(
+                select(MilkMeterReading).where(
+                    MilkMeterReading.farm == farm_key,
+                    MilkMeterReading.sample_date == sample_date,
+                )
+            )
         )
 
     return {
@@ -218,6 +306,7 @@ def save_collection_day(
         "rows_inserted": inserted,
         "rows_updated": updated,
         "orphans_merged": merged,
+        "meters": saved_meters,
     }
 
 

@@ -807,6 +807,25 @@ class NmlMilkResult(Base):
     )
 
 
+class MilkMeterReading(Base):
+    """ALH parlour meter readings for one collection day. One row per milking."""
+
+    __tablename__ = "milk_meter_readings"
+    __table_args__ = (
+        UniqueConstraint("farm", "sample_date", name="uq_milk_meter_farm_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), nullable=False, index=True)
+    sample_date = Column(Date, nullable=False, index=True)
+    morning_reading = Column(Float)
+    afternoon_reading = Column(Float)
+    evening_reading = Column(Float)
+    updated_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class EmbryoBatch(Base):
     """A planned flush, or frozen embryos already in the tank or purchased."""
 
