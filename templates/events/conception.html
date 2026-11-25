@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}Conception · {{ app_name }}{% endblock %}
+{% block page_title %}Conception{% endblock %}
+
+{% block extra_head %}
+  <style>
+    main { max-width: none; }
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(0, 4fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .page-layout { grid-template-columns: 1fr; } }
+    .sidebar-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .filter-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .filter-panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+    .filter-section { margin-bottom: 1rem; }
+    .filter-section:last-of-type { margin-bottom: 0; }
+    .filter-section .section-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .farm-slicer { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .slicer-btn .slicer-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      background: #e5e7eb;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+    .farm-slicer .slicer-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .farm-slicer .slicer-btn.selected .slicer-icon {
+      background: #fff;
+      color: var(--accent);
+    }
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .date-inputs label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.8125rem;
+      color: var(--muted);
+    }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label {
+      font-weight: 600;
+      min-width: 4.5rem;
+      text-align: right;
+      color: var(--text);
+    }
+    .help-text { font-size: 0.8125rem; color: var(--muted); line-height: 1.45; margin: 0.75rem 0 0; }
+    .meta-line { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+    .farm-block { margin-bottom: 1.75rem; }
+    .farm-block > h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
+    .table-block { margin-bottom: 1.25rem; }
+    .table-block h3 { margin: 0 0 0.45rem; font-size: 0.95rem; font-weight: 600; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .conception-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+    }
+    .conception-table th, .conception-table td {
+      padding: 0.4rem 0.7rem;
+      text-align: right;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .conception-table th:first-child, .conception-table td:first-child { text-align: left; }
+    .conception-table thead th { background: #1e3a5f; color: #fff; font-weight: 600; }
+    .conception-table tbody tr:hover { background: #f8fafc; }
+    .conception-table tfoot td {
+      background: #eef6ea;
+      font-weight: 700;
+      border-top: 2px solid #8aa888;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="page-layout">
+    <div class="sidebar-column">
+      <aside class="filter-panel">
+        <h2>Filters</h2>
+        <div class="filter-section">
+          <span class="section-label">Farm</span>
+          <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
+            {% for farm in farms %}
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="{{ farm.code }}"
+              aria-pressed="true"
+            >
+              <span class="slicer-icon" aria-hidden="true">{{ farm.code[0] }}</span>
+              {{ farm.code }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="filter-section">
+          <span class="section-label">Month range</span>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="min-date-label">—</span></label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0" aria-label="From month">
+            <label>To <span class="month-label" id="max-date-label">—</span></label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0" aria-label="To month">
+          </div>
+        </div>
+        <p class="help-text">
+          Cow services, lactation 1 and above. Conception rate is pregnancies divided by pregnancies plus opens. SPC is those services divided by pregnancies. The 95% interval is blank below 20 diagnosed services.
+          Each farm's month table is a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first. Sire and technician use only the months between From and To.
+        </p>
+        {% include "events/_refresh.html" %}
+      </aside>
+    </div>
+    <div class="content-panel">
+      <p class="meta-line" id="conception-status">Loading conception results…</p>
+      <div id="conception-tables"></div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const COLUMNS = [
+    ["ci", "95% CI", "Wilson 95% confidence interval. Blank when fewer than 20 services were diagnosed pregnant or open."],
+    ["conc", "%Conc", "Pregnancies divided by pregnancies plus opens."],
+    ["preg", "#Preg", "Services with a pregnancy and no later open or abort."],
+    ["open", "#Open", "Services diagnosed open, or followed by another service."],
+    ["other", "Other", "No pregnancy, open, or abort result."],
+    ["abort", "Abort", "Services followed by an abort. Not counted in the conception rate."],
+    ["total", "Total", "All services in the row."],
+    ["share", "%Tot", "This row's share of the services in the table."],
+    ["spc", "SPC", "Pregnancies plus opens, divided by pregnancies."]
+  ];
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const status = document.getElementById("conception-status");
+  const host = document.getElementById("conception-tables");
+  const farmSlicer = document.getElementById("farm-slicer");
+  const minRange = document.getElementById("min-date-range");
+  const maxRange = document.getElementById("max-date-range");
+  let monthList = [];
+  let requestId = 0;
+
+  function esc(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function selectedFarms() {
+    return [...farmSlicer.querySelectorAll(".slicer-btn.selected")]
+      .map((btn) => btn.dataset.value)
+      .filter(Boolean);
+  }
+
+  function rangeIndexes() {
+    let lo = parseInt(minRange.value, 10) || 0;
+    let hi = parseInt(maxRange.value, 10) || 0;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    return [lo, hi];
+  }
+
+  function updateLabels() {
+    const [lo, hi] = rangeIndexes();
+    const from = monthList[lo];
+    const to = monthList[hi];
+    document.getElementById("min-date-label").textContent = from ? sliderLabel(from) : "—";
+    document.getElementById("max-date-label").textContent = to ? sliderLabel(to) : "—";
+  }
+
+  function sliderLabel(key) {
+    const [year, month] = key.split("-");
+    return `${MONTHS[Number(month) - 1]} ${year}`;
+  }
+
+  function setupSliders(data) {
+    monthList = data.months || [];
+    const maxIdx = Math.max(0, monthList.length - 1);
+    minRange.min = "0";
+    maxRange.min = "0";
+    minRange.max = String(maxIdx);
+    maxRange.max = String(maxIdx);
+    const fromIdx = monthList.indexOf(data.from);
+    const toIdx = monthList.indexOf(data.to);
+    minRange.value = String(fromIdx >= 0 ? fromIdx : Math.max(0, maxIdx - 11));
+    maxRange.value = String(toIdx >= 0 ? toIdx : maxIdx);
+    updateLabels();
+  }
+
+  function headerRow(first) {
+    const cells = [`<th>${esc(first)}</th>`].concat(
+      COLUMNS.map(([key, label, title]) => `<th title="${esc(title)}">${esc(label)}</th>`)
+    );
+    return `<tr>${cells.join("")}</tr>`;
+  }
+
+  function bodyRow(row, foot) {
+    const tag = foot ? "td" : "td";
+    const cells = [`<${tag}>${esc(row.label)}</${tag}>`].concat(
+      COLUMNS.map(([key]) => `<${tag}>${esc(row[key])}</${tag}>`)
+    );
+    return `<tr>${cells.join("")}</tr>`;
+  }
+
+  function tableHtml(firstColumn, table) {
+    return `
+      <section class="table-block">
+        <h3>${esc(table.heading)}</h3>
+        <div class="table-wrap">
+          <table class="conception-table">
+            <thead>${headerRow(firstColumn)}</thead>
+            <tbody>${table.rows.map((row) => bodyRow(row, false)).join("")}</tbody>
+            <tfoot>${bodyRow(table.total, true)}</tfoot>
+          </table>
+        </div>
+      </section>`;
+  }
+
+  function render(data) {
+    const parts = [];
+    let farmOpen = false;
+    let lastFarm = null;
+    (data.month_tables || []).forEach((table) => {
+      if (table.farm !== lastFarm) {
+        if (farmOpen) parts.push("</section>");
+        parts.push(`<section class="farm-block"><h2>${esc(table.farm)}</h2>`);
+        farmOpen = true;
+        lastFarm = table.farm;
+      }
+      parts.push(tableHtml("Month", table));
+    });
+    if (farmOpen) parts.push("</section>");
+    parts.push(tableHtml("Sire", data.sire));
+    parts.push(tableHtml("Technician", data.technician));
+    host.innerHTML = parts.join("");
+  }
+
+  async function load(resetSliders) {
+    const token = ++requestId;
+    status.textContent = "Loading conception results…";
+    const params = new URLSearchParams();
+    selectedFarms().forEach((farm) => params.append("farm", farm));
+    if (!resetSliders && monthList.length) {
+      const [lo, hi] = rangeIndexes();
+      if (monthList[lo]) params.set("from", monthList[lo]);
+      if (monthList[hi]) params.set("to", monthList[hi]);
+    }
+    try {
+      const res = await fetch("/events/api/fertility/conception?" + params.toString());
+      const data = await res.json().catch(() => ({}));
+      if (token !== requestId) return;
+      if (!res.ok) throw new Error(data.error || "Could not load conception results");
+      if (resetSliders || !monthList.length) setupSliders(data);
+      render(data);
+      const farms = (data.farms || []).join(", ");
+      status.textContent = farms ? `Cows on ${farms}` : "No farms selected";
+    } catch (err) {
+      if (token !== requestId) return;
+      status.textContent = err.message || "Could not load conception results";
+      host.innerHTML = "";
+    }
+  }
+
+  farmSlicer.addEventListener("click", (event) => {
+    const btn = event.target.closest(".slicer-btn");
+    if (!btn || btn.classList.contains("farm-select-all")) return;
+    const selected = btn.classList.contains("selected");
+    const count = farmSlicer.querySelectorAll(".slicer-btn.selected").length;
+    if (selected && count <= 1) return;
+    btn.classList.toggle("selected");
+    btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+    load(false);
+  });
+
+  function onRange() {
+    updateLabels();
+    load(false);
+  }
+  minRange.addEventListener("change", onRange);
+  maxRange.addEventListener("change", onRange);
+  minRange.addEventListener("input", updateLabels);
+  maxRange.addEventListener("input", updateLabels);
+
+  load(true);
+})();
+</script>
+{% endblock %}

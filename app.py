@@ -71,6 +71,7 @@ from services.sales_payments import (
     unarchive_payments,
 )
 from services.births_report import build_births_report
+from services.conception_report import conception_tables
 from services.stp_report import build_stp_report
 from services.urine_ph_report import build_urine_ph_report
 from services.breeding_sires import (
@@ -2672,6 +2673,32 @@ def events_total_protein():
 @permission_required("perm_events")
 def events_urine_ph():
     return _render_events_page("urine-ph")
+
+
+@app.route("/events/fertility/conception")
+@permission_required("perm_events")
+def events_fertility_conception():
+    return render_template(
+        "events/conception.html",
+        **_page_context(active_nav="events_fertility_conception"),
+    )
+
+
+@app.route("/events/api/fertility/conception")
+def events_api_fertility_conception():
+    user, error = _events_json_user()
+    if error:
+        return error
+    farms = request.args.getlist("farm") or None
+    with get_session() as session:
+        return jsonify(
+            conception_tables(
+                session,
+                farms,
+                request.args.get("from") or None,
+                request.args.get("to") or None,
+            )
+        )
 
 
 @app.route("/api/events/dairy-semen-30d")

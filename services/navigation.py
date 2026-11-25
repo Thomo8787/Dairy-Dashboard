@@ -111,6 +111,20 @@ NAV_ITEMS = [
             {"id": "events_disease", "label": "Disease", "endpoint": "events_disease", "permission": "perm_events"},
             {"id": "events_hooftrimming", "label": "Hoof Trimming", "endpoint": "events_hooftrimming", "permission": "perm_events"},
             {"id": "events_breedings", "label": "Breedings", "endpoint": "events_breedings", "permission": "perm_events"},
+            {
+                "id": "events_fertility",
+                "label": "Fertility",
+                "endpoint": "events_fertility_conception",
+                "permission": "perm_events",
+                "children": [
+                    {
+                        "id": "events_fertility_conception",
+                        "label": "Conception",
+                        "endpoint": "events_fertility_conception",
+                        "permission": "perm_events",
+                    },
+                ],
+            },
             {"id": "events_total_protein", "label": "Total Protein", "endpoint": "events_total_protein", "permission": "perm_events"},
             {"id": "events_urine_ph", "label": "Urine PH", "endpoint": "events_urine_ph", "permission": "perm_events"},
         ],
