@@ -2675,16 +2675,48 @@ def events_urine_ph():
     return _render_events_page("urine-ph")
 
 
-@app.route("/events/fertility/conception")
-@permission_required("perm_events")
-def events_fertility_conception():
+def _render_fertility(view: str, heading: str):
     return render_template(
-        "events/conception.html",
-        **_page_context(active_nav="events_fertility_conception"),
+        "fertility/conception.html",
+        **_page_context(active_nav=f"fertility_{view}", page_heading=heading),
+        view=view,
     )
 
 
-@app.route("/events/api/fertility/conception")
+@app.route("/fertility")
+@permission_required("perm_events")
+def fertility():
+    return redirect(url_for("fertility_monthly"))
+
+
+@app.route("/fertility/monthly")
+@permission_required("perm_events")
+def fertility_monthly():
+    return _render_fertility("monthly", "Monthly Conception")
+
+
+@app.route("/fertility/sire")
+@permission_required("perm_events")
+def fertility_sire():
+    return _render_fertility("sire", "Sire Conception")
+
+
+@app.route("/fertility/technician")
+@permission_required("perm_events")
+def fertility_technician():
+    return _render_fertility("technician", "Technician Conception")
+
+
+@app.route("/events/fertility/conception")
+@permission_required("perm_events")
+def events_fertility_conception():
+    target = url_for("fertility_monthly")
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode()}"
+    return redirect(target)
+
+
+@app.route("/fertility/api/conception")
 def events_api_fertility_conception():
     user, error = _events_json_user()
     if error:

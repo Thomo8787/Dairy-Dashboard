@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Conception · {{ app_name }}{% endblock %}
-{% block page_title %}Conception{% endblock %}
+{% block title %}{{ page_heading }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ page_heading }}{% endblock %}
 
 {% block extra_head %}
   <style>
@@ -146,14 +146,20 @@
         </div>
         <p class="help-text">
           Cow services, lactation 1 and above. Conception rate is pregnancies divided by pregnancies plus opens. SPC is those services divided by pregnancies. The 95% interval is blank below 20 diagnosed services.
-          Each farm's month table is a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first. Sire and technician use only the months between From and To.
+          {% if view == "monthly" %}
+          Each farm has its own table, a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first.
+          {% elif view == "sire" %}
+          One row per sire. Selected farms are added together. The table uses the months between From and To.
+          {% else %}
+          One row per technician. Selected farms are added together. The table uses the months between From and To. A service with no technician is listed as Not recorded.
+          {% endif %}
         </p>
         {% include "events/_refresh.html" %}
       </aside>
     </div>
     <div class="content-panel">
       <p class="meta-line" id="conception-status">Loading conception results…</p>
-      <div id="conception-tables"></div>
+      <div id="conception-tables" data-view="{{ view }}"></div>
     </div>
   </div>
 {% endblock %}
@@ -260,6 +266,15 @@
   }
 
   function render(data) {
+    const view = host.dataset.view;
+    if (view === "sire") {
+      host.innerHTML = tableHtml("Sire", data.sire);
+      return;
+    }
+    if (view === "technician") {
+      host.innerHTML = tableHtml("Technician", data.technician);
+      return;
+    }
     const parts = [];
     let farmOpen = false;
     let lastFarm = null;
@@ -273,8 +288,6 @@
       parts.push(tableHtml("Month", table));
     });
     if (farmOpen) parts.push("</section>");
-    parts.push(tableHtml("Sire", data.sire));
-    parts.push(tableHtml("Technician", data.technician));
     host.innerHTML = parts.join("");
   }
 
@@ -289,7 +302,7 @@
       if (monthList[hi]) params.set("to", monthList[hi]);
     }
     try {
-      const res = await fetch("/events/api/fertility/conception?" + params.toString());
+      const res = await fetch("/fertility/api/conception?" + params.toString());
       const data = await res.json().catch(() => ({}));
       if (token !== requestId) return;
       if (!res.ok) throw new Error(data.error || "Could not load conception results");
