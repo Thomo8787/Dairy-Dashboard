@@ -72,7 +72,7 @@ from services.sales_payments import (
 )
 from services.births_report import build_births_report
 from services.conception_matches import remove_match, save_match
-from services.conception_report import conception_tables
+from services.conception_report import conception_issues, conception_tables
 from services.stp_report import build_stp_report
 from services.urine_ph_report import build_urine_ph_report
 from services.breeding_sires import (
@@ -2708,6 +2708,15 @@ def fertility_sire():
 @permission_required("perm_events")
 def fertility_technician():
     return _render_fertility("technician", "Technician Conception")
+
+
+@app.route("/fertility/api/conception-issues")
+def events_api_conception_issues():
+    user, error = _events_json_user()
+    if error:
+        return error
+    with get_session() as session:
+        return jsonify({"issues": conception_issues(session)})
 
 
 @app.route("/events/fertility/conception")

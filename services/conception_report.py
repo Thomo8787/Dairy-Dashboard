@@ -56,7 +56,10 @@ Counts = tuple[int, int, int, int]
 _ZERO: Counts = (0, 0, 0, 0)
 
 _CACHE: dict[str, Any] = {"stamp": None, "cube": None}
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
+_LOW_CONCEPTION = 40
+_MIN_CONCEPTION_SERVICES = 50
+_RECENT_CONCEPTION_DAYS = 60
 _LOCK = threading.Lock()
 
 
@@ -367,11 +370,14 @@ def _build_cube(db: Session) -> dict[str, Any]:
     by_month: dict[tuple[str, str, str], Counts] = {}
     by_sire: dict[tuple[str, str, str, str], Counts] = {}
     by_tech: dict[tuple[str, str, str, str], Counts] = {}
+    by_sire_recent: dict[tuple[str, str, str], Counts] = {}
+    by_tech_recent: dict[tuple[str, str, str], Counts] = {}
     seen_months: set[str] = set()
     for key, events in grouped.items():
         farm = key[0]
         parity = "youngstock" if key[2] == 0 else "cows"
         cut_off = youngstock_cut if parity == "youngstock" else cow_cuts[farm]
+        recent_start = cut_off - dt.timedelta(days=_RECENT_CONCEPTION_DAYS - 1)
         for day, sire, technician, outcome in lactation_services(events, fresh_dates.get(key)):
             if day > cut_off:
                 continue
@@ -384,12 +390,21 @@ def _build_cube(db: Session) -> dict[str, Any]:
             by_tech[(farm, parity, month, technician)] = _add(
                 by_tech.get((farm, parity, month, technician), _ZERO), outcome
             )
+            if day >= recent_start:
+                by_sire_recent[(farm, parity, sire)] = _add(
+                    by_sire_recent.get((farm, parity, sire), _ZERO), outcome
+                )
+                by_tech_recent[(farm, parity, technician)] = _add(
+                    by_tech_recent.get((farm, parity, technician), _ZERO), outcome
+                )
 
     return {
         "months": _continuous_months(seen_months),
         "month": by_month,
         "sire": by_sire,
         "technician": by_tech,
+        "sire_recent": by_sire_recent,
+        "technician_recent": by_tech_recent,
         "cutoffs": {
             "cows": {farm: cut.isoformat() for farm, cut in cow_cuts.items()},
             "youngstock": youngstock_cut.isoformat(),
@@ -630,3 +645,114 @@ def conception_tables(
             "matched": matched_rows(tech_counts, tech_matches, tech_grand),
         },
     }
+
+
+def _diagnosed(counts: Counts) -> int:
+    return counts[0] + counts[1]
+
+
+def _rate(counts: Counts) -> int | None:
+    diagnosed = _diagnosed(counts)
+    if diagnosed <= 0:
+        return None
+    return int(_round_half_up(100 * counts[0] / diagnosed))
+
+
+def _service_word(count: int) -> str:
+    return "1 service" if count == 1 else f"{count:,} services"
+
+
+def _named_totals(bucket: dict[Any, Counts]) -> dict[str, Counts]:
+    totals: dict[str, Counts] = {}
+    for key, counts in bucket.items():
+        name = key[-1]
+        totals[name] = _sum([totals.get(name, _ZERO), counts])
+    return totals
+
+
+def _conception_comment(rate: int, diagnosed: int, recent: Counts) -> str:
+    lead = f"{rate}% across {_service_word(diagnosed)} in the last 12 months."
+    recent_n = _diagnosed(recent)
+    if recent_n <= 0:
+        return lead + " There are no diagnosed services in the last 60 days."
+    recent_rate = _rate(recent)
+    recent_bit = f"The last 60 days are {recent_rate}% across {_service_word(recent_n)}"
+    if recent_rate is None:
+        return lead
+    if recent_rate > rate:
+        return f"{lead} {recent_bit}, so this has picked up."
+    if recent_rate < rate:
+        return f"{lead} {recent_bit}, so this has not picked up."
+    return f"{lead} {recent_bit}, the same as the year."
+
+
+def _low_conception_issues(
+    kind: str,
+    year_bucket: dict[Any, Counts],
+    recent_bucket: dict[Any, Counts],
+    matches: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Names under 40% with at least 50 diagnosed services in the last 12 months."""
+    aliases = match_map(matches)
+
+    def merged(bucket: dict[Any, Counts]) -> dict[str, Counts]:
+        totals: dict[str, Counts] = {}
+        for label, counts in collapse_counts(_named_totals(bucket), aliases):
+            totals[label] = _sum([totals.get(label, _ZERO), counts])
+        return totals
+
+    year_rows = list(merged(year_bucket).items())
+    recent_rows = merged(recent_bucket)
+    noun = "Sire" if kind == "sire" else "Technician"
+    href = "/fertility/sire" if kind == "sire" else "/fertility/technician"
+    metric = "sire_conception" if kind == "sire" else "technician_conception"
+    issues: list[dict[str, Any]] = []
+    for label, counts in year_rows:
+        if not label or label == _NOT_RECORDED:
+            continue
+        diagnosed = _diagnosed(counts)
+        rate = _rate(counts)
+        if diagnosed < _MIN_CONCEPTION_SERVICES or rate is None or rate >= _LOW_CONCEPTION:
+            continue
+        recent = recent_rows.get(label, _ZERO)
+        issues.append(
+            {
+                "farm": noun,
+                "metric": metric,
+                "label": label,
+                "value": rate,
+                "baseline": diagnosed,
+                "value_text": f"{rate}%",
+                "baseline_text": f"{diagnosed:,}",
+                "value_title": "Conception rate over the last 12 months",
+                "baseline_title": "Diagnosed services in those 12 months",
+                "comment": _conception_comment(rate, diagnosed, recent),
+                "href": href,
+            }
+        )
+    issues.sort(key=lambda item: (item["value"], str(item["label"]).lower()))
+    return issues
+
+
+def conception_issues(db: Session) -> list[dict[str, Any]]:
+    """Sires and technicians under 40% across 50 or more services."""
+    cube = get_conception_cube(db)
+    months = cube.get("months") or []
+    start, end = _default_range(months)
+    window = set(_months_between(start, end))
+    year_sire = {
+        key: counts
+        for key, counts in (cube.get("sire") or {}).items()
+        if key[2] in window
+    }
+    year_tech = {
+        key: counts
+        for key, counts in (cube.get("technician") or {}).items()
+        if key[2] in window
+    }
+    return _low_conception_issues("sire", year_sire, cube.get("sire_recent") or {}, load_matches(db, "sire")) + _low_conception_issues(
+        "technician",
+        year_tech,
+        cube.get("technician_recent") or {},
+        load_matches(db, "technician"),
+    )
