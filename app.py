@@ -1400,6 +1400,19 @@ def milk_quality_collections():
     )
 
 
+@app.route("/milk-quality/collections/alh-reconcile")
+@permission_required("perm_milk_quality")
+def milk_quality_alh_reconcile():
+    from services.alh_reconcile import reconcile_page
+
+    report = reconcile_page(request.args.getlist("month"))
+    return render_template(
+        "milk_quality/alh_reconcile.html",
+        report=report,
+        **_page_context(active_nav="milk_quality_alh_reconcile"),
+    )
+
+
 @app.route("/milk-quality/milk-per-cow")
 @permission_required("perm_milk_quality")
 def milk_quality_milk_per_cow():

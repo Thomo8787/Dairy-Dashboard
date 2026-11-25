@@ -136,10 +136,24 @@ NAV_ITEMS = [
         "permission": "perm_milk_quality",
         "children": [
             {
-                "id": "milk_quality_collections",
+                "id": "milk_quality_collections_group",
                 "label": "Collections",
                 "endpoint": "milk_quality_collections",
                 "permission": "perm_milk_quality",
+                "children": [
+                    {
+                        "id": "milk_quality_collections",
+                        "label": "Collections",
+                        "endpoint": "milk_quality_collections",
+                        "permission": "perm_milk_quality",
+                    },
+                    {
+                        "id": "milk_quality_alh_reconcile",
+                        "label": "ALH Reconcile",
+                        "endpoint": "milk_quality_alh_reconcile",
+                        "permission": "perm_milk_quality",
+                    },
+                ],
             },
             {
                 "id": "milk_quality_milk_per_cow",
