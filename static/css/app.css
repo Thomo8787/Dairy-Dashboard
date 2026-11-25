@@ -647,11 +647,30 @@ html, body {
   margin: 0 0 0.75rem;
 }
 
+.home-issues-group {
+  margin: 0 0 0.35rem;
+}
+
+.home-issues-group + .home-issues-group {
+  margin-top: 0.85rem;
+}
+
 #home-issues .home-widget {
-  flex: 0 0 auto;
-  min-width: 8.75rem;
+  flex: 0 0 13rem;
+  width: 13rem;
+  height: 6.4rem;
+  min-width: 13rem;
   max-width: 13rem;
-  min-height: 5.6rem;
+  align-items: stretch;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+#home-issues .home-widget .widget-kicker,
+#home-issues .home-widget .widget-title,
+#home-issues .home-widget .widget-sub {
+  width: 100%;
+  overflow-wrap: break-word;
 }
 
 .home-issue-comment {
@@ -671,7 +690,18 @@ html, body {
 @media (max-width: 560px) {
   .home-issue {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .home-issue-comment {
+    flex: none;
+    width: auto;
+    max-width: none;
+  }
+
+  #home-issues .home-widget {
+    flex: none;
   }
 }
 

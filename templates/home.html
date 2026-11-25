@@ -812,7 +812,7 @@
     milk: issuesRoot.dataset.milk === "1",
     fertility: issuesRoot.dataset.fertility === "1",
   };
-  const parts = { milk: [], fertility: [] };
+  const parts = { milk: [], fertility: [], health: [] };
   const ready = { milk: !needs.milk, fertility: !needs.fertility };
   const failed = { milk: false, fertility: false };
 
@@ -851,38 +851,55 @@
       return;
     }
     if (empty) empty.hidden = true;
-    rows.forEach((issue) => {
-      const row = document.createElement("article");
-      row.className = "home-issue";
-      const link = document.createElement("a");
-      link.className = "home-widget status-red";
-      link.href = issue.href || "/milk-quality/collections";
-      const farm = issue.farm || "";
-      const label = issue.label || "";
-      link.setAttribute("aria-label", `${farm} ${label}`.trim());
-      const kicker = document.createElement("p");
-      kicker.className = "widget-kicker";
-      kicker.textContent = farm && label ? `${farm} · ${label}` : (label || farm);
-      const title = document.createElement("p");
-      title.className = "widget-title";
-      title.textContent = issue.value_text || formatIssueNumber(issue.metric, issue.value);
-      title.title = issue.value_title || "7-day average (yesterday and the 6 days before)";
-      const sub = document.createElement("p");
-      sub.className = "widget-sub";
-      sub.textContent = issue.baseline_text || formatIssueNumber(issue.metric, issue.baseline);
-      sub.title = issue.baseline_title || "30-day average (ending yesterday)";
-      link.append(kicker, title, sub);
-      const comment = document.createElement("p");
-      comment.className = "home-issue-comment";
-      comment.textContent = issue.comment || "";
-      row.append(link, comment);
-      list.append(row);
+    const groups = [
+      ["Production", parts.milk],
+      ["Fertility", parts.fertility],
+      ["Health", parts.health],
+    ];
+    groups.forEach(([title, items]) => {
+      if (!items.length) return;
+      const section = document.createElement("section");
+      section.className = "home-issues-group";
+      const heading = document.createElement("h3");
+      heading.className = "home-farm-label";
+      heading.textContent = title;
+      section.append(heading);
+      items.forEach((issue) => section.append(renderIssueRow(issue)));
+      list.append(section);
     });
+  }
+
+  function renderIssueRow(issue) {
+    const row = document.createElement("article");
+    row.className = "home-issue";
+    const link = document.createElement("a");
+    link.className = "home-widget status-red";
+    link.href = issue.href || "/milk-quality/collections";
+    const farm = issue.farm || "";
+    const label = issue.label || "";
+    link.setAttribute("aria-label", `${farm} ${label}`.trim());
+    const kicker = document.createElement("p");
+    kicker.className = "widget-kicker";
+    kicker.textContent = farm && label ? `${farm} · ${label}` : (label || farm);
+    const title = document.createElement("p");
+    title.className = "widget-title";
+    title.textContent = issue.value_text || formatIssueNumber(issue.metric, issue.value);
+    title.title = issue.value_title || "7-day average (yesterday and the 6 days before)";
+    const sub = document.createElement("p");
+    sub.className = "widget-sub";
+    sub.textContent = issue.baseline_text || formatIssueNumber(issue.metric, issue.baseline);
+    sub.title = issue.baseline_title || "30-day average (ending yesterday)";
+    link.append(kicker, title, sub);
+    const comment = document.createElement("p");
+    comment.className = "home-issue-comment";
+    comment.textContent = issue.comment || "";
+    row.append(link, comment);
+    return row;
   }
 
   function publishIssues() {
     if (!ready.milk || !ready.fertility) return;
-    const rows = [...parts.milk, ...parts.fertility];
+    const rows = [...parts.milk, ...parts.fertility, ...parts.health];
     if (!rows.length && (failed.milk || failed.fertility)) {
       renderIssueList([], "Couldn't load issues.");
       return;
