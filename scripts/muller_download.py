@@ -136,6 +136,7 @@ def run(playwright: Playwright) -> list[Path]:
     page = context.new_page()
     page.set_default_timeout(90_000)
     saved: list[Path] = []
+    imported = False
     try:
         try:
             response = page.goto(LOGIN_URL, wait_until="domcontentloaded")
@@ -163,11 +164,30 @@ def run(playwright: Playwright) -> list[Path]:
             saved.append(destination)
             print(f"Saved {destination.name}", flush=True)
             _import_file(destination)
+            imported = True
             _return_home(page)
     finally:
-        context.close()
-        browser.close()
+        try:
+            context.close()
+            browser.close()
+        finally:
+            if imported:
+                _save_milk_tiles()
     return saved
+
+
+def _save_milk_tiles() -> None:
+    """Rebuild the Home milk tiles from the litres just imported."""
+    try:
+        from services.database import get_session, init_db
+        from services.home_tiles import refresh_home_tiles
+
+        init_db()
+        with get_session() as session:
+            refresh_home_tiles(session, parts="milk")
+        print("Home milk tiles saved", flush=True)
+    except Exception as exc:
+        print(f"Could not save Home milk tiles: {exc}", flush=True)
 
 
 def _import_file(path: Path) -> None:
