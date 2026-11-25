@@ -2210,6 +2210,20 @@ def _apply_compared_value(
         row[f"{metric}_status"] = _lower_is_better_band(float(shown_recent), float(shown_baseline))
 
 
+def _with_fdat_fresh(
+    events: list[tuple[dt.date, str]],
+    fdat: dt.date | None,
+) -> list[tuple[dt.date, str]]:
+    """Use the cow's fresh date when this farm has no FRESH event.
+
+    Happens when she calved on another herd (e.g. ALH) and moved with her
+    fdat filled in, but without a FRESH line in the new farm's event file.
+    """
+    if fdat is None or any(name == "FRESH" for _day, name in events):
+        return events
+    return [(fdat, "FRESH"), *events]
+
+
 def _walk_lactation(
     events: list[tuple[dt.date, str]],
     *,
@@ -2328,6 +2342,7 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
         for farm in farms
     }
     grouped: dict[tuple[str, str, int], list[tuple[dt.date, str]]] = {}
+    fresh_dates: dict[tuple[str, str, int], dt.date] = {}
     event_rows = db.execute(
         select(
             CowEvent.farm,
@@ -2336,18 +2351,23 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
             CowEvent.lact,
             CowEvent.event,
             CowEvent.event_date,
+            CowEvent.fdat,
         )
         .where(CowEvent.event.in_(_FERTILITY_EVENTS))
         .where(CowEvent.event_date.isnot(None))
         .where(CowEvent.lact >= 1)
         .where(CowEvent.farm.in_(farms))
     ).all()
-    for farm, cow_id, etag, lact, event, event_date in event_rows:
+    for farm, cow_id, etag, lact, event, event_date, fdat in event_rows:
         animal = _animal_identifier(cow_id, etag)
         day = _coerce_date(event_date)
         if farm not in result or animal is None or lact is None or not isinstance(day, dt.date):
             continue
-        grouped.setdefault((farm, animal, int(lact)), []).append((day, event))
+        key = (farm, animal, int(lact))
+        grouped.setdefault(key, []).append((day, event))
+        birth_fresh = _coerce_date(fdat)
+        if isinstance(birth_fresh, dt.date):
+            fresh_dates.setdefault(key, birth_fresh)
 
     pregnant_rows = db.execute(
         select(
@@ -2356,21 +2376,33 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
             HerdInventory.etag,
             HerdInventory.lact,
             HerdInventory.dcc,
+            HerdInventory.fdat,
         )
         .where(HerdInventory.rc.in_(_PREGNANT_RC))
         .where(HerdInventory.lact >= 1)
         .where(HerdInventory.farm.in_(farms))
     ).all()
     pregnant: dict[tuple[str, str, int], float | None] = {}
-    for farm, cow_id, etag, lact, dcc in pregnant_rows:
+    for farm, cow_id, etag, lact, dcc, fdat in pregnant_rows:
         animal = _animal_identifier(cow_id, etag)
         if farm not in result or animal is None or lact is None:
             continue
-        pregnant[(farm, animal, int(lact))] = dcc
+        key = (farm, animal, int(lact))
+        pregnant[key] = dcc
+        birth_fresh = _coerce_date(fdat)
+        if isinstance(birth_fresh, dt.date):
+            fresh_dates.setdefault(key, birth_fresh)
 
     keys = set(grouped) | set(pregnant)
     for farm, animal, lact in keys:
-        fresh, exit_day, services, conceptions = _walk_lactation(grouped.get((farm, animal, lact), []))
+        key = (farm, animal, lact)
+        # Prefer a real FRESH event; otherwise use fdat (common after a
+        # move when the calving was recorded on another farm).
+        # require_fresh=False still matches DairyComp when both are missing.
+        fresh, exit_day, services, conceptions = _walk_lactation(
+            _with_fdat_fresh(grouped.get(key, []), fresh_dates.get(key)),
+            require_fresh=False,
+        )
         _add_inventory_conception(
             conceptions,
             services,
