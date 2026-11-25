@@ -735,7 +735,9 @@ def _low_conception_issues(
 
 
 def conception_issues(db: Session) -> list[dict[str, Any]]:
-    """Sires and technicians under 40% across 50 or more services."""
+    """Red farm conception tiles, then sires and technicians under 40%."""
+    from services.farm_conception_issues import farm_conception_issues
+
     cube = get_conception_cube(db)
     months = cube.get("months") or []
     start, end = _default_range(months)
@@ -750,7 +752,9 @@ def conception_issues(db: Session) -> list[dict[str, Any]]:
         for key, counts in (cube.get("technician") or {}).items()
         if key[2] in window
     }
-    return _low_conception_issues("sire", year_sire, cube.get("sire_recent") or {}, load_matches(db, "sire")) + _low_conception_issues(
+    return farm_conception_issues(db) + _low_conception_issues(
+        "sire", year_sire, cube.get("sire_recent") or {}, load_matches(db, "sire")
+    ) + _low_conception_issues(
         "technician",
         year_tech,
         cube.get("technician_recent") or {},
