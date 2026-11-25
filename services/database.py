@@ -99,6 +99,7 @@ class User(Base):
     perm_sync_sensehub = Column(Boolean, nullable=False, default=False)
     perm_sync_sensehub_cull = Column(Boolean, nullable=False, default=False)
     perm_sync_cts = Column(Boolean, nullable=False, default=False)
+    perm_match_names = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -944,6 +945,20 @@ class EmbryoImplant(Base):
     batch = relationship("EmbryoBatch", back_populates="implants")
 
 
+class ConceptionNameMatch(Base):
+    """A sire or technician spelling shown under a chosen name."""
+
+    __tablename__ = "conception_name_matches"
+    __table_args__ = (
+        UniqueConstraint("kind", "name", name="uq_conception_name_match"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(16), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    display_name = Column(String(255), nullable=False)
+
+
 class BreedingSireClassification(Base):
     """Manual beef/dairy classification for breeding sires without .b/.s suffix."""
 
@@ -1020,6 +1035,7 @@ def _ensure_user_permission_columns(engine) -> None:
         "perm_sync_sensehub": "ALTER TABLE users ADD COLUMN perm_sync_sensehub BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_sync_sensehub_cull": "ALTER TABLE users ADD COLUMN perm_sync_sensehub_cull BOOLEAN NOT NULL DEFAULT FALSE",
         "perm_sync_cts": "ALTER TABLE users ADD COLUMN perm_sync_cts BOOLEAN NOT NULL DEFAULT FALSE",
+        "perm_match_names": "ALTER TABLE users ADD COLUMN perm_match_names BOOLEAN NOT NULL DEFAULT FALSE",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():

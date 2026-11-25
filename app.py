@@ -71,6 +71,7 @@ from services.sales_payments import (
     unarchive_payments,
 )
 from services.births_report import build_births_report
+from services.conception_matches import remove_match, save_match
 from services.conception_report import conception_tables
 from services.stp_report import build_stp_report
 from services.urine_ph_report import build_urine_ph_report
@@ -2676,10 +2677,12 @@ def events_urine_ph():
 
 
 def _render_fertility(view: str, heading: str):
+    user = current_user()
     return render_template(
         "fertility/conception.html",
         **_page_context(active_nav=f"fertility_{view}", page_heading=heading),
         view=view,
+        can_match_names=user_has_permission(user, "perm_match_names"),
     )
 
 
@@ -2714,6 +2717,34 @@ def events_fertility_conception():
     if request.query_string:
         target = f"{target}?{request.query_string.decode()}"
     return redirect(target)
+
+
+def _save_conception_match(action):
+    user, error = _events_json_user()
+    if error:
+        return error
+    if not user_has_permission(user, "perm_match_names"):
+        return jsonify({"error": "Permission denied."}), 403
+    body = request.get_json(silent=True) or {}
+    names = body.get("names")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        return jsonify({"error": "Select the rows first."}), 400
+    try:
+        with get_session() as session:
+            action(session, body.get("kind"), names)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/fertility/api/conception/matches", methods=["POST"])
+def fertility_api_match_names():
+    return _save_conception_match(save_match)
+
+
+@app.route("/fertility/api/conception/unmatches", methods=["POST"])
+def fertility_api_unmatch_names():
+    return _save_conception_match(remove_match)
 
 
 @app.route("/fertility/api/conception")

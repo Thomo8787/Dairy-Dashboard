@@ -111,6 +111,16 @@
       font-weight: 700;
       border-top: 2px solid #8aa888;
     }
+    .match-actions { display: flex; gap: 0.5rem; margin: 0 0 0.75rem; flex-wrap: wrap; }
+    .match-actions[hidden] { display: none; }
+    .match-actions .btn.is-active { box-shadow: inset 0 0 0 2px var(--accent); }
+    .conception-table .pick { width: 2.25rem; text-align: center; }
+    .conception-table .shown-as { text-align: left; }
+    #conception-tables.is-picking tbody tr { cursor: pointer; }
+    #conception-tables.is-picking tbody tr[data-locked] { cursor: default; }
+    .conception-table tbody tr.is-picked { background: #e7f0fa; }
+    .conception-table tbody tr.is-first td:nth-child(2) { font-weight: 700; }
+    .conception-table input[type="checkbox"] { pointer-events: none; }
   </style>
 {% endblock %}
 
@@ -149,17 +159,23 @@
           {% if view == "monthly" %}
           Each farm has its own table, a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first.
           {% elif view == "sire" %}
-          One row per sire. Selected farms are added together. The table uses the months between From and To.
+          One row per sire. Selected farms are added together. The table uses the months between From and To. Where names have been matched, the row keeps the name chosen first, including on a farm where that spelling has no services.
           {% else %}
-          One row per technician. Selected farms are added together. The table uses the months between From and To. A service with no technician is listed as Not recorded.
+          One row per technician. Selected farms are added together. The table uses the months between From and To. A service with no technician is listed as Not recorded. Where names have been matched, the row keeps the name chosen first, including on a farm where that spelling has no services.
           {% endif %}
         </p>
         {% include "events/_refresh.html" %}
       </aside>
     </div>
     <div class="content-panel">
+      <div class="match-actions" id="match-actions" {% if view == "monthly" or not can_match_names %}hidden{% endif %}>
+        <button type="button" class="btn" id="match-btn" aria-pressed="false">
+          Match {{ "sires" if view == "sire" else "technicians" }}
+        </button>
+        <button type="button" class="btn ghost" id="unmatch-btn" aria-pressed="false">Unmatch</button>
+      </div>
       <p class="meta-line" id="conception-status">Loading conception results…</p>
-      <div id="conception-tables" data-view="{{ view }}"></div>
+      <div id="conception-tables" data-view="{{ view }}" data-can-match="{{ '1' if can_match_names else '0' }}"></div>
     </div>
   </div>
 {% endblock %}
@@ -185,8 +201,18 @@
   const farmSlicer = document.getElementById("farm-slicer");
   const minRange = document.getElementById("min-date-range");
   const maxRange = document.getElementById("max-date-range");
+  const matchActions = document.getElementById("match-actions");
+  const matchBtn = document.getElementById("match-btn");
+  const unmatchBtn = document.getElementById("unmatch-btn");
+  const canMatch = host.dataset.canMatch === "1";
+  const view = host.dataset.view;
+  const noun = view === "technician" ? "technician" : "sire";
   let monthList = [];
   let requestId = 0;
+  let mode = null;
+  let pickOrder = [];
+  let unmatchPicked = new Set();
+  let lastData = null;
 
   function esc(value) {
     return String(value)
@@ -236,19 +262,35 @@
     updateLabels();
   }
 
+  function currentTable(data) {
+    return view === "technician" ? data.technician : data.sire;
+  }
+
+  function statCells(row) {
+    return COLUMNS.map(([key]) => `<td>${esc(row[key])}</td>`).join("");
+  }
+
+  function pickBox(label, checked) {
+    return `<td class="pick"><input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-label="Select ${esc(label)}"></td>`;
+  }
+
   function headerRow(first) {
+    const pick = mode === "match" ? `<th class="pick"></th>` : "";
     const cells = [`<th>${esc(first)}</th>`].concat(
       COLUMNS.map(([key, label, title]) => `<th title="${esc(title)}">${esc(label)}</th>`)
     );
-    return `<tr>${cells.join("")}</tr>`;
+    return `<tr>${pick}${cells.join("")}</tr>`;
   }
 
   function bodyRow(row, foot) {
-    const tag = foot ? "td" : "td";
-    const cells = [`<${tag}>${esc(row.label)}</${tag}>`].concat(
-      COLUMNS.map(([key]) => `<${tag}>${esc(row[key])}</${tag}>`)
-    );
-    return `<tr>${cells.join("")}</tr>`;
+    const locked = !foot && row.label === "Not recorded";
+    const picked = !foot && mode === "match" && pickOrder.includes(row.label);
+    const pick = mode === "match" ? (foot || locked ? `<td class="pick"></td>` : pickBox(row.label, picked)) : "";
+    const classes = [];
+    if (picked) classes.push("is-picked");
+    if (!foot && mode === "match" && pickOrder[0] === row.label) classes.push("is-first");
+    const attrs = foot ? "" : ` data-label="${esc(row.label)}"${locked ? ' data-locked="1"' : ""}`;
+    return `<tr class="${classes.join(" ")}"${attrs}>${pick}<td>${esc(row.label)}</td>${statCells(row)}</tr>`;
   }
 
   function tableHtml(firstColumn, table) {
@@ -265,14 +307,63 @@
       </section>`;
   }
 
-  function render(data) {
-    const view = host.dataset.view;
-    if (view === "sire") {
-      host.innerHTML = tableHtml("Sire", data.sire);
-      return;
+  function unmatchHtml(table) {
+    const rows = table.matched || [];
+    const title = noun === "technician" ? "Matched technicians" : "Matched sires";
+    if (!rows.length) {
+      return `<p class="meta-line">No ${noun}s are matched.</p>`;
     }
-    if (view === "technician") {
-      host.innerHTML = tableHtml("Technician", data.technician);
+    const head = `<tr><th class="pick"></th><th>${esc(noun === "technician" ? "Technician" : "Sire")}</th><th class="shown-as">Shown as</th>${
+      COLUMNS.map(([key, label, hint]) => `<th title="${esc(hint)}">${esc(label)}</th>`).join("")
+    }</tr>`;
+    const body = rows.map((row) => {
+      const picked = unmatchPicked.has(row.label);
+      return `<tr class="${picked ? "is-picked" : ""}" data-label="${esc(row.label)}">${pickBox(row.label, picked)}<td>${esc(row.label)}</td><td class="shown-as">${esc(row.shown_as)}</td>${statCells(row)}</tr>`;
+    }).join("");
+    return `
+      <section class="table-block">
+        <h3>${esc(title)}</h3>
+        <div class="table-wrap">
+          <table class="conception-table">
+            <thead>${head}</thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </section>`;
+  }
+
+  function paintButtons() {
+    if (!matchBtn || !unmatchBtn) return;
+    matchBtn.classList.toggle("is-active", mode === "match");
+    unmatchBtn.classList.toggle("is-active", mode === "unmatch");
+    matchBtn.setAttribute("aria-pressed", mode === "match" ? "true" : "false");
+    unmatchBtn.setAttribute("aria-pressed", mode === "unmatch" ? "true" : "false");
+    host.classList.toggle("is-picking", mode === "match" || mode === "unmatch");
+  }
+
+  function describe(data) {
+    const farms = (data.farms || []).join(", ");
+    const base = farms ? `Cows on ${farms}` : "No farms selected";
+    if (mode === "match") {
+      if (pickOrder.length) {
+        return `${pickOrder[0]} will be the name shown. Select the other rows, then click Match again.`;
+      }
+      return `Select the rows to join. The first one you select is the name that stays.`;
+    }
+    if (mode === "unmatch") {
+      const matched = (currentTable(data).matched || []).length;
+      if (!matched) return `No ${noun}s are matched.`;
+      return "Select the spellings to separate, then click Unmatch again.";
+    }
+    return base;
+  }
+
+  function render(data) {
+    lastData = data;
+    paintButtons();
+    if (view === "sire" || view === "technician") {
+      const table = currentTable(data);
+      host.innerHTML = mode === "unmatch" ? unmatchHtml(table) : tableHtml(view === "technician" ? "Technician" : "Sire", table);
       return;
     }
     const parts = [];
@@ -308,8 +399,7 @@
       if (!res.ok) throw new Error(data.error || "Could not load conception results");
       if (resetSliders || !monthList.length) setupSliders(data);
       render(data);
-      const farms = (data.farms || []).join(", ");
-      status.textContent = farms ? `Cows on ${farms}` : "No farms selected";
+      status.textContent = describe(data);
     } catch (err) {
       if (token !== requestId) return;
       status.textContent = err.message || "Could not load conception results";
@@ -336,6 +426,93 @@
   maxRange.addEventListener("change", onRange);
   minRange.addEventListener("input", updateLabels);
   maxRange.addEventListener("input", updateLabels);
+
+  host.addEventListener("click", (event) => {
+    if (!mode) return;
+    const row = event.target.closest("tbody tr[data-label]");
+    if (!row || row.dataset.locked || !lastData) return;
+    const label = row.dataset.label;
+    if (mode === "match") {
+      const index = pickOrder.indexOf(label);
+      if (index >= 0) pickOrder.splice(index, 1);
+      else pickOrder.push(label);
+    } else if (unmatchPicked.has(label)) {
+      unmatchPicked.delete(label);
+    } else {
+      unmatchPicked.add(label);
+    }
+    render(lastData);
+    status.textContent = describe(lastData);
+  });
+
+  async function postNames(url, names) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: view, names })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not save the match");
+  }
+
+  if (canMatch && matchActions && (view === "sire" || view === "technician")) {
+    matchBtn.addEventListener("click", async () => {
+      if (mode !== "match") {
+        mode = "match";
+        pickOrder = [];
+        unmatchPicked = new Set();
+        if (lastData) {
+          render(lastData);
+          status.textContent = describe(lastData);
+        }
+        return;
+      }
+      if (pickOrder.length < 2) {
+        status.textContent = `Select at least two ${noun}s. The first one you select is the name that stays.`;
+        return;
+      }
+      matchBtn.disabled = true;
+      try {
+        await postNames("/fertility/api/conception/matches", pickOrder);
+        mode = null;
+        pickOrder = [];
+        await load(false);
+      } catch (err) {
+        status.textContent = err.message || "Could not save the match";
+      } finally {
+        matchBtn.disabled = false;
+      }
+    });
+
+    unmatchBtn.addEventListener("click", async () => {
+      if (mode !== "unmatch") {
+        mode = "unmatch";
+        pickOrder = [];
+        unmatchPicked = new Set();
+        if (lastData) {
+          render(lastData);
+          status.textContent = describe(lastData);
+        }
+        return;
+      }
+      const names = [...unmatchPicked];
+      if (!names.length) {
+        status.textContent = `Select a ${noun} to separate.`;
+        return;
+      }
+      unmatchBtn.disabled = true;
+      try {
+        await postNames("/fertility/api/conception/unmatches", names);
+        mode = null;
+        unmatchPicked = new Set();
+        await load(false);
+      } catch (err) {
+        status.textContent = err.message || "Could not unmatch";
+      } finally {
+        unmatchBtn.disabled = false;
+      }
+    });
+  }
 
   load(true);
 })();

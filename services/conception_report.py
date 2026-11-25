@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from services.breeding_sires import normalize_sire_code
+from services.conception_matches import active_spellings, load_matches, match_map
 from services.database import CowEvent
 from services.events_common import _animal_identifier, _coerce_date
 from services.farms import HERD_FARM_OPTIONS
@@ -103,6 +104,24 @@ def _tech_name(value: str | None) -> str:
 
 def _display_name(value: str) -> str:
     return value or _NOT_RECORDED
+
+
+def collapse_counts(bucket: dict[str, Counts], aliases: dict[str, str]) -> list[tuple[str, Counts]]:
+    """Add spellings that share a saved name.
+
+    The saved name is kept even when that spelling has no services in this
+    filter. A spelling left out of the match keeps its own row.
+    """
+    grouped: dict[str, Counts] = {}
+    own: dict[str, Counts] = {}
+    for name, counts in bucket.items():
+        label = _display_name(name)
+        if label != _NOT_RECORDED and name in aliases:
+            target = aliases[name]
+            grouped[target] = _sum([grouped.get(target, _ZERO), counts])
+        else:
+            own[label] = _sum([own.get(label, _ZERO), counts])
+    return list(grouped.items()) + list(own.items())
 
 
 def _add(counts: Counts, outcome: str) -> Counts:
@@ -450,11 +469,27 @@ def conception_tables(
         if farm in selected and month in window:
             tech_counts[name] = _sum([tech_counts.get(name, _ZERO), counts])
 
-    def named_rows(bucket: dict[str, Counts]) -> list[tuple[str, Counts]]:
+    sire_matches = load_matches(db, "sire")
+    tech_matches = load_matches(db, "technician")
+
+    def named_rows(bucket: dict[str, Counts], records: list[tuple[str, str]]) -> list[tuple[str, Counts]]:
         return sorted(
-            ((_display_name(name), counts) for name, counts in bucket.items()),
+            collapse_counts(bucket, match_map(records)),
             key=lambda item: (-sum(item[1]), item[0].lower()),
         )
+
+    def matched_rows(bucket: dict[str, Counts], records: list[tuple[str, str]], grand: int) -> list[dict[str, Any]]:
+        rows = []
+        for spelling, shown_as in active_spellings(records):
+            row = _row(_display_name(spelling), bucket.get(spelling, _ZERO), grand)
+            row["shown_as"] = shown_as
+            rows.append(row)
+        return rows
+
+    sire_table = _table(named_rows(sire_counts, sire_matches))
+    tech_table = _table(named_rows(tech_counts, tech_matches))
+    sire_grand = sum(sire_table["total"][key] for key in ("preg", "open", "other", "abort"))
+    tech_grand = sum(tech_table["total"][key] for key in ("preg", "open", "other", "abort"))
 
     return {
         "months": months,
@@ -464,10 +499,12 @@ def conception_tables(
         "month_tables": month_tables,
         "sire": {
             "heading": _named_heading("sire", start, end),
-            **_table(named_rows(sire_counts)),
+            **sire_table,
+            "matched": matched_rows(sire_counts, sire_matches, sire_grand),
         },
         "technician": {
             "heading": _named_heading("technician", start, end),
-            **_table(named_rows(tech_counts)),
+            **tech_table,
+            "matched": matched_rows(tech_counts, tech_matches, tech_grand),
         },
     }

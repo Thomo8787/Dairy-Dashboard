@@ -28,7 +28,7 @@
       <fieldset class="perm-fieldset">
         <legend>Pages</legend>
         <div class="perm-grid">
-          {% for key in permission_keys if 'sync' not in key %}
+          {% for key in permission_keys if key != 'perm_match_names' and 'sync' not in key %}
             <label class="check-row">
               <input type="checkbox" name="{{ key }}" value="1" {% if key == 'perm_home' %}checked{% endif %}>
               {{ permission_labels[key] }}
@@ -40,7 +40,7 @@
       <fieldset class="perm-fieldset">
         <legend>Actions</legend>
         <div class="perm-grid">
-          {% for key in permission_keys if 'sync' in key %}
+          {% for key in permission_keys if key == 'perm_match_names' or 'sync' in key %}
             <label class="check-row">
               <input type="checkbox" name="{{ key }}" value="1">
               {{ permission_labels[key] }}
@@ -131,7 +131,7 @@
               <fieldset class="perm-fieldset">
                 <legend>Pages</legend>
                 <div class="perm-grid">
-                  {% for key in permission_keys if 'sync' not in key %}
+                  {% for key in permission_keys if key != 'perm_match_names' and 'sync' not in key %}
                     <label class="check-row">
                       <input
                         type="checkbox"
@@ -148,7 +148,7 @@
               <fieldset class="perm-fieldset">
                 <legend>Actions</legend>
                 <div class="perm-grid">
-                  {% for key in permission_keys if 'sync' in key %}
+                  {% for key in permission_keys if key == 'perm_match_names' or 'sync' in key %}
                     <label class="check-row">
                       <input
                         type="checkbox"

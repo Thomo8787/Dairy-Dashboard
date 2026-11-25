@@ -30,6 +30,7 @@ PERMISSION_KEYS = (
     "perm_sync_sensehub",
     "perm_sync_sensehub_cull",
     "perm_sync_cts",
+    "perm_match_names",
 )
 
 PERMISSION_LABELS = {
@@ -48,6 +49,7 @@ PERMISSION_LABELS = {
     "perm_sync_sensehub": "SenseHub — refresh reports",
     "perm_sync_sensehub_cull": "SenseHub — cull Tags To Remove",
     "perm_sync_cts": "CTS — sync / send movements",
+    "perm_match_names": "Match sires and technicians",
 }
 
 PUBLIC_ENDPOINTS = {
