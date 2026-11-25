@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.orm import Session
 
-from services.database import CowEvent, HerdBirth
+from services.database import CowEvent, HerdBirth, HerdInventory
 from services.farms import HERD_FARM_OPTIONS
 from services.breeding_sires import classify_semen_type, load_sire_overrides
 from services.herd_import_utils import BEEF_CBREED_MIN
@@ -2169,6 +2169,284 @@ def _youngstock_mortality_band(born: dt.date | None, died: dt.date | None) -> st
     return "ys_12_plus"
 
 
+_FERTILITY_EVENTS = ("FRESH", "BRED", "PREG", "OPEN", "ABORT", "SOLD", "DIED")
+_FERTILITY_EVENT_SORT = {"OPEN": 0, "ABORT": 1, "SOLD": 2, "DIED": 3, "FRESH": 4, "BRED": 5, "PREG": 6}
+_PREGNANT_RC = (5, 6)
+
+
+def _apply_compared_value(
+    row: dict[str, Any],
+    metric: str,
+    recent: float | None,
+    baseline: float | None,
+    *,
+    higher_is_better: bool,
+) -> None:
+    # Whole numbers, same as the tiles. Colour uses those figures so the
+    # band matches what is on screen.
+    shown_recent = None if recent is None else int(round(recent))
+    shown_baseline = None if baseline is None else int(round(baseline))
+    row[metric] = shown_recent
+    row[f"{metric}_avg_120"] = shown_baseline
+    if shown_recent is None or shown_baseline is None:
+        row[f"{metric}_status"] = "unknown"
+    elif higher_is_better:
+        row[f"{metric}_status"] = _semen_status_band(shown_recent, shown_baseline)
+    else:
+        row[f"{metric}_status"] = _lower_is_better_band(shown_recent, shown_baseline)
+
+
+def _walk_lactation(
+    events: list[tuple[dt.date, str]],
+) -> tuple[dt.date | None, dt.date | None, list[dt.date], list[tuple[dt.date, dt.date, dt.date | None]]]:
+    """Fresh date, exit date, service dates, and conceptions.
+
+    A conception is (service date, pregnancy-check date, ended date).
+    Ended is an OPEN or ABORT after that service. The service still counts
+    as a conception.
+    """
+    ordered = sorted(events, key=lambda item: (item[0], _FERTILITY_EVENT_SORT.get(item[1], 9)))
+    fresh: dt.date | None = None
+    exit_day: dt.date | None = None
+    services: list[dt.date] = []
+    conceptions: list[tuple[dt.date, dt.date, dt.date | None]] = []
+    pending: dt.date | None = None
+    for day, name in ordered:
+        if name == "FRESH":
+            if fresh is None:
+                fresh = day
+            continue
+        if name in ("SOLD", "DIED"):
+            if exit_day is None:
+                exit_day = day
+            continue
+        if name == "BRED":
+            if fresh is None or day < fresh:
+                continue
+            services.append(day)
+            pending = day
+            continue
+        if name == "PREG" and pending is not None and pending <= day:
+            conceptions.append((pending, day, None))
+            pending = None
+            continue
+        if name in ("OPEN", "ABORT"):
+            pending = None
+            if conceptions and conceptions[-1][2] is None and day >= conceptions[-1][0]:
+                service, confirmed, _ended = conceptions[-1]
+                conceptions[-1] = (service, confirmed, day)
+    return fresh, exit_day, services, conceptions
+
+
+def _in_calf_on(
+    conceptions: list[tuple[dt.date, dt.date, dt.date | None]],
+    day: dt.date,
+) -> bool:
+    return any(service <= day and (ended is None or ended > day) for service, _confirmed, ended in conceptions)
+
+
+def _rate(success: int, total: int) -> float | None:
+    if total <= 0:
+        return None
+    return 100.0 * success / total
+
+
+def _mean(values: list[int]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _add_inventory_conception(
+    conceptions: list[tuple[dt.date, dt.date, dt.date | None]],
+    services: list[dt.date],
+    *,
+    today: dt.date,
+    dcc: float | None,
+) -> None:
+    """Use the current days-carried-calf when this lactation has no active pregnancy event."""
+    if dcc is None or _in_calf_on(conceptions, today):
+        return
+    try:
+        carried = int(round(float(dcc)))
+    except (TypeError, ValueError):
+        return
+    if carried <= 0:
+        return
+    estimated = today - dt.timedelta(days=carried)
+    near = [day for day in services if abs((day - estimated).days) <= 14 and day <= estimated + dt.timedelta(days=3)]
+    service = max(near) if near else estimated
+    conceptions.append((service, service, None))
+
+
+def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> dict[str, dict[str, Any]]:
+    """Conception rate, days open, 100-day in calf, and 200-day not in calf.
+
+    Conception rate starts 30 days ago. The other three use the last 30 days
+    against the last 120 days. Rates are pooled across the 120 days.
+    """
+    conception_end = today - dt.timedelta(days=30)
+    conception_30 = conception_end - dt.timedelta(days=30)
+    conception_120 = conception_end - dt.timedelta(days=120)
+    start_30 = today - dt.timedelta(days=30)
+    start_120 = today - dt.timedelta(days=120)
+    result = {
+        farm: {
+            "conception_success_30": 0,
+            "conception_total_30": 0,
+            "conception_success_120": 0,
+            "conception_total_120": 0,
+            "days_open_30": [],
+            "days_open_120": [],
+            "in_calf_100_success_30": 0,
+            "in_calf_100_total_30": 0,
+            "in_calf_100_success_120": 0,
+            "in_calf_100_total_120": 0,
+            "empty_200_30": 0,
+            "empty_200_total_30": 0,
+            "empty_200_120": 0,
+            "empty_200_total_120": 0,
+        }
+        for farm in farms
+    }
+    grouped: dict[tuple[str, str, int], list[tuple[dt.date, str]]] = {}
+    event_rows = db.execute(
+        select(
+            CowEvent.farm,
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.lact,
+            CowEvent.event,
+            CowEvent.event_date,
+        )
+        .where(CowEvent.event.in_(_FERTILITY_EVENTS))
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.lact >= 1)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    for farm, cow_id, etag, lact, event, event_date in event_rows:
+        animal = _animal_identifier(cow_id, etag)
+        day = _coerce_date(event_date)
+        if farm not in result or animal is None or lact is None or not isinstance(day, dt.date):
+            continue
+        grouped.setdefault((farm, animal, int(lact)), []).append((day, event))
+
+    pregnant_rows = db.execute(
+        select(
+            HerdInventory.farm,
+            HerdInventory.cow_id,
+            HerdInventory.etag,
+            HerdInventory.lact,
+            HerdInventory.dcc,
+        )
+        .where(HerdInventory.rc.in_(_PREGNANT_RC))
+        .where(HerdInventory.lact >= 1)
+        .where(HerdInventory.farm.in_(farms))
+    ).all()
+    pregnant: dict[tuple[str, str, int], float | None] = {}
+    for farm, cow_id, etag, lact, dcc in pregnant_rows:
+        animal = _animal_identifier(cow_id, etag)
+        if farm not in result or animal is None or lact is None:
+            continue
+        pregnant[(farm, animal, int(lact))] = dcc
+
+    keys = set(grouped) | set(pregnant)
+    for farm, animal, lact in keys:
+        fresh, exit_day, services, conceptions = _walk_lactation(grouped.get((farm, animal, lact), []))
+        _add_inventory_conception(
+            conceptions,
+            services,
+            today=today,
+            dcc=pregnant.get((farm, animal, lact)),
+        )
+        bucket = result[farm]
+        seen_services: set[dt.date] = set()
+        conceived = {service for service, _confirmed, _ended in conceptions}
+        for service in services:
+            if service in seen_services or service > conception_end or service < conception_120:
+                continue
+            seen_services.add(service)
+            success = service in conceived
+            bucket["conception_total_120"] += 1
+            if success:
+                bucket["conception_success_120"] += 1
+            if service >= conception_30:
+                bucket["conception_total_30"] += 1
+                if success:
+                    bucket["conception_success_30"] += 1
+        if fresh is not None:
+            def latest_days_open(start: dt.date) -> int | None:
+                latest: dt.date | None = None
+                value: int | None = None
+                for service, confirmed, _ended in conceptions:
+                    days_open = (service - fresh).days
+                    if confirmed < start or confirmed > today or days_open < 0:
+                        continue
+                    if latest is None or confirmed > latest:
+                        latest = confirmed
+                        value = days_open
+                return value
+
+            days_120 = latest_days_open(start_120)
+            days_30 = latest_days_open(start_30)
+            if days_120 is not None:
+                bucket["days_open_120"].append(days_120)
+            if days_30 is not None:
+                bucket["days_open_30"].append(days_30)
+            for days, total_30, success_30, total_120, success_120, count_empty in (
+                (100, "in_calf_100_total_30", "in_calf_100_success_30", "in_calf_100_total_120", "in_calf_100_success_120", False),
+                (200, "empty_200_total_30", "empty_200_30", "empty_200_total_120", "empty_200_120", True),
+            ):
+                milestone = fresh + dt.timedelta(days=days)
+                if milestone > today or milestone < start_120:
+                    continue
+                if exit_day is not None and exit_day < milestone:
+                    continue
+                in_calf = _in_calf_on(conceptions, milestone)
+                hit = 0 if count_empty else (1 if in_calf else 0)
+                if count_empty:
+                    hit = 0 if in_calf else 1
+                bucket[total_120] += 1
+                bucket[success_120] += hit
+                if milestone >= start_30:
+                    bucket[total_30] += 1
+                    bucket[success_30] += hit
+
+    output: dict[str, dict[str, Any]] = {}
+    for farm, bucket in result.items():
+        row: dict[str, Any] = {}
+        _apply_compared_value(
+            row,
+            "conception_rate",
+            _rate(bucket["conception_success_30"], bucket["conception_total_30"]),
+            _rate(bucket["conception_success_120"], bucket["conception_total_120"]),
+            higher_is_better=True,
+        )
+        _apply_compared_value(
+            row,
+            "days_open",
+            _mean(bucket["days_open_30"]),
+            _mean(bucket["days_open_120"]),
+            higher_is_better=False,
+        )
+        _apply_compared_value(
+            row,
+            "in_calf_100",
+            _rate(bucket["in_calf_100_success_30"], bucket["in_calf_100_total_30"]),
+            _rate(bucket["in_calf_100_success_120"], bucket["in_calf_100_total_120"]),
+            higher_is_better=True,
+        )
+        _apply_compared_value(
+            row,
+            "not_in_calf_200",
+            _rate(bucket["empty_200_30"], bucket["empty_200_total_30"]),
+            _rate(bucket["empty_200_120"], bucket["empty_200_total_120"]),
+            higher_is_better=False,
+        )
+        output[farm] = row
+    return output
+
+
 def _apply_lower_count(row: dict[str, Any], metric: str, count_30: int, count_120: int) -> None:
     average = count_120 / 4.0
     row[metric] = count_30
@@ -2455,5 +2733,8 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
             sum(health_30[farm][metric] for farm in farms),
             sum(health_120[farm][metric] for farm in farms),
         )
+
+    for farm, outcome in _build_fertility_outcomes(db, farms, today).items():
+        rows[farm].update(outcome)
 
     return {"farms": [rows[code] for code in farms], "youngstock": youngstock}

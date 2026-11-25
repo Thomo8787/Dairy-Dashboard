@@ -202,10 +202,10 @@
           <p class="widget-title">—</p>
           <p class="widget-sub">—</p>
         </a>
-        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget" aria-label="{{ farm.code }} conception rate">
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="conception_rate" data-suffix="%" aria-label="{{ farm.code }} conception rate">
           <p class="widget-kicker">Conception rate</p>
           <p class="widget-title">—</p>
-          <p class="widget-sub">—</p>
+          <p class="widget-sub" title="Services from 150 days ago to 30 days ago">—</p>
         </a>
         <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="services" aria-label="{{ farm.code }} services in the last 30 days">
           <p class="widget-kicker">Services</p>
@@ -216,6 +216,21 @@
           <p class="widget-kicker">Days to first service</p>
           <p class="widget-title">—</p>
           <p class="widget-sub" title="Average days to first service over the last 120 days">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="days_open" aria-label="{{ farm.code }} days open">
+          <p class="widget-kicker">Days open</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Pregnancies confirmed over the last 120 days">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="in_calf_100" data-suffix="%" aria-label="{{ farm.code }} 100 day in calf rate">
+          <p class="widget-kicker">100 day in calf</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Cows reaching day 100 over the last 120 days">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}?farm={{ farm.code }}" class="home-widget status-loading" data-farm="{{ farm.code }}" data-metric="not_in_calf_200" data-suffix="%" aria-label="{{ farm.code }} 200 day not in calf">
+          <p class="widget-kicker">200 day not in calf</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Cows reaching day 200 over the last 120 days">—</p>
         </a>
       </div>
     </div>
@@ -338,6 +353,10 @@
   const comparisonMetrics = {
     services: "services_avg_30d_120",
     days_to_first_service: "days_to_first_service_avg_120",
+    conception_rate: "conception_rate_avg_120",
+    days_open: "days_open_avg_120",
+    in_calf_100: "in_calf_100_avg_120",
+    not_in_calf_200: "not_in_calf_200_avg_120",
     mortality: "mortality_avg_30d_120",
     mastitis: "mastitis_avg_30d_120",
     lameness: "lameness_avg_30d_120",
@@ -354,10 +373,11 @@
     ys_cert_12_plus: "ys_cert_12_plus_avg_30d_120",
   };
 
-  function formatWhole(value) {
+  function formatWhole(value, suffix) {
     if (value === null || value === undefined || value === "") return "—";
     const n = Number(value);
-    return Number.isFinite(n) ? Math.round(n).toLocaleString("en-GB") : "—";
+    if (!Number.isFinite(n)) return "—";
+    return Math.round(n).toLocaleString("en-GB") + (suffix || "");
   }
 
   function leaveDash() {
@@ -394,12 +414,13 @@
         const title = tile.querySelector(".widget-title");
         const subKey = comparisonMetrics[metric];
         const status = subKey && row ? (row[`${metric}_status`] || "unknown") : "unknown";
+        const suffix = tile.dataset.suffix || "";
         tile.className = subKey ? `home-widget status-${status}` : "home-widget status-unknown";
-        if (title) title.textContent = formatWhole(value);
+        if (title) title.textContent = formatWhole(value, suffix);
         if (!subKey) return;
         const sub = tile.querySelector(".widget-sub");
         if (!sub) return;
-        sub.textContent = formatWhole(row ? row[subKey] : null);
+        sub.textContent = formatWhole(row ? row[subKey] : null, suffix);
         sub.className = `widget-sub tone-${status}`;
       });
     } catch (_err) {
