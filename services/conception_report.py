@@ -24,7 +24,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from services.breeding_sires import normalize_sire_code
+from services.breeding_sires import load_sire_overrides, normalize_sire_code
 from services.conception_matches import active_spellings, load_matches, match_map
 from services.database import CowEvent
 from services.events_common import _animal_identifier, _coerce_date
@@ -36,6 +36,9 @@ _OUTCOME_INDEX = {"preg": 0, "open": 1, "other": 2, "abort": 3}
 _CI_MIN_DIAGNOSED = 20
 _NOT_RECORDED = "Not recorded"
 _DASH = "–"
+_YOUNGSTOCK_FARM = "WWF"
+_PARITIES = ("cows", "youngstock")
+_SEMEN = ("beef", "dairy")
 _WILSON_Z = 1.959963984540054
 
 Counts = tuple[int, int, int, int]
@@ -288,7 +291,7 @@ def _build_cube(db: Session) -> dict[str, Any]:
         )
         .where(CowEvent.event.in_(_FERTILITY_EVENTS))
         .where(CowEvent.event_date.isnot(None))
-        .where(CowEvent.lact >= 1)
+        .where(CowEvent.lact >= 0)
         .where(CowEvent.farm.in_(HERD_FARM_OPTIONS))
     ).all()
 
@@ -313,22 +316,28 @@ def _build_cube(db: Session) -> dict[str, Any]:
                 technician if event == "BRED" else None,
             )
         )
-        fresh = _coerce_date(fdat)
-        if isinstance(fresh, dt.date):
-            fresh_dates.setdefault(key, fresh)
+        if int(lact) >= 1:
+            fresh = _coerce_date(fdat)
+            if isinstance(fresh, dt.date):
+                fresh_dates.setdefault(key, fresh)
 
-    by_month: dict[tuple[str, str], Counts] = {}
-    by_sire: dict[tuple[str, str, str], Counts] = {}
-    by_tech: dict[tuple[str, str, str], Counts] = {}
+    by_month: dict[tuple[str, str, str], Counts] = {}
+    by_sire: dict[tuple[str, str, str, str], Counts] = {}
+    by_tech: dict[tuple[str, str, str, str], Counts] = {}
     seen_months: set[str] = set()
     for key, events in grouped.items():
         farm = key[0]
+        parity = "youngstock" if key[2] == 0 else "cows"
         for day, sire, technician, outcome in lactation_services(events, fresh_dates.get(key)):
             month = _month_key(day)
             seen_months.add(month)
-            by_month[(farm, month)] = _add(by_month.get((farm, month), _ZERO), outcome)
-            by_sire[(farm, month, sire)] = _add(by_sire.get((farm, month, sire), _ZERO), outcome)
-            by_tech[(farm, month, technician)] = _add(by_tech.get((farm, month, technician), _ZERO), outcome)
+            by_month[(farm, parity, month)] = _add(by_month.get((farm, parity, month), _ZERO), outcome)
+            by_sire[(farm, parity, month, sire)] = _add(
+                by_sire.get((farm, parity, month, sire), _ZERO), outcome
+            )
+            by_tech[(farm, parity, month, technician)] = _add(
+                by_tech.get((farm, parity, month, technician), _ZERO), outcome
+            )
 
     return {
         "months": _continuous_months(seen_months),
@@ -424,11 +433,50 @@ def _long_month(month: str) -> str:
     return f"{year} {dt.date(year, month_no, 1):%B}"
 
 
+def _chosen(requested: list[str] | None, allowed: tuple[str, ...]) -> list[str]:
+    if not requested:
+        return list(allowed)
+    chosen = [item for item in allowed if item in requested]
+    return chosen or list(allowed)
+
+
+def sire_class_map(db: Session) -> dict[str, str]:
+    """Saved Breedings classification, keyed by the uppercased sire code.
+
+    The .b and .s remark suffixes are not used.
+    """
+    mapped: dict[str, str] = {}
+    for code, semen in load_sire_overrides(db).items():
+        key = (normalize_sire_code(code) or code).strip().upper()
+        if key and semen in _SEMEN:
+            mapped[key] = semen
+    return mapped
+
+
+def allows_semen(name: str, selected: set[str], classes: dict[str, str]) -> bool:
+    """Both types include sires with no saved classification. One type does not."""
+    if selected >= set(_SEMEN):
+        return True
+    kind = classes.get(name.upper(), "unknown") if name else "unknown"
+    return kind in selected
+
+
+def _youngstock_month(cube: dict[str, Any], month: str) -> Counts:
+    return _sum(
+        [
+            cube["month"].get((farm, "youngstock", month), _ZERO)
+            for farm in HERD_FARM_OPTIONS
+        ]
+    )
+
+
 def conception_tables(
     db: Session,
     farms: list[str] | None,
     start_month: str | None,
     end_month: str | None,
+    parities: list[str] | None = None,
+    semen: list[str] | None = None,
 ) -> dict[str, Any]:
     cube = get_conception_cube(db)
     months: list[str] = cube["months"]
@@ -437,9 +485,15 @@ def conception_tables(
     end = _clamp_month(end_month, months, default_end)
     if start > end:
         start, end = end, start
-    selected = [farm for farm in HERD_FARM_OPTIONS if not farms or farm in farms]
-    if not selected:
+    requested = set(farms or [])
+    include_wwf = not requested or _YOUNGSTOCK_FARM in requested
+    selected = [farm for farm in HERD_FARM_OPTIONS if not requested or farm in requested]
+    if not selected and not include_wwf:
         selected = list(HERD_FARM_OPTIONS)
+        include_wwf = True
+    chosen_parities = _chosen(parities, _PARITIES)
+    chosen_semen = set(_chosen(semen, _SEMEN))
+    classes = sire_class_map(db)
 
     month_tables = []
     for farm in selected:
@@ -447,7 +501,7 @@ def conception_tables(
             counts = [
                 (
                     _long_month(month),
-                    cube["month"].get((farm, month), _ZERO),
+                    cube["month"].get((farm, "cows", month), _ZERO),
                 )
                 for month in _months_between(block_start, block_end)
             ]
@@ -458,16 +512,33 @@ def conception_tables(
                     **_table(counts),
                 }
             )
+    if include_wwf:
+        for block_start, block_end in month_blocks(start, end):
+            counts = [
+                (_long_month(month), _youngstock_month(cube, month))
+                for month in _months_between(block_start, block_end)
+            ]
+            month_tables.append(
+                {
+                    "farm": _YOUNGSTOCK_FARM,
+                    "heading": _month_heading(block_start, block_end),
+                    **_table(counts),
+                }
+            )
 
     window = set(_months_between(start, end))
     sire_counts: dict[str, Counts] = {}
     tech_counts: dict[str, Counts] = {}
-    for (farm, month, name), counts in cube["sire"].items():
-        if farm in selected and month in window:
-            sire_counts[name] = _sum([sire_counts.get(name, _ZERO), counts])
-    for (farm, month, name), counts in cube["technician"].items():
-        if farm in selected and month in window:
-            tech_counts[name] = _sum([tech_counts.get(name, _ZERO), counts])
+    for (farm, parity, month, name), counts in cube["sire"].items():
+        if farm not in selected or parity not in chosen_parities or month not in window:
+            continue
+        if not allows_semen(name, chosen_semen, classes):
+            continue
+        sire_counts[name] = _sum([sire_counts.get(name, _ZERO), counts])
+    for (farm, parity, month, name), counts in cube["technician"].items():
+        if farm not in selected or parity not in chosen_parities or month not in window:
+            continue
+        tech_counts[name] = _sum([tech_counts.get(name, _ZERO), counts])
 
     sire_matches = load_matches(db, "sire")
     tech_matches = load_matches(db, "technician")
@@ -495,7 +566,7 @@ def conception_tables(
         "months": months,
         "from": start,
         "to": end,
-        "farms": selected,
+        "farms": selected + ([_YOUNGSTOCK_FARM] if include_wwf else []),
         "month_tables": month_tables,
         "sire": {
             "heading": _named_heading("sire", start, end),

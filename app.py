@@ -2760,6 +2760,8 @@ def events_api_fertility_conception():
                 farms,
                 request.args.get("from") or None,
                 request.args.get("to") or None,
+                parities=request.args.getlist("parity") or None,
+                semen=request.args.getlist("semen") or None,
             )
         )
 

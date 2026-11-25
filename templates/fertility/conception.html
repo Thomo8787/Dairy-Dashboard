@@ -105,6 +105,39 @@
     }
     .conception-table th:first-child, .conception-table td:first-child { text-align: left; }
     .conception-table thead th { background: #1e3a5f; color: #fff; font-weight: 600; }
+    .conception-table thead th.sortable { cursor: pointer; }
+    .conception-table thead th .sort-mark { margin-left: 0.25rem; font-size: 0.65rem; }
+    .parity-slicer, .semen-slicer { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .slicer-btn[data-value="youngstock"].selected {
+      background: #e8f5e9;
+      border-color: #81c784;
+      color: #2e7d32;
+    }
+    .slicer-btn[data-value="youngstock"].selected .slicer-icon {
+      background: #a5d6a7;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="cows"].selected {
+      background: #dceaf7;
+      border-color: #7eb0d8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="cows"].selected .slicer-icon {
+      background: #9ec5e8;
+      color: #1e3a5f;
+    }
+    .slicer-btn[data-value="beef"].selected {
+      background: #f5ebe0;
+      border-color: #8B4513;
+      color: #5c2e0a;
+    }
+    .slicer-btn[data-value="beef"].selected .slicer-icon { background: #8B4513; color: #fff; }
+    .slicer-btn[data-value="dairy"].selected {
+      background: #e8f5e9;
+      border-color: #2ca02c;
+      color: #1b5e20;
+    }
+    .slicer-btn[data-value="dairy"].selected .slicer-icon { background: #2ca02c; color: #fff; }
     .conception-table tbody tr:hover { background: #f8fafc; }
     .conception-table tfoot td {
       background: #eef6ea;
@@ -143,8 +176,50 @@
               {{ farm.code }}
             </button>
             {% endfor %}
+            {% if view == "monthly" %}
+            <button
+              type="button"
+              class="slicer-btn selected"
+              data-value="WWF"
+              aria-pressed="true"
+              title="WeaverWood Farm, heifers"
+            >
+              <span class="slicer-icon" aria-hidden="true">W</span>
+              WWF
+            </button>
+            {% endif %}
           </div>
         </div>
+        {% if view != "monthly" %}
+        <div class="filter-section">
+          <span class="section-label">Parity</span>
+          <div class="parity-slicer" id="parity-slicer" role="group" aria-label="Parity">
+            <button type="button" class="slicer-btn selected" data-value="youngstock" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">Y</span>
+              Youngstock
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="cows" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">C</span>
+              Cows
+            </button>
+          </div>
+        </div>
+        {% endif %}
+        {% if view == "sire" %}
+        <div class="filter-section">
+          <span class="section-label">Semen</span>
+          <div class="semen-slicer" id="semen-slicer" role="group" aria-label="Semen">
+            <button type="button" class="slicer-btn selected" data-value="beef" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">B</span>
+              Beef
+            </button>
+            <button type="button" class="slicer-btn selected" data-value="dairy" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">D</span>
+              Dairy
+            </button>
+          </div>
+        </div>
+        {% endif %}
         <div class="filter-section">
           <span class="section-label">Month range</span>
           <div class="date-inputs">
@@ -155,13 +230,13 @@
           </div>
         </div>
         <p class="help-text">
-          Cow services, lactation 1 and above. Conception rate is pregnancies divided by pregnancies plus opens. SPC is those services divided by pregnancies. The 95% interval is blank below 20 diagnosed services.
+          Conception rate is pregnancies divided by pregnancies plus opens. SPC is those services divided by pregnancies. The 95% interval is blank below 20 diagnosed services.
           {% if view == "monthly" %}
-          Each farm has its own table, a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first.
+          Each farm table is cows, lactation 1 and above. WWF is WeaverWood Farm: heifer services, lactation 0, from every farm. Each table is a full 12 months ending on To. If From sits inside that block, the whole 12 months stay. Moving From into the previous 12 months adds that block underneath, newest first.
           {% elif view == "sire" %}
-          One row per sire. Selected farms are added together. The table uses the months between From and To. Where names have been matched, the row keeps the name chosen first, including on a farm where that spelling has no services.
+          Cows and youngstock on the selected farms are added together. Beef and dairy follow the classification saved on Breedings. A sire with no classification stays in the table only while both are on. Where names have been matched, the row keeps the name chosen first. Click a column title to sort. The table opens on conception rate, highest first.
           {% else %}
-          One row per technician. Selected farms are added together. The table uses the months between From and To. A service with no technician is listed as Not recorded. Where names have been matched, the row keeps the name chosen first, including on a farm where that spelling has no services.
+          Cows and youngstock on the selected farms are added together. A service with no technician is listed as Not recorded. Where names have been matched, the row keeps the name chosen first. Click a column title to sort. The table opens on conception rate, highest first.
           {% endif %}
         </p>
         {% include "events/_refresh.html" %}
@@ -213,6 +288,8 @@
   let pickOrder = [];
   let unmatchPicked = new Set();
   let lastData = null;
+  let sortKey = "conc";
+  let sortDir = "desc";
 
   function esc(value) {
     return String(value)
@@ -224,6 +301,14 @@
 
   function selectedFarms() {
     return [...farmSlicer.querySelectorAll(".slicer-btn.selected")]
+      .map((btn) => btn.dataset.value)
+      .filter(Boolean);
+  }
+
+  function selectedValues(id) {
+    const group = document.getElementById(id);
+    if (!group) return [];
+    return [...group.querySelectorAll(".slicer-btn.selected")]
       .map((btn) => btn.dataset.value)
       .filter(Boolean);
   }
@@ -274,10 +359,56 @@
     return `<td class="pick"><input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-label="Select ${esc(label)}"></td>`;
   }
 
+  function missingValue(value) {
+    return value === "–" || value === "-" || value === "" || value == null;
+  }
+
+  function sortValue(row, key) {
+    if (key === "label") return row.label || "";
+    if (key === "shown_as") return row.shown_as || "";
+    const raw = row[key];
+    if (missingValue(raw)) return null;
+    if (key === "ci") {
+      const match = String(raw).match(/-?\d+/);
+      return match ? Number(match[0]) : null;
+    }
+    const number = Number(raw);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function sortRows(rows) {
+    const text = sortKey === "label" || sortKey === "shown_as";
+    return [...rows].sort((a, b) => {
+      const left = sortValue(a, sortKey);
+      const right = sortValue(b, sortKey);
+      if (!text) {
+        if (left === null && right === null) return String(a.label).localeCompare(String(b.label));
+        if (left === null) return 1;
+        if (right === null) return -1;
+      }
+      let cmp = text
+        ? String(left).localeCompare(String(right))
+        : (left < right ? -1 : left > right ? 1 : 0);
+      if (cmp === 0) cmp = String(a.label).localeCompare(String(b.label));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }
+
+  function headingCell(key, label, title) {
+    if (view === "monthly") {
+      return `<th title="${esc(title)}">${esc(label)}</th>`;
+    }
+    const active = sortKey === key;
+    const aria = active ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+    const mark = active ? `<span class="sort-mark">${sortDir === "asc" ? "▲" : "▼"}</span>` : "";
+    const cls = key === "shown_as" ? " shown-as" : "";
+    return `<th class="sortable${cls}" data-sort="${esc(key)}" title="${esc(title)}" aria-sort="${aria}">${esc(label)}${mark}</th>`;
+  }
+
   function headerRow(first) {
     const pick = mode === "match" ? `<th class="pick"></th>` : "";
-    const cells = [`<th>${esc(first)}</th>`].concat(
-      COLUMNS.map(([key, label, title]) => `<th title="${esc(title)}">${esc(label)}</th>`)
+    const cells = [headingCell("label", first, first)].concat(
+      COLUMNS.map(([key, label, title]) => headingCell(key, label, title))
     );
     return `<tr>${pick}${cells.join("")}</tr>`;
   }
@@ -300,7 +431,7 @@
         <div class="table-wrap">
           <table class="conception-table">
             <thead>${headerRow(firstColumn)}</thead>
-            <tbody>${table.rows.map((row) => bodyRow(row, false)).join("")}</tbody>
+            <tbody>${(view === "monthly" ? table.rows : sortRows(table.rows || [])).map((row) => bodyRow(row, false)).join("")}</tbody>
             <tfoot>${bodyRow(table.total, true)}</tfoot>
           </table>
         </div>
@@ -308,13 +439,14 @@
   }
 
   function unmatchHtml(table) {
-    const rows = table.matched || [];
+    const rows = sortRows(table.matched || []);
     const title = noun === "technician" ? "Matched technicians" : "Matched sires";
     if (!rows.length) {
       return `<p class="meta-line">No ${noun}s are matched.</p>`;
     }
-    const head = `<tr><th class="pick"></th><th>${esc(noun === "technician" ? "Technician" : "Sire")}</th><th class="shown-as">Shown as</th>${
-      COLUMNS.map(([key, label, hint]) => `<th title="${esc(hint)}">${esc(label)}</th>`).join("")
+    const name = noun === "technician" ? "Technician" : "Sire";
+    const head = `<tr><th class="pick"></th>${headingCell("label", name, name)}${headingCell("shown_as", "Shown as", "The name this spelling is shown as")}${
+      COLUMNS.map(([key, label, hint]) => headingCell(key, label, hint)).join("")
     }</tr>`;
     const body = rows.map((row) => {
       const picked = unmatchPicked.has(row.label);
@@ -343,7 +475,13 @@
 
   function describe(data) {
     const farms = (data.farms || []).join(", ");
-    const base = farms ? `Cows on ${farms}` : "No farms selected";
+    const picked = selectedValues("parity-slicer");
+    const group = picked.length === 1 && picked[0] === "youngstock"
+      ? "Youngstock on "
+      : picked.length === 1
+        ? "Cows on "
+        : "Cows and youngstock on ";
+    const base = !farms ? "No farms selected" : (view === "monthly" ? farms : `${group}${farms}`);
     if (mode === "match") {
       if (pickOrder.length) {
         return `${pickOrder[0]} will be the name shown. Select the other rows, then click Match again.`;
@@ -387,6 +525,8 @@
     status.textContent = "Loading conception results…";
     const params = new URLSearchParams();
     selectedFarms().forEach((farm) => params.append("farm", farm));
+    selectedValues("parity-slicer").forEach((value) => params.append("parity", value));
+    selectedValues("semen-slicer").forEach((value) => params.append("semen", value));
     if (!resetSliders && monthList.length) {
       const [lo, hi] = rangeIndexes();
       if (monthList[lo]) params.set("from", monthList[lo]);
@@ -427,7 +567,38 @@
   minRange.addEventListener("input", updateLabels);
   maxRange.addEventListener("input", updateLabels);
 
+  function keepOneSelected(id) {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.addEventListener("click", (event) => {
+      const btn = event.target.closest(".slicer-btn");
+      if (!btn) return;
+      const selected = btn.classList.contains("selected");
+      const count = group.querySelectorAll(".slicer-btn.selected").length;
+      if (selected && count <= 1) return;
+      btn.classList.toggle("selected");
+      btn.setAttribute("aria-pressed", btn.classList.contains("selected") ? "true" : "false");
+      load(false);
+    });
+  }
+  keepOneSelected("parity-slicer");
+  keepOneSelected("semen-slicer");
+
   host.addEventListener("click", (event) => {
+    const th = event.target.closest("thead th[data-sort]");
+    if (th && view !== "monthly") {
+      const key = th.dataset.sort;
+      if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
+      else {
+        sortKey = key;
+        sortDir = key === "label" || key === "shown_as" ? "asc" : "desc";
+      }
+      if (lastData) {
+        render(lastData);
+        status.textContent = describe(lastData);
+      }
+      return;
+    }
     if (!mode) return;
     const row = event.target.closest("tbody tr[data-label]");
     if (!row || row.dataset.locked || !lastData) return;
