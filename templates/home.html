@@ -235,6 +235,36 @@
       </div>
     </div>
     {% endfor %}
+    <div class="home-farm-block">
+      <h3 class="home-farm-label">Youngstock</h3>
+      <div class="home-widgets">
+        <a href="{{ url_for('events_breedings') }}" class="home-widget" aria-label="Youngstock pregnancy rate">
+          <p class="widget-kicker">Pregnancy rate</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="conception_rate" data-suffix="%" aria-label="Youngstock conception rate">
+          <p class="widget-kicker">Conception rate</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Heifer services from 150 days ago to 30 days ago">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="services" aria-label="Youngstock services in the last 30 days">
+          <p class="widget-kicker">Services</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="120-day heifer services ÷ 4 (average per 30 days)">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="days_to_first_service" aria-label="Youngstock days to first service">
+          <p class="widget-kicker">Days to first service</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Average age at first service over the last 120 days">—</p>
+        </a>
+        <a href="{{ url_for('events_breedings') }}" class="home-widget status-loading" data-scope="youngstock" data-metric="age_at_first_calving" data-decimals="1" aria-label="Youngstock age at first calving">
+          <p class="widget-kicker">Age at 1st calving</p>
+          <p class="widget-title">—</p>
+          <p class="widget-sub" title="Age at conception + 280 days, in months, over the last 120 days">—</p>
+        </a>
+      </div>
+    </div>
   </section>
   <section class="home-section" id="home-health" aria-label="Health" hidden>
     {% for farm in farms %}
@@ -357,6 +387,7 @@
     days_open: "days_open_avg_120",
     in_calf_100: "in_calf_100_avg_120",
     not_in_calf_200: "not_in_calf_200_avg_120",
+    age_at_first_calving: "age_at_first_calving_avg_120",
     mortality: "mortality_avg_30d_120",
     mastitis: "mastitis_avg_30d_120",
     lameness: "lameness_avg_30d_120",
@@ -373,10 +404,16 @@
     ys_cert_12_plus: "ys_cert_12_plus_avg_30d_120",
   };
 
-  function formatWhole(value, suffix) {
+  function formatWhole(value, suffix, decimals) {
     if (value === null || value === undefined || value === "") return "—";
     const n = Number(value);
     if (!Number.isFinite(n)) return "—";
+    if (decimals != null && decimals !== "") {
+      const places = Number(decimals);
+      if (Number.isFinite(places) && places > 0) {
+        return n.toFixed(places) + (suffix || "");
+      }
+    }
     return Math.round(n).toLocaleString("en-GB") + (suffix || "");
   }
 
@@ -415,12 +452,13 @@
         const subKey = comparisonMetrics[metric];
         const status = subKey && row ? (row[`${metric}_status`] || "unknown") : "unknown";
         const suffix = tile.dataset.suffix || "";
+        const decimals = tile.dataset.decimals || "";
         tile.className = subKey ? `home-widget status-${status}` : "home-widget status-unknown";
-        if (title) title.textContent = formatWhole(value, suffix);
+        if (title) title.textContent = formatWhole(value, suffix, decimals);
         if (!subKey) return;
         const sub = tile.querySelector(".widget-sub");
         if (!sub) return;
-        sub.textContent = formatWhole(row ? row[subKey] : null, suffix);
+        sub.textContent = formatWhole(row ? row[subKey] : null, suffix, decimals);
         sub.className = `widget-sub tone-${status}`;
       });
     } catch (_err) {

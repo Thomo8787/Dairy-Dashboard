@@ -2174,6 +2174,10 @@ _FERTILITY_EVENT_SORT = {"OPEN": 0, "ABORT": 1, "SOLD": 2, "DIED": 3, "FRESH": 4
 _PREGNANT_RC = (5, 6)
 
 
+_MONTH_DAYS = 365.25 / 12.0
+_GESTATION_DAYS = 280
+
+
 def _apply_compared_value(
     row: dict[str, Any],
     metric: str,
@@ -2181,29 +2185,41 @@ def _apply_compared_value(
     baseline: float | None,
     *,
     higher_is_better: bool,
+    decimals: int = 0,
 ) -> None:
-    # Whole numbers, same as the tiles. Colour uses those figures so the
-    # band matches what is on screen.
-    shown_recent = None if recent is None else int(round(recent))
-    shown_baseline = None if baseline is None else int(round(baseline))
+    # Shown figures drive the colour band so the tile matches the screen.
+    if recent is None:
+        shown_recent = None
+    elif decimals <= 0:
+        shown_recent = int(round(recent))
+    else:
+        shown_recent = round(recent, decimals)
+    if baseline is None:
+        shown_baseline = None
+    elif decimals <= 0:
+        shown_baseline = int(round(baseline))
+    else:
+        shown_baseline = round(baseline, decimals)
     row[metric] = shown_recent
     row[f"{metric}_avg_120"] = shown_baseline
     if shown_recent is None or shown_baseline is None:
         row[f"{metric}_status"] = "unknown"
     elif higher_is_better:
-        row[f"{metric}_status"] = _semen_status_band(shown_recent, shown_baseline)
+        row[f"{metric}_status"] = _semen_status_band(float(shown_recent), float(shown_baseline))
     else:
-        row[f"{metric}_status"] = _lower_is_better_band(shown_recent, shown_baseline)
+        row[f"{metric}_status"] = _lower_is_better_band(float(shown_recent), float(shown_baseline))
 
 
 def _walk_lactation(
     events: list[tuple[dt.date, str]],
+    *,
+    require_fresh: bool = True,
 ) -> tuple[dt.date | None, dt.date | None, list[dt.date], list[tuple[dt.date, dt.date, dt.date | None]]]:
     """Fresh date, exit date, service dates, and conceptions.
 
     A conception is (service date, pregnancy-check date, ended date).
     Ended is an OPEN or ABORT after that service. The service still counts
-    as a conception.
+    as a conception. Heifers have no calving yet, so pass require_fresh=False.
     """
     ordered = sorted(events, key=lambda item: (item[0], _FERTILITY_EVENT_SORT.get(item[1], 9)))
     fresh: dt.date | None = None
@@ -2221,7 +2237,9 @@ def _walk_lactation(
                 exit_day = day
             continue
         if name == "BRED":
-            if fresh is None or day < fresh:
+            if require_fresh and (fresh is None or day < fresh):
+                continue
+            if not require_fresh and fresh is not None and day < fresh:
                 continue
             services.append(day)
             pending = day
@@ -2447,6 +2465,181 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
     return output
 
 
+def _build_youngstock_fertility(db: Session, farms: list[str], today: dt.date) -> dict[str, Any]:
+    """Herd-wide heifer fertility (lactation 0).
+
+    Services and conception rate match the cow tiles. Days to first service is
+    age at first breeding. Age at first calving is age at conception + 280 days,
+    shown in months.
+    """
+    conception_end = today - dt.timedelta(days=30)
+    conception_30 = conception_end - dt.timedelta(days=30)
+    conception_120 = conception_end - dt.timedelta(days=120)
+    start_30 = today - dt.timedelta(days=30)
+    start_120 = today - dt.timedelta(days=120)
+
+    event_rows = db.execute(
+        select(
+            CowEvent.farm,
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.event,
+            CowEvent.event_date,
+            CowEvent.bdat,
+        )
+        .where(CowEvent.event.in_(_FERTILITY_EVENTS))
+        .where(CowEvent.event_date.isnot(None))
+        .where(CowEvent.lact == 0)
+        .where(CowEvent.farm.in_(farms))
+    ).all()
+    grouped: dict[tuple[str, str], list[tuple[dt.date, str]]] = {}
+    births: dict[tuple[str, str], dt.date] = {}
+    services_30 = 0
+    services_120 = 0
+    for farm, cow_id, etag, event, event_date, bdat in event_rows:
+        animal = _animal_identifier(cow_id, etag)
+        day = _coerce_date(event_date)
+        if farm not in farms or animal is None or not isinstance(day, dt.date):
+            continue
+        key = (farm, animal)
+        grouped.setdefault(key, []).append((day, event))
+        birth = _coerce_date(bdat)
+        if isinstance(birth, dt.date):
+            births.setdefault(key, birth)
+        if event == "BRED":
+            if start_120 <= day <= today:
+                services_120 += 1
+            if start_30 <= day <= today:
+                services_30 += 1
+
+    inv_rows = db.execute(
+        select(
+            HerdInventory.farm,
+            HerdInventory.cow_id,
+            HerdInventory.etag,
+            HerdInventory.dcc,
+            HerdInventory.bdat,
+            HerdInventory.rc,
+        )
+        .where(HerdInventory.lact == 0)
+        .where(HerdInventory.farm.in_(farms))
+    ).all()
+    pregnant: dict[tuple[str, str], float | None] = {}
+    for farm, cow_id, etag, dcc, bdat, rc in inv_rows:
+        animal = _animal_identifier(cow_id, etag)
+        if farm not in farms or animal is None:
+            continue
+        key = (farm, animal)
+        birth = _coerce_date(bdat)
+        if isinstance(birth, dt.date):
+            births.setdefault(key, birth)
+        try:
+            rc_value = int(rc) if rc is not None else None
+        except (TypeError, ValueError):
+            rc_value = None
+        if rc_value in _PREGNANT_RC:
+            pregnant[key] = dcc
+
+    birth_rows = db.execute(
+        select(HerdBirth.farm, HerdBirth.cow_id, HerdBirth.etag, HerdBirth.bdat)
+        .where(HerdBirth.bdat.isnot(None))
+        .where(HerdBirth.farm.in_(farms))
+    ).all()
+    for farm, cow_id, etag, bdat in birth_rows:
+        animal = _animal_identifier(cow_id, etag)
+        birth = _coerce_date(bdat)
+        if farm not in farms or animal is None or not isinstance(birth, dt.date):
+            continue
+        births.setdefault((farm, animal), birth)
+
+    conception_success_30 = conception_total_30 = 0
+    conception_success_120 = conception_total_120 = 0
+    first_service_30: list[int] = []
+    first_service_120: list[int] = []
+    age_calving_30: list[float] = []
+    age_calving_120: list[float] = []
+
+    for key, events in grouped.items():
+        _fresh, _exit, services, conceptions = _walk_lactation(events, require_fresh=False)
+        _add_inventory_conception(
+            conceptions,
+            services,
+            today=today,
+            dcc=pregnant.get(key),
+        )
+        conceived = {service for service, _confirmed, _ended in conceptions}
+        seen: set[dt.date] = set()
+        for service in services:
+            if service in seen or service > conception_end or service < conception_120:
+                continue
+            seen.add(service)
+            success = service in conceived
+            conception_total_120 += 1
+            if success:
+                conception_success_120 += 1
+            if service >= conception_30:
+                conception_total_30 += 1
+                if success:
+                    conception_success_30 += 1
+
+        birth = births.get(key)
+        if birth is not None and services:
+            first = min(services)
+            age_days = (first - birth).days
+            if age_days >= 0:
+                if start_120 <= first <= today:
+                    first_service_120.append(age_days)
+                if start_30 <= first <= today:
+                    first_service_30.append(age_days)
+
+        if birth is not None and conceptions:
+            latest: dt.date | None = None
+            months_value: float | None = None
+            for service, confirmed, _ended in conceptions:
+                if confirmed < start_120 or confirmed > today:
+                    continue
+                age_at_conception = (service - birth).days
+                if age_at_conception < 0:
+                    continue
+                months = (age_at_conception + _GESTATION_DAYS) / _MONTH_DAYS
+                if latest is None or confirmed > latest:
+                    latest = confirmed
+                    months_value = months
+            if months_value is not None and latest is not None:
+                age_calving_120.append(months_value)
+                if latest >= start_30:
+                    age_calving_30.append(months_value)
+
+    row: dict[str, Any] = {}
+    average = services_120 / 4.0
+    row["services"] = services_30
+    row["services_avg_30d_120"] = round(average, 1)
+    row["services_status"] = _semen_status_band(float(services_30), average)
+    _apply_compared_value(
+        row,
+        "conception_rate",
+        _rate(conception_success_30, conception_total_30),
+        _rate(conception_success_120, conception_total_120),
+        higher_is_better=True,
+    )
+    _apply_compared_value(
+        row,
+        "days_to_first_service",
+        _mean(first_service_30),
+        _mean(first_service_120),
+        higher_is_better=False,
+    )
+    _apply_compared_value(
+        row,
+        "age_at_first_calving",
+        _mean(age_calving_30),
+        _mean(age_calving_120),
+        higher_is_better=False,
+        decimals=1,
+    )
+    return row
+
+
 def _apply_lower_count(row: dict[str, Any], metric: str, count_30: int, count_120: int) -> None:
     average = count_120 / 4.0
     row[metric] = count_30
@@ -2518,8 +2711,8 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
     """Home Fertility and Health tiles.
 
     Each compared tile shows the last 30 days against the last 120 days.
-    Health counts are cows (lactation 1 and above). Youngstock mortality is
-    one herd total, split by age, for lactation 0.
+    Farm fertility and health are cows (lactation 1 and above). Youngstock
+    fertility and mortality are one herd total for lactation 0.
     """
     today = dt.date.today()
     start_30 = today - dt.timedelta(days=30)
@@ -2541,6 +2734,7 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
         .where(CowEvent.event_date.isnot(None))
         .where(CowEvent.event_date >= start_120)
         .where(CowEvent.event_date <= today)
+        .where(CowEvent.lact >= 1)
         .where(CowEvent.farm.in_(farms))
     ).all()
     prior_rows = db.execute(
@@ -2548,6 +2742,7 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
         .where(CowEvent.event == "BRED")
         .where(CowEvent.event_date.isnot(None))
         .where(CowEvent.event_date < start_120)
+        .where(CowEvent.lact >= 1)
         .where(CowEvent.farm.in_(farms))
         .distinct()
     ).all()
@@ -2736,5 +2931,7 @@ def build_home_herd_summary(db: Session) -> dict[str, Any]:
 
     for farm, outcome in _build_fertility_outcomes(db, farms, today).items():
         rows[farm].update(outcome)
+
+    youngstock.update(_build_youngstock_fertility(db, farms, today))
 
     return {"farms": [rows[code] for code in farms], "youngstock": youngstock}
