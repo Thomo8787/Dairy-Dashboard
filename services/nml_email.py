@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import base64
+import gc
 import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import quote, urlencode
 
 from services.graph_client import GRAPH_BASE, _request_with_retries, auth_mode, graph_get, graph_get_bytes, graph_headers
-from services.nml_pdf import looks_like_nml_pdf
+from services.nml_pdf import parse_nml_pdf, peek_nml_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +200,15 @@ class NmlPdfEmailService:
         return matches[:top]
 
     def _list_attachments(self, message_id: str) -> list[dict]:
+        """Attachment names and sizes only. File bytes are downloaded one at a time."""
         root = self._mailbox_root()
-        return graph_get(f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments").get("value", [])
+        query = urlencode({"$select": "id,name,size,contentType"})
+        rows = graph_get(
+            f"{GRAPH_BASE}/{root}/messages/{message_id}/attachments?{query}"
+        ).get("value", [])
+        for row in rows:
+            row.pop("contentBytes", None)
+        return rows
 
     def _attachment_bytes(self, message_id: str, attachment: dict) -> bytes | None:
         raw = attachment.get("contentBytes")
@@ -220,13 +228,14 @@ class NmlPdfEmailService:
         since: datetime | None = None,
         skip_message_ids: set[str] | None = None,
         top: int = 80,
-    ) -> list[dict[str, Any]]:
+    ) -> Iterator[dict[str, Any]]:
+        """Yield one parsed NML report at a time, then drop that PDF's bytes."""
         since_aware = since or (datetime.now(timezone.utc) - timedelta(days=NML_LOOKBACK_DAYS))
         if since_aware.tzinfo is None:
             since_aware = since_aware.replace(tzinfo=timezone.utc)
         skip = skip_message_ids if skip_message_ids is not None else set()
         messages = self._list_messages(top=top, since=since_aware, skip_message_ids=skip)
-        found: list[dict[str, Any]] = []
+        found = 0
         for message in messages:
             message_id = message.get("id") or ""
             for attachment in self._list_attachments(message_id):
@@ -238,18 +247,28 @@ class NmlPdfEmailService:
                     logger.warning("Skipping oversized NML PDF %s (%s bytes)", name, size)
                     continue
                 content = self._attachment_bytes(message_id, attachment)
-                if not content or not content.startswith(b"%PDF"):
+                parsed = None
+                try:
+                    if not content or not content.startswith(b"%PDF") or not peek_nml_pdf(content):
+                        continue
+                    parsed = parse_nml_pdf(content)
+                except Exception:
+                    logger.exception("Failed to parse NML PDF %s", name)
                     continue
-                if not looks_like_nml_pdf(content):
+                finally:
+                    content = None
+                    gc.collect()
+                metadata = (parsed or {}).get("metadata") or {}
+                if not metadata.get("producer_ref") or not (parsed or {}).get("samples"):
+                    parsed = None
                     continue
-                found.append(
-                    {
-                        "content": content,
-                        "source_file": Path(name).name,
-                        "message_id": message_id,
-                        "subject": message.get("subject"),
-                        "received_at": _parse_received(message.get("receivedDateTime")),
-                    }
-                )
-        logger.info("Fetched %s NML PDF(s) from %s message(s)", len(found), len(messages))
-        return found
+                found += 1
+                yield {
+                    "parsed": parsed,
+                    "source_file": Path(name).name,
+                    "message_id": message_id,
+                    "subject": message.get("subject"),
+                    "received_at": _parse_received(message.get("receivedDateTime")),
+                }
+                parsed = None
+        logger.info("Fetched %s NML PDF(s) from %s message(s)", found, len(messages))

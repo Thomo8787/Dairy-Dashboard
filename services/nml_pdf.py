@@ -464,6 +464,18 @@ def _payment_marks(
     return marks
 
 
+def peek_nml_pdf(content: bytes) -> bool:
+    """True when the opening pages name a producer. Text only, no word positions."""
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            lines: list[str] = []
+            for page in pdf.pages[:2]:
+                lines.extend((page.extract_text() or "").splitlines())
+    except Exception:
+        return False
+    return _PRODUCER_RE.search("\n".join(lines)) is not None
+
+
 def looks_like_nml_pdf(content: bytes) -> bool:
     try:
         result = parse_nml_pdf(content)

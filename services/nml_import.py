@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import gc
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import select
 
@@ -101,12 +102,8 @@ def import_nml_results(
     fetch_top = min(2000, max(50, lookback * 8))
 
     if force or not local_dir:
-        # Short lookbacks (cron / Fetch NML) always re-read mail in the window so
-        # new PDFs and parser fixes are applied. Long backfills skip known IDs.
-        lookback_days = max(1, (dt.datetime.now(dt.timezone.utc) - since_at).days)
-        skip_ids: set[str] = set()
-        if not force and lookback_days > 21:
-            skip_ids = _known_message_ids()
+        # Skip mail already stored. Fetch NML passes force=1 when a re-read is wanted.
+        skip_ids: set[str] = set() if force else _known_message_ids()
         sources = NmlPdfEmailService().fetch_pdfs(
             since=since_at,
             skip_message_ids=skip_ids,
@@ -164,7 +161,7 @@ def _sample_key(producer_ref: str, sample_date: dt.date, sample_id: str) -> tupl
     return (producer_ref, sample_date, normalize_sample_id(sample_id))
 
 
-def _import_sources(sources: list[dict[str, Any]]) -> dict[str, Any]:
+def _import_sources(sources: Iterable[dict[str, Any]]) -> dict[str, Any]:
     parsed_by_key: dict[tuple[str, dt.date, str], dict[str, Any]] = {}
     payment_loads: list[dict[str, Any]] = []
     files_processed = 0
@@ -173,50 +170,60 @@ def _import_sources(sources: list[dict[str, Any]]) -> dict[str, Any]:
 
     for source in sources:
         source_file = source.get("source_file") or "unknown"
+        content = source.pop("content", None)
+        result = source.pop("parsed", None)
         try:
-            result = parse_nml_pdf(source["content"])
-        except Exception:
-            files_skipped += 1
-            warnings.append(f"{source_file}: could not read PDF")
-            logger.exception("Failed to parse NML PDF %s", source_file)
-            continue
+            try:
+                if result is None:
+                    result = parse_nml_pdf(content)
+            except Exception:
+                files_skipped += 1
+                warnings.append(f"{source_file}: could not read PDF")
+                logger.exception("Failed to parse NML PDF %s", source_file)
+                continue
+            finally:
+                content = None
 
-        metadata = result["metadata"]
-        producer_ref = (metadata.get("producer_ref") or "").strip()
-        if not producer_ref or not result["samples"]:
-            files_skipped += 1
-            if not producer_ref:
-                warnings.append(f"{source_file}: no producer reference found")
-            else:
-                warnings.append(f"{source_file}: no sample rows found")
-            continue
+            metadata = result["metadata"]
+            producer_ref = (metadata.get("producer_ref") or "").strip()
+            if not producer_ref or not result["samples"]:
+                files_skipped += 1
+                if not producer_ref:
+                    warnings.append(f"{source_file}: no producer reference found")
+                else:
+                    warnings.append(f"{source_file}: no sample rows found")
+                continue
 
-        files_processed += 1
-        if metadata.get("payment_report"):
-            _collect_payment_loads(payment_loads, source, metadata, result["samples"])
-        farm = metadata.get("farm")
-        if farm is None:
-            warnings.append(
-                f"{source_file}: unknown producer reference {producer_ref}"
-            )
-        for sample in result["samples"]:
-            sample_id = normalize_sample_id(sample["sample_id"])
-            key = _sample_key(producer_ref, sample["sample_date"], sample_id)
-            record: dict[str, Any] = {
-                "producer_ref": producer_ref,
-                "sample_date": sample["sample_date"],
-                "sample_id": sample_id,
-                "farm": farm,
-                "milk_buyer": metadata.get("milk_buyer"),
-                "report_month": metadata.get("report_month"),
-                "report_date": metadata.get("report_date"),
-                "source": "nml",
-                "source_message_id": source.get("message_id"),
-                "source_file": source_file,
-            }
-            for field in _SAMPLE_FIELDS:
-                record[field] = sample.get(field)
-            parsed_by_key[key] = record
+            files_processed += 1
+            if metadata.get("payment_report"):
+                _collect_payment_loads(payment_loads, source, metadata, result["samples"])
+            farm = metadata.get("farm")
+            if farm is None:
+                warnings.append(
+                    f"{source_file}: unknown producer reference {producer_ref}"
+                )
+            for sample in result["samples"]:
+                sample_id = normalize_sample_id(sample["sample_id"])
+                key = _sample_key(producer_ref, sample["sample_date"], sample_id)
+                record: dict[str, Any] = {
+                    "producer_ref": producer_ref,
+                    "sample_date": sample["sample_date"],
+                    "sample_id": sample_id,
+                    "farm": farm,
+                    "milk_buyer": metadata.get("milk_buyer"),
+                    "report_month": metadata.get("report_month"),
+                    "report_date": metadata.get("report_date"),
+                    "source": "nml",
+                    "source_message_id": source.get("message_id"),
+                    "source_file": source_file,
+                }
+                for field in _SAMPLE_FIELDS:
+                    record[field] = sample.get(field)
+                parsed_by_key[key] = record
+        finally:
+            content = None
+            result = None
+            gc.collect()
 
     with get_session() as session:
         inserted, updated, linked, merged = _upsert(session, parsed_by_key)
