@@ -874,6 +874,41 @@ class NmlMilkResult(Base):
     )
 
 
+class NmlPaymentLoad(Base):
+    """A load Müller selected for payment, from the Results Notification PDF."""
+
+    __tablename__ = "nml_payment_loads"
+    __table_args__ = (
+        UniqueConstraint(
+            "producer_ref",
+            "sample_date",
+            "sample_id",
+            name="uq_nml_payment_producer_sample",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    farm = Column(String(8), index=True)
+    producer_ref = Column(String(32), nullable=False, index=True)
+    sample_date = Column(Date, nullable=False, index=True)
+    sample_id = Column(String(32), nullable=False)
+    vat_order = Column(String(8))
+    butterfat_pct = Column(Float)
+    protein_pct = Column(Float)
+    scc = Column(Integer)
+    bactoscan = Column(Integer)
+    urea_pct = Column(Float)
+    fpd = Column(Integer)
+    antibiotic_pass = Column(Boolean)
+    report_month = Column(String(32))
+    report_date = Column(Date)
+    source_message_id = Column(String(256))
+    source_file = Column(String(256))
+    imported_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class MilkMeterReading(Base):
     """ALH parlour meter readings for one collection day. One row per milking."""
 

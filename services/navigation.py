@@ -179,6 +179,12 @@ NAV_ITEMS = [
                         "endpoint": "milk_quality_alh_reconcile",
                         "permission": "perm_milk_quality",
                     },
+                    {
+                        "id": "milk_quality_payments",
+                        "label": "Payments",
+                        "endpoint": "milk_quality_payments",
+                        "permission": "perm_milk_quality",
+                    },
                 ],
             },
             {

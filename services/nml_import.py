@@ -127,12 +127,46 @@ def import_nml_pdf_paths(paths: list[Path]) -> dict[str, Any]:
     return _import_sources(sources)
 
 
+def _collect_payment_loads(
+    payment_loads: list[dict[str, Any]],
+    source: dict[str, Any],
+    metadata: dict[str, Any],
+    samples: list[dict[str, Any]],
+) -> None:
+    """Keep loads whose Payment column is Y. N rows are not payment loads."""
+    producer_ref = (metadata.get("producer_ref") or "").strip()
+    for sample in samples:
+        if not sample.get("payment_selected"):
+            continue
+        payment_loads.append(
+            {
+                "producer_ref": producer_ref,
+                "farm": metadata.get("farm"),
+                "sample_date": sample["sample_date"],
+                "sample_id": normalize_sample_id(sample["sample_id"]),
+                "vat_order": sample.get("vat_order"),
+                "butterfat_pct": sample.get("butterfat_pct"),
+                "protein_pct": sample.get("protein_pct"),
+                "scc": sample.get("scc"),
+                "bactoscan": sample.get("bactoscan"),
+                "urea_pct": sample.get("urea_pct"),
+                "fpd": sample.get("fpd"),
+                "antibiotic_pass": sample.get("antibiotic_pass"),
+                "report_month": metadata.get("report_month"),
+                "report_date": metadata.get("report_date"),
+                "source_message_id": source.get("message_id"),
+                "source_file": source.get("source_file"),
+            }
+        )
+
+
 def _sample_key(producer_ref: str, sample_date: dt.date, sample_id: str) -> tuple[str, dt.date, str]:
     return (producer_ref, sample_date, normalize_sample_id(sample_id))
 
 
 def _import_sources(sources: list[dict[str, Any]]) -> dict[str, Any]:
     parsed_by_key: dict[tuple[str, dt.date, str], dict[str, Any]] = {}
+    payment_loads: list[dict[str, Any]] = []
     files_processed = 0
     files_skipped = 0
     warnings: list[str] = []
@@ -158,6 +192,8 @@ def _import_sources(sources: list[dict[str, Any]]) -> dict[str, Any]:
             continue
 
         files_processed += 1
+        if metadata.get("payment_report"):
+            _collect_payment_loads(payment_loads, source, metadata, result["samples"])
         farm = metadata.get("farm")
         if farm is None:
             warnings.append(
@@ -184,6 +220,10 @@ def _import_sources(sources: list[dict[str, Any]]) -> dict[str, Any]:
 
     with get_session() as session:
         inserted, updated, linked, merged = _upsert(session, parsed_by_key)
+    if payment_loads:
+        from services.nml_payments import save_payment_loads
+
+        save_payment_loads(payment_loads)
 
     return {
         "files_processed": files_processed,

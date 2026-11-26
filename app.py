@@ -1417,6 +1417,35 @@ def milk_quality_alh_reconcile():
     )
 
 
+@app.route("/milk-quality/collections/payments")
+@permission_required("perm_milk_quality")
+def milk_quality_payments():
+    return render_template(
+        "milk_quality/payments.html",
+        **_page_context(active_nav="milk_quality_payments"),
+    )
+
+
+@app.route("/milk-quality/api/payments")
+def milk_quality_api_payments():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    date_from = _parse_iso_date_arg("date_from")
+    date_to = _parse_iso_date_arg("date_to")
+    if date_from is False or date_to is False:
+        return jsonify({"error": "Invalid date. Use YYYY-MM-DD."}), 400
+    from services.nml_payments import list_payment_loads
+
+    return jsonify(
+        list_payment_loads(
+            farms=_milk_quality_farms_arg(),
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )
+
+
 @app.route("/milk-quality/milk-per-cow")
 @permission_required("perm_milk_quality")
 def milk_quality_milk_per_cow():

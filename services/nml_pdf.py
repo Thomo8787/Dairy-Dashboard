@@ -410,7 +410,58 @@ def parse_nml_pdf(content: bytes) -> dict[str, Any]:
             seen.add(key)
             samples.append(row)
 
+    metadata["payment_report"] = _is_payment_report(full_text)
+    if metadata["payment_report"]:
+        marks = _payment_marks(pages_words)
+        for sample in samples:
+            mark = marks.get((sample["sample_id"], sample["sample_date"]))
+            sample["vat_order"] = mark.get("vat_order") if mark else None
+            sample["payment_selected"] = bool(mark and mark.get("payment_selected"))
+
     return {"metadata": metadata, "samples": samples}
+
+
+def _is_payment_report(full_text: str) -> bool:
+    """Müller Results Notification: the loads chosen for fat, protein, SCC and Bactoscan pay."""
+    lowered = full_text.lower()
+    return "müller results notification" in lowered or "muller results notification" in lowered
+
+
+def _payment_marks(
+    pages_words: list[list[dict[str, Any]]],
+) -> dict[tuple[str, dt.date], dict[str, Any]]:
+    """Sample and date to collection order and whether the Payment column is Y."""
+    marks: dict[tuple[str, dt.date], dict[str, Any]] = {}
+    for words in pages_words:
+        for row_words in _cluster_word_rows(words):
+            joined = " ".join(word["text"] for word in row_words)
+            if _SKIP_ROW_RE.search(joined):
+                continue
+            sample_id = None
+            sample_date = None
+            vat_order = None
+            payment_selected = None
+            for word in row_words:
+                token = word["text"].strip()
+                x0 = float(word["x0"])
+                if sample_id is None and x0 < 55 and _SAMPLE_ID_RE.match(token):
+                    sample_id = normalize_sample_id(token)
+                    continue
+                if sample_date is None and _DATE_TOKEN_RE.match(token):
+                    sample_date = _to_date(token)
+                    continue
+                if vat_order is None and _VAT_ORDER_RE.match(token):
+                    vat_order = token
+                    continue
+                if x0 >= 510 and token.upper() in {"Y", "N"}:
+                    payment_selected = token.upper() == "Y"
+            if not sample_id or sample_date is None or payment_selected is None:
+                continue
+            marks[(sample_id, sample_date)] = {
+                "vat_order": vat_order,
+                "payment_selected": payment_selected,
+            }
+    return marks
 
 
 def looks_like_nml_pdf(content: bytes) -> bool:
