@@ -2380,10 +2380,11 @@ def _add_inventory_conception(
 def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> dict[str, dict[str, Any]]:
     """Conception rate, days open, 100-day in calf, and 200-day not in calf.
 
-    Conception rate ends 32/33 days before each farm's last main PD session.
-    The top figure is the last 30 eligible days; the bottom is the 90 days
-    before that. 100-day and 200-day rates use the last 30 days against the
-    90 days before. Days open still uses the last 30 against the last 120.
+    Conception rate and 100-day in calf end 32/33 days before each farm's last
+    main PD session so pregnancy checks have time to land. The top figure is
+    the last 30 eligible days; the bottom is the 90 days before that. 200-day
+    not in calf still uses the last 30 days against the 90 days before. Days
+    open uses the last 30 against the last 120.
     """
     start_30 = today - dt.timedelta(days=30)
     start_120 = today - dt.timedelta(days=120)
@@ -2524,25 +2525,34 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
                 bucket["days_open_120"].append(days_120)
             if days_30 is not None:
                 bucket["days_open_30"].append(days_30)
-            for days, total_30, success_30, total_prior, success_prior, count_empty in (
-                (100, "in_calf_100_total_30", "in_calf_100_success_30", "in_calf_100_total_prior", "in_calf_100_success_prior", False),
-                (200, "empty_200_total_30", "empty_200_30", "empty_200_total_prior", "empty_200_prior", True),
+
+            # 100-day in calf uses the same PD lag window as conception rate.
+            day_100 = fresh + dt.timedelta(days=100)
+            if (
+                prior_start <= day_100 <= cut_off
+                and (exit_day is None or exit_day >= day_100)
             ):
-                milestone = fresh + dt.timedelta(days=days)
-                if milestone > today or milestone < rate_prior_start:
-                    continue
-                if exit_day is not None and exit_day < milestone:
-                    continue
-                in_calf = _in_calf_on(conceptions, milestone)
-                hit = 1 if in_calf else 0
-                if count_empty:
-                    hit = 0 if in_calf else 1
-                if milestone >= start_30:
-                    bucket[total_30] += 1
-                    bucket[success_30] += hit
+                hit = 1 if _in_calf_on(conceptions, day_100) else 0
+                if day_100 >= recent_start:
+                    bucket["in_calf_100_total_30"] += 1
+                    bucket["in_calf_100_success_30"] += hit
                 else:
-                    bucket[total_prior] += 1
-                    bucket[success_prior] += hit
+                    bucket["in_calf_100_total_prior"] += 1
+                    bucket["in_calf_100_success_prior"] += hit
+
+            # 200-day not in calf stays on the calendar 30 / prior-90 windows.
+            day_200 = fresh + dt.timedelta(days=200)
+            if (
+                rate_prior_start <= day_200 <= today
+                and (exit_day is None or exit_day >= day_200)
+            ):
+                hit = 0 if _in_calf_on(conceptions, day_200) else 1
+                if day_200 >= start_30:
+                    bucket["empty_200_total_30"] += 1
+                    bucket["empty_200_30"] += hit
+                else:
+                    bucket["empty_200_total_prior"] += 1
+                    bucket["empty_200_prior"] += hit
 
     output: dict[str, dict[str, Any]] = {}
     for farm, bucket in result.items():
@@ -2550,6 +2560,11 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
         recent_start, cut_off, prior_start, last_pd = conception_windows[farm]
         prior_end = recent_start - dt.timedelta(days=1)
         pd_lag = _pd_lag_days(farm)
+        pd_note = (
+            f"(ended {pd_lag} days before last main PD"
+            + (f" on {_format_tile_day(last_pd)}" if last_pd else "")
+            + ")"
+        )
         _apply_compared_value(
             row,
             "conception_rate",
@@ -2558,10 +2573,7 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
             higher_is_better=True,
         )
         row["conception_rate_title"] = (
-            f"Services {_format_tile_day(recent_start)} to {_format_tile_day(cut_off)} "
-            f"(ended {pd_lag} days before last main PD"
-            + (f" on {_format_tile_day(last_pd)}" if last_pd else "")
-            + ")"
+            f"Services {_format_tile_day(recent_start)} to {_format_tile_day(cut_off)} {pd_note}"
         )
         row["conception_rate_avg_120_title"] = (
             f"Services {_format_tile_day(prior_start)} to {_format_tile_day(prior_end)} "
@@ -2583,8 +2595,14 @@ def _build_fertility_outcomes(db: Session, farms: list[str], today: dt.date) -> 
             _rate(bucket["in_calf_100_success_prior"], bucket["in_calf_100_total_prior"]),
             higher_is_better=True,
         )
-        row["in_calf_100_title"] = "Share of cows whose day 100 fell in the last 30 days and who were in calf that day"
-        row["in_calf_100_avg_120_title"] = "Same rate for cows whose day 100 fell in the 90 days before that"
+        row["in_calf_100_title"] = (
+            f"Cows whose day 100 fell {_format_tile_day(recent_start)} to {_format_tile_day(cut_off)} "
+            f"and who were in calf that day {pd_note}"
+        )
+        row["in_calf_100_avg_120_title"] = (
+            f"Same rate for day 100 from {_format_tile_day(prior_start)} to {_format_tile_day(prior_end)} "
+            f"(90 days before the top window)"
+        )
         _apply_compared_value(
             row,
             "not_in_calf_200",
