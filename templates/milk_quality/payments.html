@@ -98,7 +98,11 @@
     .pay-table tfoot td {
       background: #eef6ea;
       font-weight: 700;
-      border-top: 2px solid #8aa888;
+    }
+    .pay-table tfoot tr:first-child td { border-top: 2px solid #8aa888; }
+    .pay-table tfoot tr:last-child td {
+      background: #e4efe0;
+      border-top: 1px solid #8aa888;
     }
     .empty-state { padding: 1.5rem; color: var(--muted); text-align: left; }
   </style>
@@ -137,7 +141,8 @@
         <p class="help-text">
           These are the loads Müller selected for payment.
           Each farm has a table for each month.
-          The bottom row is the average of those loads.
+          The row above the bottom is the average of the loads in the table.
+          The bottom row is the average of every collection that month.
           Double-click a farm to show only that one.
         </p>
       </aside>
@@ -272,10 +277,10 @@
     ];
   }
 
-  function summaryCells(rows, farm) {
+  function summaryCells(rows, farm, label) {
     return [
       esc(farm),
-      "Average",
+      esc(label),
       "",
       "",
       num(mean(rows, "butterfat_pct"), 2),
@@ -288,13 +293,20 @@
     ];
   }
 
-  function tableHtml(title, rows) {
+  function summaryRow(rows, farm, label) {
+    return "<tr>" + summaryCells(rows, farm, label).map((cell) => `<td>${cell}</td>`).join("") + "</tr>";
+  }
+
+  function tableHtml(title, rows, monthAverage) {
     const farm = rows[0] ? rows[0].farm : "";
     const head = "<thead><tr>" + HEADERS.map((label) => `<th>${label}</th>`).join("") + "</tr></thead>";
     const body = "<tbody>" + rows.map((row) =>
       "<tr>" + rowCells(row).map((cell) => `<td>${cell}</td>`).join("") + "</tr>"
     ).join("") + "</tbody>";
-    const foot = "<tfoot><tr>" + summaryCells(rows, farm).map((cell) => `<td>${cell}</td>`).join("") + "</tr></tfoot>";
+    const foot = "<tfoot>"
+      + summaryRow(rows, farm, "Average for the payments")
+      + summaryRow(monthAverage ? [monthAverage] : [], farm, "Average for the month")
+      + "</tfoot>";
     return `<h2>${esc(title)}</h2><div class="table-wrap"><table class="pay-table">${head}${body}${foot}</table></div>`;
   }
 
@@ -306,6 +318,10 @@
       host.innerHTML = '<div class="table-wrap"><table class="pay-table"><tbody><tr><td class="empty-state">No payment loads in this month range.</td></tr></tbody></table></div>';
       return;
     }
+    const monthAverage = new Map();
+    (data.month_averages || []).forEach((row) => {
+      monthAverage.set(row.farm + "|" + row.month, row);
+    });
     const byMonth = new Map();
     rows.forEach((row) => {
       const key = String(row.sample_date || "").slice(0, 7);
@@ -321,7 +337,7 @@
           .slice()
           .sort((a, b) => String(a.sample_date).localeCompare(String(b.sample_date)) || String(a.sample_id).localeCompare(String(b.sample_id), undefined, { numeric: true }));
         const title = monthFarms.length > 1 ? monthHeading(key) + " · " + farm : monthHeading(key);
-        return tableHtml(title, farmRows);
+        return tableHtml(title, farmRows, monthAverage.get(farm + "|" + key));
       }).join("");
       return `<section class="month-block">${tables}</section>`;
     }).join("");

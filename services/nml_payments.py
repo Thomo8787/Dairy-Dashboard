@@ -7,8 +7,10 @@ from typing import Any
 
 from sqlalchemy import select
 
-from services.database import NmlPaymentLoad, get_session
+from services.database import NmlMilkResult, NmlPaymentLoad, get_session
 from services.farms import HERD_FARM_OPTIONS
+
+_QUALITY_FIELDS = ("butterfat_pct", "protein_pct", "scc", "bactoscan", "urea_pct", "fpd")
 
 
 def save_payment_loads(records: list[dict[str, Any]]) -> int:
@@ -73,12 +75,56 @@ def list_payment_loads(
             query = query.where(NmlPaymentLoad.sample_date <= date_to)
         rows = db.scalars(query.order_by(NmlPaymentLoad.sample_date, NmlPaymentLoad.sample_id)).all()
         payload = [_row_out(row) for row in rows]
+        month_averages = _month_averages(db, selected, date_from, date_to)
     return {
         "rows": payload,
         "total": len(payload),
+        "month_averages": month_averages,
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
     }
+
+
+def _month_averages(
+    db,
+    farms: list[str],
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+) -> list[dict[str, Any]]:
+    """Simple mean of every real lab result for each farm and calendar month.
+
+    Estimated and missing samples are left out. This is every collection in the
+    month, not only the loads Müller selected for payment.
+    """
+    query = select(NmlMilkResult).where(
+        NmlMilkResult.farm.in_(farms),
+        NmlMilkResult.sample_missing.is_(False),
+        NmlMilkResult.quality_estimated.is_(False),
+    )
+    if date_from is not None:
+        query = query.where(NmlMilkResult.sample_date >= date_from)
+    if date_to is not None:
+        query = query.where(NmlMilkResult.sample_date <= date_to)
+    grouped: dict[tuple[str, str], list[NmlMilkResult]] = {}
+    for row in db.scalars(query).all():
+        if row.sample_date is None or not row.farm:
+            continue
+        key = (row.farm, f"{row.sample_date.year:04d}-{row.sample_date.month:02d}")
+        grouped.setdefault(key, []).append(row)
+    averages = []
+    for (farm, month), samples in sorted(grouped.items()):
+        item = {"farm": farm, "month": month, "loads": len(samples)}
+        for field in _QUALITY_FIELDS:
+            item[field] = _plain_mean(samples, field)
+        averages.append(item)
+    return averages
+
+
+def _plain_mean(rows: list[Any], field: str) -> float | None:
+    values = [float(getattr(row, field)) for row in rows if getattr(row, field, None) is not None]
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 def _row_out(row: NmlPaymentLoad) -> dict[str, Any]:
