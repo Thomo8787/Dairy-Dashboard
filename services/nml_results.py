@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
 
 from services.cows_in_milk import cows_in_milk_for_dates
-from services.database import NmlMilkResult, get_session
+from services.database import NmlMilkResult, NmlPaymentLoad, get_session
 from services.farms import FARMS
 
 XLSX_CONTENT_TYPE = (
@@ -29,6 +29,7 @@ _HEADERS = (
     "NML",
     "Litres",
     "Weighbridge",
+    "Payment",
     "Temp °C",
     "Cows in milk",
     "Butterfat %",
@@ -192,6 +193,7 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
         "litres_load": row.litres_load,
         "litres_weighbridge": row.litres_weighbridge,
         "weighbridge_confirmed": bool(getattr(row, "weighbridge_confirmed", False)),
+        "payment_selected": False,
         "cows_in_milk": None,
         "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
         "butterfat_pct": row.butterfat_pct,
@@ -475,6 +477,41 @@ def _in_result_window(row: Any, date_from: dt.date | None, date_to: dt.date | No
     return True
 
 
+def _attach_payment_flags(
+    session,
+    stored: list[NmlMilkResult],
+    rows: list[dict[str, Any]],
+    farms: list[str],
+    date_from: dt.date | None,
+    date_to: dt.date | None,
+) -> None:
+    """Mark loads Müller selected for payment. Match is producer, date, and sample."""
+    from services.nml_pdf import normalize_sample_id
+
+    query = select(
+        NmlPaymentLoad.producer_ref,
+        NmlPaymentLoad.sample_date,
+        NmlPaymentLoad.sample_id,
+    ).where(NmlPaymentLoad.farm.in_(farms))
+    if date_from is not None:
+        query = query.where(NmlPaymentLoad.sample_date >= date_from)
+    if date_to is not None:
+        query = query.where(NmlPaymentLoad.sample_date <= date_to)
+    keys = {
+        ((producer or "").strip(), day, normalize_sample_id(sample_id))
+        for producer, day, sample_id in session.execute(query).all()
+    }
+    for source, row in zip(stored, rows):
+        if row.get("sample_missing") or source.sample_date is None:
+            continue
+        key = (
+            (source.producer_ref or "").strip(),
+            source.sample_date,
+            normalize_sample_id(source.sample_id),
+        )
+        row["payment_selected"] = key in keys
+
+
 def list_nml_results(
     *,
     farms: list[str] | None = None,
@@ -506,6 +543,7 @@ def list_nml_results(
         stored.sort(key=lambda row: row.load_number if row.load_number is not None else 10**9)
         stored.sort(key=lambda row: row.sample_date or dt.date.min, reverse=True)
         rows = [_row_to_dict(row, today=dt.date.today()) for row in stored]
+        _attach_payment_flags(session, stored, rows, selected_farms, date_from, date_to)
         _attach_cows_in_milk(session, rows)
     return {
         "rows": rows,
@@ -555,6 +593,7 @@ def _export_cells(row: dict[str, Any]) -> list[Any]:
         _nml_export_label(row),
         row.get("litres_load"),
         row.get("litres_weighbridge"),
+        "Yes" if row.get("payment_selected") else "",
         row.get("temp_c"),
         row.get("cows_in_milk"),
         row.get("butterfat_pct"),
@@ -583,7 +622,7 @@ def build_nml_results_xlsx(rows: list[dict[str, Any]]) -> bytes:
     ws.append(list(_HEADERS))
     for row in rows:
         ws.append(_export_cells(row))
-    widths = [8, 14, 14, 8, 12, 10, 12, 12, 10, 12, 12, 11, 8, 11, 8, 8, 9]
+    widths = [8, 14, 14, 8, 12, 10, 12, 12, 12, 10, 12, 12, 11, 8, 11, 8, 8, 9]
     for index, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(index)].width = width
     for cell in ws[1]:

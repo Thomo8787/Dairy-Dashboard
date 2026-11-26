@@ -125,8 +125,8 @@
       padding: 0.4rem 0.55rem; text-align: left;
       border-bottom: 1px solid var(--line); white-space: nowrap;
     }
-    #coll-table th:nth-child(n+3):nth-child(-n+16),
-    #coll-table td:nth-child(n+3):nth-child(-n+16) {
+    #coll-table th:nth-child(n+3):nth-child(-n+17),
+    #coll-table td:nth-child(n+3):nth-child(-n+17) {
       text-align: center;
     }
     .nml-mark {
@@ -142,6 +142,7 @@
       background: #1e3a5f; color: #fff; font-weight: 600;
       position: sticky; top: 0; z-index: 1; cursor: pointer; user-select: none;
     }
+    #coll-table tbody tr.payment td { background: #c8ebd0; }
     #coll-table tbody tr.fail td { background: #fff1f2; }
     #coll-table tbody tr.missing-sample td { background: #fee2e2; }
     .empty-state { padding: 1.5rem; color: var(--muted); }
@@ -405,6 +406,7 @@
               <th data-sort="nml_status">NML</th>
               <th data-sort="litres_load">Litres</th>
               <th data-sort="litres_weighbridge">Weighbridge</th>
+              <th data-sort="payment_selected">Payment</th>
               <th data-sort="temp_c">Temp °C</th>
               <th data-sort="cows_in_milk">Cows in milk</th>
               <th data-sort="butterfat_pct">Butterfat %</th>
@@ -418,7 +420,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr><td colspan="17" class="empty-state">Loading…</td></tr>
+            <tr><td colspan="18" class="empty-state">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -978,6 +980,11 @@
     return '<span class="nml-mark bad" title="This load is missing NML quality" aria-label="Not matched to NML">✕</span>';
   }
 
+  function paymentCell(row) {
+    if (!row.payment_selected) return "";
+    return '<span class="nml-mark ok" title="Müller used this load for payment" aria-label="Used for payment">✓</span>';
+  }
+
   function sampleSortValue(row) {
     const raw = row.sample_id == null ? "" : String(row.sample_id).trim();
     if (!raw) return null;
@@ -1048,11 +1055,12 @@
     const tbody = document.getElementById("table-body");
     const visible = visibleRows();
     if (!visible.length) {
-      tbody.innerHTML = '<tr><td colspan="17" class="empty-state">No collections match the current filters.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="18" class="empty-state">No collections match the current filters.</td></tr>';
       return;
     }
     tbody.innerHTML = sortRows(visible).map((row) => {
       const classes = [];
+      if (row.payment_selected) classes.push("payment");
       if (row.sample_missing) classes.push("missing-sample");
       if (row.antibiotic_pass === false) classes.push("fail");
       const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
@@ -1064,6 +1072,7 @@
         `<td class="nml-status">${nmlCell(row)}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.litres_load))}</td>` +
         `<td class="num">${weighbridgeCell(row)}</td>` +
+        `<td class="nml-status">${paymentCell(row)}</td>` +
         `<td class="num">${escapeHtml(num(row.temp_c, 2))}</td>` +
         `<td class="num">${escapeHtml(intFmt(row.cows_in_milk))}</td>` +
         `<td class="num">${escapeHtml(num(row.butterfat_pct, 2))}</td>` +
@@ -1099,7 +1108,7 @@
     } catch (err) {
       document.getElementById("meta-line").textContent = "";
       document.getElementById("table-body").innerHTML =
-        '<tr><td colspan="17" class="empty-state">Could not load collections.</td></tr>';
+        '<tr><td colspan="18" class="empty-state">Could not load collections.</td></tr>';
       showMessage(err.message || String(err), true);
     }
   }
