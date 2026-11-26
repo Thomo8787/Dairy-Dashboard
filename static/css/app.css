@@ -682,6 +682,17 @@ html, body {
   line-height: 1.4;
 }
 
+.home-issues-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 0 0.85rem;
+}
+
+#home-issues-speak {
+  min-height: 2.75rem;
+  padding: 0.55rem 1.15rem;
+}
+
 .home-issues-empty {
   margin: 0.2rem 0 0;
   color: var(--muted);

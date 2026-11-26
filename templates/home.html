@@ -191,6 +191,9 @@
 
   {% if can_production or can_herd %}
   <section class="home-section" id="home-issues" aria-label="Issues" hidden data-milk="{{ '1' if can_production else '0' }}" data-fertility="{{ '1' if can_herd else '0' }}">
+    <div class="home-issues-toolbar">
+      <button type="button" class="secondary" id="home-issues-speak" aria-pressed="false">Speak</button>
+    </div>
     <p class="home-issues-empty" id="home-issues-loading">Checking the latest figures…</p>
     <div id="home-issues-list"></div>
     <p class="home-issues-empty" id="home-issues-empty" hidden>No issues. Milk tiles are clear, no conception rate is red, and no sire or technician is under 40% across 50 or more services.</p>
@@ -791,6 +794,7 @@
   };
 
   function show(name) {
+    if (name !== "issues") stopSpeaking();
     buttons.forEach((btn) => {
       const on = btn.dataset.homeScreen === name;
       btn.classList.toggle("is-selected", on);
@@ -815,6 +819,98 @@
   const parts = { milk: [], fertility: [], health: [] };
   const ready = { milk: !needs.milk, fertility: !needs.fertility };
   const failed = { milk: false, fertility: false };
+  const speakBtn = document.getElementById("home-issues-speak");
+  let speaking = false;
+
+  function speechSupported() {
+    return "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+  }
+
+  function setSpeakButton(active) {
+    speaking = active;
+    if (!speakBtn) return;
+    speakBtn.textContent = active ? "Stop" : "Speak";
+    speakBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function stopSpeaking() {
+    if (speechSupported()) window.speechSynthesis.cancel();
+    setSpeakButton(false);
+  }
+
+  function spokenFarm(farm) {
+    const text = String(farm || "").trim();
+    if (/^[A-Z]{2,4}$/.test(text)) return text.split("").join(" ");
+    return text;
+  }
+
+  function spokenLabel(label) {
+    return String(label || "")
+      .replace(/\bSCC\b/g, "S C C")
+      .replace(/%/g, " percent")
+      .replace(/\//g, " per ");
+  }
+
+  function issueSentence(group, issue) {
+    const who = [spokenFarm(issue.farm), spokenLabel(issue.label)].filter(Boolean).join(", ");
+    const value = issue.value_text || formatIssueNumber(issue.metric, issue.value);
+    const comment = String(issue.comment || "").trim();
+    const bits = [group, who];
+    if (value && value !== "—") bits.push(String(value));
+    if (comment) bits.push(comment);
+    return bits.filter(Boolean).join(". ");
+  }
+
+  function speakIssues() {
+    if (!speechSupported()) return;
+    if (speaking) {
+      stopSpeaking();
+      return;
+    }
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    const chunks = [];
+    if (!ready.milk || !ready.fertility) {
+      chunks.push("Issues are still loading.");
+    } else {
+      const groups = [
+        ["Production", parts.milk],
+        ["Fertility", parts.fertility],
+        ["Health", parts.health],
+      ];
+      const rows = groups.flatMap(([, items]) => items);
+      if (!rows.length) {
+        chunks.push(failed.milk || failed.fertility ? "Couldn't load issues." : "No issues.");
+      } else {
+        chunks.push(rows.length === 1 ? "1 issue." : `${rows.length} issues.`);
+        groups.forEach(([title, items]) => {
+          items.forEach((issue) => chunks.push(issueSentence(title, issue)));
+        });
+      }
+    }
+    setSpeakButton(true);
+    window.setTimeout(() => {
+      if (!speaking) return;
+      chunks.forEach((text, index) => {
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = "en-GB";
+        utter.rate = 0.95;
+        if (index === chunks.length - 1) {
+          utter.onend = () => setSpeakButton(false);
+          utter.onerror = () => setSpeakButton(false);
+        }
+        synth.speak(utter);
+      });
+    }, 50);
+  }
+
+  if (speakBtn) {
+    if (!speechSupported()) {
+      speakBtn.hidden = true;
+    } else {
+      speakBtn.addEventListener("click", speakIssues);
+    }
+  }
 
   function formatIssueNumber(metric, value) {
     if (value === null || value === undefined || value === "") return "—";
