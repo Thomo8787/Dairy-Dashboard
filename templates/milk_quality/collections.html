@@ -38,15 +38,29 @@
       background: #f3f4f6; color: var(--muted);
       font-size: 0.8125rem; font-weight: 600; cursor: pointer;
     }
+    .farm-slicer .slicer-btn {
+      flex-direction: column;
+      gap: 0.3rem;
+      min-height: 3.25rem;
+      padding: 0.5rem 0.4rem;
+    }
+    .farm-slicer .slicer-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 1.5rem; height: 1.5rem; border-radius: 999px;
+      background: #e5e7eb; color: #9ca3af;
+      font-size: 0.7rem; font-weight: 700;
+    }
     .farm-slicer .slicer-btn.selected {
       background: var(--accent); border-color: var(--accent); color: #fff;
     }
-    .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .date-row label {
-      display: flex; flex-direction: column; gap: 0.2rem;
-      font-size: 0.8rem; font-weight: 600; color: var(--muted);
+    .farm-slicer .slicer-btn.selected .slicer-icon { background: #fff; color: var(--accent); }
+    .date-inputs { display: grid; gap: 0.5rem; }
+    .date-inputs label {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      font-size: 0.8125rem; color: var(--muted);
     }
-    .date-row select { margin: 0; width: 100%; }
+    .date-inputs input[type="range"] { width: 100%; }
+    .date-inputs .month-label { font-weight: 600; min-width: 4.5rem; text-align: right; color: var(--text); }
     .meta-line { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; }
     .summary-cards {
       display: grid;
@@ -75,6 +89,7 @@
     .smoothing-slicer .slicer-btn.selected, .outlier-slicer .slicer-btn.selected {
       background: #dceaf7; border-color: #5a9fd4; color: #1e3a5f;
     }
+    .charts-section { margin-top: 1.25rem; }
     .charts-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -229,15 +244,20 @@
           <span class="section-label">Farm</span>
           <div class="farm-slicer" id="farm-slicer" role="group" aria-label="Farm">
             {% for farm in farms %}
-            <button type="button" class="slicer-btn selected" data-value="{{ farm.code }}" aria-pressed="true">{{ farm.code }}</button>
+            <button type="button" class="slicer-btn selected" data-value="{{ farm.code }}" aria-pressed="true">
+              <span class="slicer-icon" aria-hidden="true">{{ farm.code[0] }}</span>
+              {{ farm.code }}
+            </button>
             {% endfor %}
           </div>
         </div>
         <div class="filter-section">
-          <span class="section-label">Sample date range</span>
-          <div class="date-row">
-            <label>From <select id="date-from"></select></label>
-            <label>To <select id="date-to"></select></label>
+          <span class="section-label">Month range</span>
+          <div class="date-inputs">
+            <label>From <span class="month-label" id="min-date-label">—</span></label>
+            <input type="range" id="min-date-range" min="0" max="0" value="0" aria-label="From month">
+            <label>To <span class="month-label" id="max-date-label">—</span></label>
+            <input type="range" id="max-date-range" min="0" max="0" value="0" aria-label="To month">
           </div>
           <button type="button" class="btn sidebar-add-btn" id="add-collection-btn">Milk Collection</button>
         </div>
@@ -287,6 +307,44 @@
       <p class="message" id="status-message"></p>
       <div class="summary-cards" id="summary-cards"></div>
 
+      <div class="action-bar">
+        <button type="button" class="btn ghost" id="download-csv-btn">Export CSV</button>
+        <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
+        <button type="button" class="btn" id="upload-muller-btn">Upload Müller</button>
+        <input type="file" id="upload-muller-input" accept=".csv,text/csv" multiple hidden>
+        <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="coll-table">
+          <thead>
+            <tr>
+              <th data-sort="farm">Farm</th>
+              <th data-sort="sample_date">Date</th>
+              <th data-sort="load_number">Load</th>
+              <th data-sort="sample_id">Sample</th>
+              <th data-sort="nml_status">NML</th>
+              <th data-sort="litres_load">Litres</th>
+              <th data-sort="litres_weighbridge">Weighbridge</th>
+              <th data-sort="payment_selected">Payment</th>
+              <th data-sort="temp_c">Temp °C</th>
+              <th data-sort="cows_in_milk">Cows in milk</th>
+              <th data-sort="butterfat_pct">Butterfat %</th>
+              <th data-sort="protein_pct">Protein %</th>
+              <th data-sort="scc">SCC</th>
+              <th data-sort="bactoscan">BactoScan</th>
+              <th data-sort="urea_pct">Urea</th>
+              <th data-sort="fpd">FPD</th>
+              <th data-sort="antibiotic_pass">A/B</th>
+              <th class="col-edit"></th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr><td colspan="18" class="empty-state">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="charts-section">
       <div class="chart-toolbar">
         <span class="section-label" style="margin:0">Trend</span>
         <div class="smoothing-slicer" role="group" aria-label="Smoothing">
@@ -387,42 +445,6 @@
       </div>
       <p class="chart-hint">Scroll to zoom, drag to box-zoom, hold Ctrl and drag to pan, double-click to reset. Click ⤢ to enlarge.</p>
 
-      <div class="action-bar">
-        <button type="button" class="btn ghost" id="download-csv-btn">Export CSV</button>
-        <button type="button" class="btn ghost" id="download-xlsx-btn">Export XLSX</button>
-        <button type="button" class="btn" id="upload-muller-btn">Upload Müller</button>
-        <input type="file" id="upload-muller-input" accept=".csv,text/csv" multiple hidden>
-        <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
-      </div>
-
-      <div class="table-wrap">
-        <table id="coll-table">
-          <thead>
-            <tr>
-              <th data-sort="farm">Farm</th>
-              <th data-sort="sample_date">Date</th>
-              <th data-sort="load_number">Load</th>
-              <th data-sort="sample_id">Sample</th>
-              <th data-sort="nml_status">NML</th>
-              <th data-sort="litres_load">Litres</th>
-              <th data-sort="litres_weighbridge">Weighbridge</th>
-              <th data-sort="payment_selected">Payment</th>
-              <th data-sort="temp_c">Temp °C</th>
-              <th data-sort="cows_in_milk">Cows in milk</th>
-              <th data-sort="butterfat_pct">Butterfat %</th>
-              <th data-sort="protein_pct">Protein %</th>
-              <th data-sort="scc">SCC</th>
-              <th data-sort="bactoscan">BactoScan</th>
-              <th data-sort="urea_pct">Urea</th>
-              <th data-sort="fpd">FPD</th>
-              <th data-sort="antibiotic_pass">A/B</th>
-              <th class="col-edit"></th>
-            </tr>
-          </thead>
-          <tbody id="table-body">
-            <tr><td colspan="18" class="empty-state">Loading…</td></tr>
-          </tbody>
-        </table>
       </div>
     </section>
   </div>
@@ -621,6 +643,8 @@
     return m + "-" + String(last).padStart(2, "0");
   }
 
+  let monthList = [];
+
   function populateMonths() {
     const now = new Date();
     const current = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -634,29 +658,51 @@
       new Date(boundEnd.getFullYear(), boundEnd.getMonth(), 1).getTime(),
       current.getTime()
     ));
-    const months = [];
+    monthList = [];
     for (let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
          cursor <= end;
          cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
-      months.push(monthKey(cursor));
+      monthList.push(monthKey(cursor));
     }
-    const opts = months.map((m) => `<option value="${m}">${monthLabel(m)}</option>`).join("");
-    document.getElementById("date-from").innerHTML = opts;
-    document.getElementById("date-to").innerHTML = opts;
+    const minRange = document.getElementById("min-date-range");
+    const maxRange = document.getElementById("max-date-range");
+    const maxIdx = Math.max(0, monthList.length - 1);
+    minRange.min = 0;
+    minRange.max = maxIdx;
+    maxRange.min = 0;
+    maxRange.max = maxIdx;
     const thisMonth = monthKey(current);
     const lastMonth = monthKey(new Date(current.getFullYear(), current.getMonth() - 1, 1));
-    document.getElementById("date-from").value = months.includes(lastMonth) ? lastMonth : months[0];
-    document.getElementById("date-to").value = months.includes(thisMonth) ? thisMonth : months[months.length - 1];
+    const fromIdx = monthList.indexOf(lastMonth);
+    const toIdx = monthList.indexOf(thisMonth);
+    minRange.value = fromIdx >= 0 ? fromIdx : 0;
+    maxRange.value = toIdx >= 0 ? toIdx : maxIdx;
+    updateDateLabels();
+  }
+
+  function updateDateLabels() {
+    const minRange = document.getElementById("min-date-range");
+    const maxRange = document.getElementById("max-date-range");
+    let lo = parseInt(minRange.value, 10) || 0;
+    let hi = parseInt(maxRange.value, 10) || 0;
+    if (lo > hi) {
+      const swap = lo;
+      lo = hi;
+      hi = swap;
+      minRange.value = lo;
+      maxRange.value = hi;
+    }
+    document.getElementById("min-date-label").textContent = monthList[lo] ? monthLabel(monthList[lo]) : "—";
+    document.getElementById("max-date-label").textContent = monthList[hi] ? monthLabel(monthList[hi]) : "—";
+    return { from: monthList[lo] || "", to: monthList[hi] || "" };
   }
 
   function buildQuery() {
     const params = new URLSearchParams();
     selectedFarms().forEach((f) => params.append("farm", f));
-    let from = document.getElementById("date-from").value;
-    let to = document.getElementById("date-to").value;
-    if (from && to && from > to) { const tmp = from; from = to; to = tmp; }
-    if (from) params.set("date_from", monthToDateFrom(from));
-    if (to) params.set("date_to", monthToDateTo(to));
+    const range = updateDateLabels();
+    if (range.from) params.set("date_from", monthToDateFrom(range.from));
+    if (range.to) params.set("date_to", monthToDateTo(range.to));
     return params.toString();
   }
 
@@ -1181,8 +1227,10 @@
     });
   });
 
-  ["date-from", "date-to"].forEach((id) => {
-    document.getElementById(id).addEventListener("change", loadResults);
+  ["min-date-range", "max-date-range"].forEach((id) => {
+    const slider = document.getElementById(id);
+    slider.addEventListener("input", updateDateLabels);
+    slider.addEventListener("change", loadResults);
   });
 
   document.getElementById("download-csv-btn").addEventListener("click", () => {
