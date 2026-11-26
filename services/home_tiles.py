@@ -100,7 +100,7 @@ def _public(payload: dict[str, Any]) -> dict[str, Any]:
 def stored_production_summary(db: Session) -> dict[str, Any]:
     found = _read(db, "production")
     # Snapshots saved before the Issues tab have no comment list. Rebuild once.
-    if found is None or "issues" not in found:
+    if found is None or "issues" not in found or "collection_issues" not in found:
         _write(db, "production", get_production_summary())
         found = _read(db, "production")
     if found is None:

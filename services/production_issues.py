@@ -39,7 +39,14 @@ _LABELS = {
     "bactoscan": "BactoScan",
     "scc": "SCC",
     "milk_temp": "Milk temp",
+    "weighbridge": "Weighbridge",
+    "collection": "Collection",
 }
+
+# ALH may be up to 1,000 L apart. Every other farm has to match exactly.
+_WEIGHBRIDGE_TOLERANCE_L = 1000
+_PARKES_FARM = "PRK"
+_PARKES_DROP = 0.10
 
 
 def _num(value: Any) -> float | None:
@@ -765,4 +772,172 @@ def build_production_issues(
                     "href": f"/milk-quality/collections?farm={farm}",
                 }
             )
+    return issues
+
+
+def _rounded_litres(value: Any) -> int | None:
+    number = _num(value)
+    if number is None or number <= 0:
+        return None
+    return int(math.floor(number + 0.5))
+
+
+def _weighbridge_gap(farm: str, litres: int, bridge: int) -> int | None:
+    gap = abs(litres - bridge)
+    if farm == "ALH":
+        return gap if gap > _WEIGHBRIDGE_TOLERANCE_L else None
+    if litres != bridge:
+        return gap
+    return None
+
+
+def _load_gap_phrase(day: dt.date, load: Any, litres: int, bridge: int) -> str:
+    load_bit = ""
+    if load is not None and load != "":
+        try:
+            load_bit = f" load {int(load)}"
+        except (TypeError, ValueError):
+            load_bit = f" load {load}"
+    return (
+        f"{_fmt_date(day)}{load_bit} "
+        f"(weighbridge {_fmt_litres(bridge)}, litres {_fmt_litres(litres)})"
+    )
+
+
+def _weighbridge_issues(rows: list[dict[str, Any]], *, cutoff: dt.date) -> list[dict[str, Any]]:
+    """Loads older than 7 days whose weighbridge still does not agree.
+
+    Parkes has no weighbridge, so it is left out. ALH is allowed 1,000 L.
+    A missing weighbridge is not a mismatch: there is nothing to compare.
+    """
+    found: dict[str, list[tuple[dt.date, Any, int, int, int]]] = {}
+    for row in rows:
+        farm = str(row.get("farm") or "").strip().upper()
+        if not farm or farm == _PARKES_FARM:
+            continue
+        day = _parse_day(row.get("sample_date"))
+        if day is None or day >= cutoff:
+            continue
+        litres = _rounded_litres(row.get("litres_load"))
+        bridge = _rounded_litres(row.get("litres_weighbridge"))
+        if litres is None or bridge is None:
+            continue
+        gap = _weighbridge_gap(farm, litres, bridge)
+        if gap is None:
+            continue
+        found.setdefault(farm, []).append((day, row.get("load_number"), litres, bridge, gap))
+
+    issues: list[dict[str, Any]] = []
+    for farm in ("ALH", "BNK", "SFR", "COF"):
+        loads = found.get(farm) or []
+        if not loads:
+            continue
+        loads.sort(key=lambda item: (item[0], item[1] if isinstance(item[1], int) else 0))
+        largest = max(gap for _day, _load, _litres, _bridge, gap in loads)
+        listed = _join_and(
+            _load_gap_phrase(day, load, litres, bridge)
+            for day, load, litres, bridge, _gap in loads
+        )
+        count = len(loads)
+        loads_word = "load" if count == 1 else "loads"
+        if farm == "ALH":
+            verb = "is" if count == 1 else "are"
+            lead = f"{count} {loads_word} older than 7 days {verb} more than 1,000 L from the litres"
+        else:
+            verb = "does not match" if count == 1 else "do not match"
+            lead = f"{count} {loads_word} older than 7 days {verb} the litres"
+        issues.append(
+            {
+                "farm": farm,
+                "metric": "weighbridge",
+                "label": _LABELS["weighbridge"],
+                "value": count,
+                "baseline": largest,
+                "value_text": f"{count:,}",
+                "baseline_text": f"{largest:,} L",
+                "value_title": "Loads older than 7 days whose weighbridge does not agree",
+                "baseline_title": "Largest gap between weighbridge and litres",
+                "comment": f"{lead}: {listed}.",
+                "href": f"/milk-quality/collections?farm={farm}",
+            }
+        )
+    return issues
+
+
+def _parkes_drop_issue(rows: list[dict[str, Any]], *, yesterday: dt.date) -> dict[str, Any] | None:
+    """A Parkes day more than 10% under the previous collection day."""
+    totals: dict[dt.date, int] = {}
+    for row in rows:
+        if str(row.get("farm") or "").strip().upper() != _PARKES_FARM:
+            continue
+        day = _parse_day(row.get("sample_date"))
+        if day is None:
+            continue
+        litres = _rounded_litres(row.get("litres_load"))
+        if litres is None:
+            litres = _rounded_litres(row.get("litres_weighbridge"))
+        if litres is None:
+            continue
+        totals[day] = totals.get(day, 0) + litres
+
+    days = [day for day in sorted(totals) if day <= yesterday]
+    drops: list[tuple[dt.date, dt.date, int, int]] = []
+    for previous, day in zip(days, days[1:]):
+        before = totals[previous]
+        current = totals[day]
+        if before <= 0:
+            continue
+        if (before - current) / before > _PARKES_DROP:
+            drops.append((day, previous, current, before))
+    if not drops:
+        return None
+
+    def phrase(day: dt.date, previous: dt.date, current: int, before: int) -> str:
+        percent = int(round(100 * (before - current) / before))
+        return (
+            f"{_fmt_date(day)} was {_fmt_litres(current)} L, {percent}% below "
+            f"{_fmt_date(previous)} ({_fmt_litres(before)} L)"
+        )
+
+    if len(drops) == 1:
+        day, previous, current, before = drops[0]
+        return {
+            "farm": _PARKES_FARM,
+            "metric": "collection",
+            "label": _LABELS["collection"],
+            "value": current,
+            "baseline": before,
+            "value_text": f"{current:,}",
+            "baseline_text": f"{before:,}",
+            "value_title": f"Litres on {_fmt_date(day)}",
+            "baseline_title": f"Litres on the previous collection day, {_fmt_date(previous)}",
+            "comment": f"{phrase(day, previous, current, before)}.",
+            "href": "/milk-quality/collections?farm=PRK",
+        }
+
+    worst = max(drops, key=lambda item: (item[3] - item[2]) / item[3])
+    worst_percent = int(round(100 * (worst[3] - worst[2]) / worst[3]))
+    return {
+        "farm": _PARKES_FARM,
+        "metric": "collection",
+        "label": _LABELS["collection"],
+        "value": len(drops),
+        "baseline": worst_percent,
+        "value_text": f"{len(drops):,}",
+        "baseline_text": f"{worst_percent}%",
+        "value_title": "Days more than 10% below the previous collection day",
+        "baseline_title": "Largest drop against the previous day",
+        "comment": f"{_join_and(phrase(*item) for item in drops)}.",
+        "href": "/milk-quality/collections?farm=PRK",
+    }
+
+
+def collection_issues(rows: list[dict[str, Any]], *, today: dt.date) -> list[dict[str, Any]]:
+    """Weighbridge disagreements older than 7 days, and a short Parkes day."""
+    cutoff = today - dt.timedelta(days=7)
+    yesterday = today - dt.timedelta(days=1)
+    issues = _weighbridge_issues(rows, cutoff=cutoff)
+    parkes = _parkes_drop_issue(rows, yesterday=yesterday)
+    if parkes is not None:
+        issues.append(parkes)
     return issues

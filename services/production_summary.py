@@ -316,6 +316,34 @@ def get_home_cows_in_milk(*, as_of: dt.date | None = None) -> dict[str, Any]:
     }
 
 
+def _collection_rows() -> list[dict[str, Any]]:
+    """Every collection, so an old weighbridge gap is not limited to the 7-day window."""
+    from sqlalchemy import select
+
+    from services.database import NmlMilkResult
+
+    with get_session() as session:
+        found = session.execute(
+            select(
+                NmlMilkResult.farm,
+                NmlMilkResult.sample_date,
+                NmlMilkResult.load_number,
+                NmlMilkResult.litres_load,
+                NmlMilkResult.litres_weighbridge,
+            ).where(NmlMilkResult.sample_date.isnot(None))
+        ).all()
+    return [
+        {
+            "farm": farm,
+            "sample_date": day,
+            "load_number": load,
+            "litres_load": litres,
+            "litres_weighbridge": bridge,
+        }
+        for farm, day, load, litres, bridge in found
+    ]
+
+
 def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
     """Return per-farm 7-day / 30-day production averages ending yesterday."""
     today = as_of or _uk_today()
@@ -359,19 +387,23 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
             }
         )
 
-    from services.production_issues import build_production_issues
+    from services.production_issues import build_production_issues, collection_issues
+
+    issues = build_production_issues(
+        farms=farms_out,
+        trend=trend,
+        loads=payload.get("rows") or [],
+        window_end=completed_through,
+    )
+    issues.extend(collection_issues(_collection_rows(), today=today))
 
     return {
         "as_of": today.isoformat(),
         "completed_through": completed_through.isoformat(),
         "href": "/milk-quality/collections",
         "farms": farms_out,
-        "issues": build_production_issues(
-            farms=farms_out,
-            trend=trend,
-            loads=payload.get("rows") or [],
-            window_end=completed_through,
-        ),
+        "collection_issues": True,
+        "issues": issues,
         "bactoscan_chart": _build_quality_chart(
             trend, window_end=completed_through, key="bactoscan"
         ),
