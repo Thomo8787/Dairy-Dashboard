@@ -297,8 +297,9 @@
           a day with more than one possible pairing is left crossed. Name each file with the farm code and an underscore,
           for example ALH_MULLER_collection_details_for_2026-10.csv. Accepted codes are
           ALH, BNK, COF, SFR, and PRK.           A row matches a ticket by sample number and
-          collection date (or the day either side). The same sample can be used on
-          another load after you confirm it. Match joins a load with its lab or
+          collection date (or the day either side).           The same sample can be used on
+          another load after you confirm it. Each of those loads gets a weighbridge
+          tick when its litres fit. Match joins a load with its lab or
           weighbridge row and keeps that sample number. Unmatch splits them again.
           If the sample number is blank, it
           matches the date and the ticket litres instead. When it does not, that

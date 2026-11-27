@@ -645,6 +645,48 @@ def _claim_sampled_simple(
     return inserted
 
 
+def _shared_sample_ticket(
+    candidates: list[NmlMilkResult],
+    record: dict[str, Any],
+) -> NmlMilkResult | None:
+    """The one load already showing this sample whose litres fit the portal row.
+
+    Two loads may share a sample. Each portal row confirms the load it fits.
+    Two loads that both fit the same portal row are left unconfirmed.
+    """
+
+    def fitting(day: dt.date | None) -> list[NmlMilkResult]:
+        if day is None:
+            return []
+        pool = [
+            row
+            for row in candidates
+            if row.id is not None
+            and not _is_orphan_bridge_row(row)
+            and row.sample_date == day
+            and _within_tolerance(row.litres_load, record["litres"])
+        ]
+        exact_key = _litres_key(record.get("litres"))
+        exact = [row for row in pool if _litres_key(row.litres_load) == exact_key]
+        if len(exact) == 1:
+            return exact
+        if exact:
+            return []
+        if len(pool) == 1:
+            return pool
+        return []
+
+    seen: set[dt.date] = set()
+    for day in (record.get("payment_date"), record.get("actual_date")):
+        if day is None or day in seen:
+            continue
+        seen.add(day)
+        hits = fitting(day)
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
 def _volume_distance(ticket_litres: Any, bridge_litres: Any) -> int | None:
     left = _litres_key(ticket_litres)
     right = _litres_key(bridge_litres)
@@ -668,8 +710,8 @@ def _claim_sampled_records(
 ) -> int:
     """Match portal rows that have a sample number. Returns insert count.
 
-    Closest volume fit wins when Müller reuses a sample ID. That ticket adopts
-    the sample; any poorer second hit on another ticket stays provisional.
+    A repeated sample confirms every load that already shows it and whose litres
+    fit. A load with a different sample stays provisional.
     """
     inserted = 0
     # score, record, ticket, adopt_sample (override farm sample to Müller's)
@@ -681,6 +723,12 @@ def _claim_sampled_records(
             sample_hits, record["actual_date"], record["payment_date"]
         )
         if status == "ambiguous":
+            shared = _shared_sample_ticket(sample_hits, record)
+            if shared is not None and shared.id is not None:
+                dist = _volume_distance(shared.litres_load, record["litres"])
+                if dist is not None:
+                    pairs.append((dist * 2, record, shared, False))
+                    continue
             _keep_brief(ambiguous, record, sample_hits)
             continue
 
@@ -732,13 +780,10 @@ def _claim_sampled_records(
                 if sample_key is not None:
                     samples_owned.add(sample_key)
         else:
-            if sample_taken:
-                # Better volume fit already owns this sample — provisional.
-                claimed[ticket.id].append((record, ticket, False, False))
-            else:
-                claimed[ticket.id].append((record, ticket, True, False))
-                if sample_key is not None:
-                    samples_owned.add(sample_key)
+            # This load already shows the sample, so a repeat still confirms.
+            claimed[ticket.id].append((record, ticket, True, False))
+            if sample_key is not None:
+                samples_owned.add(sample_key)
         used_records.add(id(record))
 
     for record in sampled:
