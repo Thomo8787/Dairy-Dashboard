@@ -804,19 +804,41 @@ def _load_gap_phrase(day: dt.date, load: Any, litres: int, bridge: int) -> str:
     )
 
 
-def _weighbridge_issues(rows: list[dict[str, Any]], *, cutoff: dt.date) -> list[dict[str, Any]]:
-    """Loads older than 7 days whose weighbridge still does not agree.
+def _previous_month_start(today: dt.date) -> dt.date:
+    """First day of the month before ``today``."""
+    this_month = today.replace(day=1)
+    return (this_month - dt.timedelta(days=1)).replace(day=1)
 
-    Parkes has no weighbridge, so it is left out. ALH is allowed 1,000 L.
-    A missing weighbridge is not a mismatch: there is nothing to compare.
+
+def _month_span(start: dt.date, today: dt.date) -> str:
+    opening = start.strftime("%B")
+    closing = today.strftime("%B")
+    if opening == closing:
+        return opening
+    return f"{opening} and {closing}"
+
+
+def _weighbridge_issues(
+    rows: list[dict[str, Any]],
+    *,
+    start: dt.date,
+    cutoff: dt.date,
+    today: dt.date,
+) -> list[dict[str, Any]]:
+    """Loads in this month and the previous one whose weighbridge still does not agree.
+
+    The last 7 days are left out, so a load still waiting on Müller is not listed.
+    Parkes has no weighbridge. ALH is allowed 1,000 L. A missing weighbridge is
+    not a mismatch: there is nothing to compare.
     """
+    span = _month_span(start, today)
     found: dict[str, list[tuple[dt.date, Any, int, int, int]]] = {}
     for row in rows:
         farm = str(row.get("farm") or "").strip().upper()
         if not farm or farm == _PARKES_FARM:
             continue
         day = _parse_day(row.get("sample_date"))
-        if day is None or day >= cutoff:
+        if day is None or day < start or day >= cutoff:
             continue
         if row.get("manual_match"):
             continue
@@ -844,10 +866,10 @@ def _weighbridge_issues(rows: list[dict[str, Any]], *, cutoff: dt.date) -> list[
         loads_word = "load" if count == 1 else "loads"
         if farm == "ALH":
             verb = "is" if count == 1 else "are"
-            lead = f"{count} {loads_word} older than 7 days {verb} more than 1,000 L from the litres"
+            lead = f"{count} {loads_word} in {span} {verb} more than 1,000 L from the litres"
         else:
             verb = "does not match" if count == 1 else "do not match"
-            lead = f"{count} {loads_word} older than 7 days {verb} the litres"
+            lead = f"{count} {loads_word} in {span} {verb} the litres"
         issues.append(
             {
                 "farm": farm,
@@ -857,7 +879,7 @@ def _weighbridge_issues(rows: list[dict[str, Any]], *, cutoff: dt.date) -> list[
                 "baseline": largest,
                 "value_text": f"{count:,}",
                 "baseline_text": f"{largest:,} L",
-                "value_title": "Loads older than 7 days whose weighbridge does not agree",
+                "value_title": f"Loads in {span}, older than 7 days, whose weighbridge does not agree",
                 "baseline_title": "Largest gap between weighbridge and litres",
                 "comment": f"{lead}: {listed}.",
                 "href": f"/milk-quality/collections?farm={farm}",
@@ -935,10 +957,15 @@ def _parkes_drop_issue(rows: list[dict[str, Any]], *, yesterday: dt.date) -> dic
 
 
 def collection_issues(rows: list[dict[str, Any]], *, today: dt.date) -> list[dict[str, Any]]:
-    """Weighbridge disagreements older than 7 days, and a short Parkes day."""
+    """Weighbridge gaps from this month and the last, and a short Parkes day."""
     cutoff = today - dt.timedelta(days=7)
     yesterday = today - dt.timedelta(days=1)
-    issues = _weighbridge_issues(rows, cutoff=cutoff)
+    issues = _weighbridge_issues(
+        rows,
+        start=_previous_month_start(today),
+        cutoff=cutoff,
+        today=today,
+    )
     parkes = _parkes_drop_issue(rows, yesterday=yesterday)
     if parkes is not None:
         issues.append(parkes)
