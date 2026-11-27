@@ -14,9 +14,11 @@ from services.database import (
     STOCK_GROUP_DAIRY_BULL,
     STOCK_GROUP_YOUNGSTOCK,
     CowEvent,
+    StockAccrualEventAdjustment,
     StockPurchaseAnimal,
 )
 from services.herd_import_utils import BEEF_CBREED_MIN, CATEGORY_DAIRY, category_from_birth
+from services.stock_transfer_moves import derive_transfer_adjustments
 
 
 def classify_purchase_stock_group(
@@ -159,16 +161,24 @@ def rebuild_stock_purchases(db: Session) -> dict[str, Any]:
             }
         )
         by_farm[farm] = by_farm.get(farm, 0) + 1
-        by_stock_group[stock_group] = by_stock_group.get(stock_group, 0) + 1
+
+    adjustments, transfer_summary = derive_transfer_adjustments(db, mappings, import_time)
+    for mapping in mappings:
+        group = mapping["stock_group"]
+        by_stock_group[group] = by_stock_group.get(group, 0) + 1
 
     db.execute(delete(StockPurchaseAnimal))
     if mappings:
         db.bulk_insert_mappings(StockPurchaseAnimal, mappings)
+    db.execute(delete(StockAccrualEventAdjustment))
+    if adjustments:
+        db.bulk_insert_mappings(StockAccrualEventAdjustment, adjustments)
 
     return {
         "rows_imported": len(mappings),
         "farm_counts": by_farm,
         "stock_group_counts": by_stock_group,
+        "transfers": transfer_summary,
         "imported_at": import_time.isoformat(timespec="seconds"),
     }
 

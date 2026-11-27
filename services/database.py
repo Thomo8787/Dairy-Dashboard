@@ -531,10 +531,31 @@ class StockPurchaseAnimal(Base):
     cbrd = Column(Integer)
     gndr = Column(String(8))
     stock_group = Column(String(16), nullable=False, index=True)
+    # Stock Accruals month. EDAT stays the DairyComp entry date for CTS and BCMS.
+    accrual_date = Column(Date)
     import_timestamp = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         index=True,
+    )
+
+
+class StockAccrualEventAdjustment(Base):
+    """Cow events Stock Accruals dates differently or leaves out, rebuilt with purchases."""
+
+    __tablename__ = "stock_accrual_event_adjustments"
+
+    id = Column(Integer, primary_key=True)
+    cow_event_id = Column(Integer, nullable=False, index=True)
+    kind = Column(String(16), nullable=False, index=True)
+    farm = Column(String(8), nullable=False)
+    other_farm = Column(String(8))
+    etag = Column(String(64))
+    event_date = Column(Date)
+    accrual_date = Column(Date)
+    import_timestamp = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
     )
 
 
@@ -1375,10 +1396,23 @@ def _ensure_stock_accrual_columns(engine) -> None:
             conn.execute(text(ddl))
 
 
+def _ensure_stock_purchase_columns(engine) -> None:
+    """create_all will not add columns to an existing stock_purchase_animals table."""
+    inspector = inspect(engine)
+    if "stock_purchase_animals" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("stock_purchase_animals")}
+    if "accrual_date" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE stock_purchase_animals ADD COLUMN accrual_date DATE"))
+
+
 def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_stock_accrual_columns(engine)
+    _ensure_stock_purchase_columns(engine)
     _ensure_user_permission_columns(engine)
     _ensure_genomic_result_columns(engine)
     _ensure_embryo_batch_columns(engine)

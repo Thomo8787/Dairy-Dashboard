@@ -22,6 +22,7 @@ from services.database import (
     CowEvent,
     HerdBirth,
     HerdInventory,
+    StockAccrualEventAdjustment,
     StockAccrualSnapshot,
     StockOpeningBaseline,
     StockPurchaseAnimal,
@@ -46,10 +47,11 @@ from services.stock_purchase_derivation import (
     ensure_stock_purchases,
     rebuild_stock_purchases,
 )
+from services.stock_transfer_moves import ADJUST_FRESH_IGNORED, ADJUST_SALE_MOVED
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "dairy-bull-v1"
+ACCRUAL_LOGIC_VERSION = "transfer-move-v1"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 
@@ -132,7 +134,27 @@ def _dairy_bull_event_clause():
     )
 
 
-def _apply_cow_event_stock_group(query, stock_group: str):
+def _sale_accrual_date():
+    """Sold date, or the move date when the farm she joined has the earlier entry."""
+    return func.coalesce(StockAccrualEventAdjustment.accrual_date, CowEvent.event_date)
+
+
+def _join_sale_moves(query):
+    return query.outerjoin_from(
+        CowEvent,
+        StockAccrualEventAdjustment,
+        and_(
+            StockAccrualEventAdjustment.cow_event_id == CowEvent.id,
+            StockAccrualEventAdjustment.kind == ADJUST_SALE_MOVED,
+        ),
+    )
+
+
+def _purchase_accrual_date():
+    return func.coalesce(StockPurchaseAnimal.accrual_date, StockPurchaseAnimal.edat)
+
+
+def _apply_cow_event_stock_group(query, stock_group: str, on_date=None):
     if stock_group == STOCK_GROUP_COWS:
         return query.where(CowEvent.lact.isnot(None)).where(CowEvent.lact > 0)
     if stock_group == STOCK_GROUP_DAIRY_BULL:
@@ -148,7 +170,9 @@ def _apply_cow_event_stock_group(query, stock_group: str):
         )
     for condition in _youngstock_cow_event_filter():
         query = query.where(condition)
-    return _apply_youngstock_age_band(query, stock_group, CowEvent.event_date, CowEvent.bdat)
+    return _apply_youngstock_age_band(
+        query, stock_group, CowEvent.event_date if on_date is None else on_date, CowEvent.bdat
+    )
 
 
 def _fetch_sales_by_month(
@@ -160,23 +184,26 @@ def _fetch_sales_by_month(
     month_to: dt.date,
 ) -> dict[tuple[int, int], dict[str, int]]:
     reason_expr = _sales_reason_expression()
-    query = (
+    sale_date = _sale_accrual_date()
+    query = _join_sale_moves(
         select(
-            extract("year", CowEvent.event_date),
-            extract("month", CowEvent.event_date),
+            extract("year", sale_date),
+            extract("month", sale_date),
             reason_expr.label("reason"),
             func.count(),
         )
-        .where(sales_classified_event_clause())
+    )
+    query = (
+        query.where(sales_classified_event_clause())
         .where(CowEvent.event_date.isnot(None))
         .where(CowEvent.farm == farm)
-        .where(CowEvent.event_date >= month_from)
-        .where(CowEvent.event_date <= month_to)
+        .where(sale_date >= month_from)
+        .where(sale_date <= month_to)
     )
-    query = _apply_cow_event_stock_group(query, stock_group)
+    query = _apply_cow_event_stock_group(query, stock_group, sale_date)
     query = query.group_by(
-        extract("year", CowEvent.event_date),
-        extract("month", CowEvent.event_date),
+        extract("year", sale_date),
+        extract("month", sale_date),
         reason_expr,
     )
 
@@ -207,25 +234,28 @@ def _fetch_dairy_dest_by_month(
 ) -> dict[tuple[int, int], dict[str, int]]:
     """Farm remark on dairy sales, for the same rows the Dairy column counts."""
     dest_expr = _dairy_dest_label()
-    query = (
+    sale_date = _sale_accrual_date()
+    query = _join_sale_moves(
         select(
-            extract("year", CowEvent.event_date),
-            extract("month", CowEvent.event_date),
+            extract("year", sale_date),
+            extract("month", sale_date),
             dest_expr,
             func.count(),
         )
-        .where(sales_classified_event_clause())
+    )
+    query = (
+        query.where(sales_classified_event_clause())
         .where(~or_(ofs_sales_clause(), died_cert_clause()))
         .where(dairy_remark_clause())
         .where(CowEvent.event_date.isnot(None))
         .where(CowEvent.farm == farm)
-        .where(CowEvent.event_date >= month_from)
-        .where(CowEvent.event_date <= month_to)
+        .where(sale_date >= month_from)
+        .where(sale_date <= month_to)
     )
-    query = _apply_cow_event_stock_group(query, stock_group)
+    query = _apply_cow_event_stock_group(query, stock_group, sale_date)
     query = query.group_by(
-        extract("year", CowEvent.event_date),
-        extract("month", CowEvent.event_date),
+        extract("year", sale_date),
+        extract("month", sale_date),
         dest_expr,
     )
 
@@ -266,6 +296,14 @@ def _fetch_event_count_by_month(
         query = query.where(death_report_event_clause())
     else:
         query = query.where(CowEvent.event == event_type)
+    if event_type == "FRESH":
+        query = query.where(
+            ~CowEvent.id.in_(
+                select(StockAccrualEventAdjustment.cow_event_id).where(
+                    StockAccrualEventAdjustment.kind == ADJUST_FRESH_IGNORED
+                )
+            )
+        )
     if lact_filter == "fresh_heifers":
         query = query.where(CowEvent.lact == 1)
         query = query.where(func.upper(func.coalesce(CowEvent.gndr, "")) == "F")
@@ -417,24 +455,23 @@ def _fetch_purchases_by_month(
     purchase_group = stock_group
     if stock_group in (STOCK_GROUP_YOUNGSTOCK_0_12, STOCK_GROUP_YOUNGSTOCK_12_PLUS):
         purchase_group = STOCK_GROUP_YOUNGSTOCK
+    joined = _purchase_accrual_date()
     query = (
         select(
-            extract("year", StockPurchaseAnimal.edat),
-            extract("month", StockPurchaseAnimal.edat),
+            extract("year", joined),
+            extract("month", joined),
             func.count(),
         )
         .where(StockPurchaseAnimal.farm == farm)
         .where(StockPurchaseAnimal.stock_group == purchase_group)
-        .where(StockPurchaseAnimal.edat >= month_from)
-        .where(StockPurchaseAnimal.edat <= month_to)
+        .where(joined >= month_from)
+        .where(joined <= month_to)
     )
-    query = _apply_youngstock_age_band(
-        query, stock_group, StockPurchaseAnimal.edat, StockPurchaseAnimal.bdat
-    )
+    query = _apply_youngstock_age_band(query, stock_group, joined, StockPurchaseAnimal.bdat)
     rows = db.execute(
         query.group_by(
-            extract("year", StockPurchaseAnimal.edat),
-            extract("month", StockPurchaseAnimal.edat),
+            extract("year", joined),
+            extract("month", joined),
         )
     ).all()
     return {
@@ -506,7 +543,7 @@ def _fetch_turned_12_by_month(
         animals[key] = {"bdat": bdat, "arrived": bdat, "exit": None}
 
     purchases = db.execute(
-        select(StockPurchaseAnimal.etag, StockPurchaseAnimal.bdat, StockPurchaseAnimal.edat)
+        select(StockPurchaseAnimal.etag, StockPurchaseAnimal.bdat, _purchase_accrual_date())
         .where(StockPurchaseAnimal.farm == farm)
         .where(StockPurchaseAnimal.stock_group == STOCK_GROUP_YOUNGSTOCK)
     ).all()
