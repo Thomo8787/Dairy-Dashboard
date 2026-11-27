@@ -1,7 +1,9 @@
 """Apply Müller collection CSV litres to Collections weighbridge values.
 
 One CSV row is one tanker collection. Litres is written to litres_weighbridge.
-Payment Date is the primary calendar day (Actual Collection is fallback).
+Payment Date is the primary calendar day. When that day and the Actual
+Collection date differ, the collection day is used if it has the same sample
+and the same litres.
 
 ALH uses volume-tolerant matching (within 1000 L / 5%), sample override, and
 provisional blank-sample order matching. Other farms match by sample ID and
@@ -533,6 +535,49 @@ def _match_blank_exact(
             unmatched.append(_row_brief(record))
 
 
+def _match_simple_ticket(
+    candidates: list[NmlMilkResult],
+    record: dict[str, Any],
+) -> tuple[NmlMilkResult | None, str]:
+    """Non-ALH sample match. Payment day first, then the collection day.
+
+    Müller stamps an after-midnight collection on the previous payment day.
+    The farm ticket is on the actual collection date. Use that ticket when it
+    has the same sample and the same litres and the payment-day ticket does not.
+    """
+    actual = record.get("actual_date")
+    payment = record.get("payment_date")
+    litres = _litres_key(record.get("litres"))
+
+    def tickets_on(day: dt.date | None) -> list[NmlMilkResult]:
+        if day is None:
+            return []
+        return [
+            row
+            for row in candidates
+            if row.sample_date == day and not _is_orphan_bridge_row(row)
+        ]
+
+    def exact_litres(rows: list[NmlMilkResult]) -> list[NmlMilkResult]:
+        if litres is None:
+            return []
+        return [row for row in rows if _litres_key(row.litres_load) == litres]
+
+    if actual is not None and payment is not None and actual != payment:
+        pay_exact = exact_litres(tickets_on(payment))
+        act_exact = exact_litres(tickets_on(actual))
+        if len(pay_exact) == 1:
+            return pay_exact[0], "matched"
+        if len(pay_exact) > 1:
+            return None, "ambiguous"
+        if len(act_exact) == 1:
+            return act_exact[0], "matched"
+        if len(act_exact) > 1:
+            return None, "ambiguous"
+
+    return _match_row(candidates, actual, payment)
+
+
 def _claim_sampled_simple(
     sampled: list[dict[str, Any]],
     rows: list[NmlMilkResult],
@@ -550,9 +595,7 @@ def _claim_sampled_simple(
     inserted = 0
     for record in sampled:
         candidates = index.get(record["sample_id"], [])
-        chosen, status = _match_row(
-            candidates, record["actual_date"], record["payment_date"]
-        )
+        chosen, status = _match_simple_ticket(candidates, record)
         if status == "ambiguous":
             ambiguous.append(_row_brief(record, candidates))
             continue
