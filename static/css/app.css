@@ -645,6 +645,10 @@ html, body {
   align-items: center;
   gap: 0.9rem 1.15rem;
   margin: 0 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #fee2e2;
+  border: 1px solid #f87171;
+  border-radius: 12px;
 }
 
 .home-issues-group {
@@ -677,9 +681,18 @@ html, body {
   margin: 0;
   flex: 1 1 16rem;
   max-width: 46rem;
-  color: #1e3a5f;
+  color: #7f1d1d;
   font-size: 0.95rem;
   line-height: 1.4;
+}
+
+#home-issues .home-widget.status-red {
+  background: #fecaca;
+  border-color: #ef4444;
+}
+
+#home-issues .home-widget.status-red .widget-sub {
+  color: #991b1b;
 }
 
 .home-issues-toolbar {
