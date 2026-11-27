@@ -1,7 +1,7 @@
 """Check that ALH and Bank cows in milk can be rebuilt from DairyComp events.
 
 Bank is the cows in milk in pens 89 to 93. ALH is every other cow in milk,
-leaving out pen 150. The inventory file holds today's pens, so it gives the
+leaving out pens 27, 140 and 150. The inventory file holds today's pens, so it gives the
 right answer for today. This script rebuilds the same two numbers from the
 events file alone and compares them cow by cow. It also checks every MOVE
 line in the history against the pen the rebuild had her in.
@@ -49,7 +49,7 @@ if str(ROOT) not in sys.path:
 from services.cows_in_milk import (  # noqa: E402
     BNK_MILK_PENS,
     MOVE_REMARK,
-    MOVED_PEN,
+    MOVED_PENS,
     MilkSegment,
     MoveFact,
     _is_milking_inventory_row,
@@ -62,14 +62,14 @@ ENCODING = "windows-1252"
 
 BANK = "Bank"
 ALH = "ALH"
-MOVED = "Pen 150"
+MOVED = "Pen 27/140/150"
 PLACES = (BANK, ALH, MOVED)
 
 
 def place_for_pen(pen: int | None) -> str:
     if pen in BNK_MILK_PENS:
         return BANK
-    if pen == MOVED_PEN:
+    if pen in MOVED_PENS:
         return MOVED
     return ALH
 

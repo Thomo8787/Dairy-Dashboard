@@ -51,7 +51,7 @@ from services.stock_transfer_moves import ADJUST_FRESH_IGNORED, ADJUST_SALE_MOVE
 
 _ZERO_SALES = {reason: 0 for reason in SALES_TABLE_REASON_ORDER}
 _BASELINE_FISCAL_YEARS = 3
-ACCRUAL_LOGIC_VERSION = "transfer-move-v1"
+ACCRUAL_LOGIC_VERSION = "transfer-move-v2"
 DAIRY_DEST_OTHER = "Other"
 ACCRUAL_LOGIC_SETTING = "stock_accruals.logic_version"
 

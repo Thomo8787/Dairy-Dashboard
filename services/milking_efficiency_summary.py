@@ -614,7 +614,7 @@ def _cows_in_milk_by_pen(session: Any, farm_code: str) -> dict[str, int]:
 
     Includes fresh cows so ID Efficiency matches Entry IDs.
     ALH and BNK are split by current pen: BNK is pens 89 to 93, ALH is the
-    other pens, and pen 150 is left out.
+    other pens, and pens 27, 140 and 150 are left out.
     """
     farm_code = (farm_code or "").strip().upper()
     shared = farm_code in {"ALH", "BNK"}

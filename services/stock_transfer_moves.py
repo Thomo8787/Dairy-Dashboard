@@ -4,6 +4,9 @@ The farm she leaves records SOLD and the farm she joins records an entry date
 (EDAT). When the two dates sit either side of a month end she is in both counts,
 or in neither. Stock Accruals uses one date for both farms:
 
+- She leaves ALH or BNK with a MOVE into pen 27 (Park Hall), pen 140 (The
+  Parkes) or pen 150 (any other farm) from 30 days before to 14 days after the sale and entry dates:
+  the date of that move.
 - She joins within 14 days after the sale: the sold date.
 - She joins before the sale and the farm she left still records events of its
   own after her entry date: the sold date, so the purchase moves later.
@@ -33,9 +36,13 @@ from services.farms import FARMS_BY_CODE
 
 GAP_DAYS = 14
 FRESH_MATCH_DAYS = 7
+LEAVING_PEN_DAYS_BEFORE = 30
+LEAVING_PEN_DAYS_AFTER = 14
 ADJUST_SALE_MOVED = "sale_moved"
 ADJUST_FRESH_IGNORED = "fresh_ignored"
 _EXIT_EVENTS = ("SOLD", "DIED")
+_LEAVING_PEN_FARMS = frozenset({"ALH", "BNK"})
+_MOVE_TO_LEAVING_PEN = re.compile(r"^F\d{3}T(027|140|150)$")
 _CHUNK = 500
 
 
@@ -78,6 +85,7 @@ def _fetch_cross_group_events(db: Session) -> dict[str, list[dict[str, Any]]]:
                 CowEvent.event_date,
                 CowEvent.lact,
                 CowEvent.edat,
+                CowEvent.remark,
             ).where(CowEvent.etag.in_(etags[start : start + _CHUNK]))
         ).mappings()
         for row in rows:
@@ -129,6 +137,27 @@ def _transfer_candidates(
                     break
     candidates.sort(key=lambda item: item[0])
     return candidates
+
+
+def _leaving_pen_date(
+    from_farm: str, from_events: list[dict[str, Any]], entry: dt.date, sold: dt.date
+) -> dt.date | None:
+    """The day ALH or BNK moved her into pen 27, 140 or 150, nearest her entry date."""
+    if from_farm not in _LEAVING_PEN_FARMS:
+        return None
+    earliest = min(entry, sold) - dt.timedelta(days=LEAVING_PEN_DAYS_BEFORE)
+    latest = max(entry, sold) + dt.timedelta(days=LEAVING_PEN_DAYS_AFTER)
+    moves = [
+        e["event_date"]
+        for e in from_events
+        if e["event"] == "MOVE"
+        and e["event_date"] is not None
+        and earliest <= e["event_date"] <= latest
+        and _MOVE_TO_LEAVING_PEN.match((e.get("remark") or "").strip().upper())
+    ]
+    if not moves:
+        return None
+    return min(moves, key=lambda day: (abs((day - entry).days), day))
 
 
 def _still_on_leaving_farm(
@@ -200,6 +229,26 @@ def derive_transfer_adjustments(
             transfers.add((from_farm, to_farm))
             entry = purchase["edat"]
             sold = sale["event_date"]
+            moved_out = _leaving_pen_date(from_farm, by_farm[from_farm], entry, sold)
+            if moved_out is not None:
+                if moved_out != entry:
+                    purchase["accrual_date"] = moved_out
+                    summary["purchases_moved"] += 1
+                if moved_out != sold:
+                    adjustments.append(
+                        {
+                            "cow_event_id": sale["id"],
+                            "kind": ADJUST_SALE_MOVED,
+                            "farm": from_farm,
+                            "other_farm": to_farm,
+                            "etag": sale["etag"],
+                            "event_date": sold,
+                            "accrual_date": moved_out,
+                            "import_timestamp": import_time,
+                        }
+                    )
+                    summary["sales_moved"] += 1
+                continue
             if entry == sold:
                 continue
             if entry > sold or _still_on_leaving_farm(

@@ -7,18 +7,25 @@ another farm, is counted from that arrival until she dries off, is sold,
 or dies. A heifer or a dry cow waits until she calves on the new farm.
 
 ALH and BNK share one herd. Stock inventory stays on the barn name. Cows in
-milk follow the pen. Bank is pens 89 to 93. ALH is every other pen, and pen
-150 is left out. She joins Bank on a MOVE into those pens and leaves on a
+milk follow the pen. Bank is pens 89 to 93. ALH is every other pen, and pens
+27, 140 and 150 are left out: 27 holds cows going to Park Hall, 140 cows
+going to The Parkes and 150 cows going to any other farm. She joins Bank on a MOVE into those pens and leaves on a
 MOVE out, DRY, SOLD, or DIED. Fresh pens 1 and 6 stay on ALH. Today's count
 uses the pen on the herd file. Earlier days are rebuilt from each cow's
-moves. A cow now in pen 150 with no MOVE into that pen still leaves ALH on
-the day that ear tag arrives on another farm.
+moves. A cow now in pen 27, 140 or 150 with no MOVE into that pen still leaves
+ALH on the day that ear tag arrives on another farm.
 
 An abort opens lactation 1 with no FRESH line. It counts as a calving only
 when a later move shows her in pen 1, pen 6, or pens 89 to 93. The abort
 itself can put her in a fresh pen with no MOVE line, so the next line often
 shows her leaving that pen. An early abort that is sold from a heifer pen
 does not count.
+
+A cow who changes DairyComp uses the same move date as Stock Accruals on
+both farms, so she is not in milk on both farms, or on neither, while the
+sale and the entry date disagree. A first-lactation fresh copied onto the
+farm she joined is left out there. She is matched across farms by ear tag,
+because cow numbers can change between DairyComps.
 """
 
 from __future__ import annotations
@@ -27,14 +34,20 @@ import datetime as dt
 import itertools
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from services.database import CowEvent, HerdInventory
+from services.database import (
+    CowEvent,
+    HerdInventory,
+    StockAccrualEventAdjustment,
+    StockPurchaseAnimal,
+)
 from services.duplicate_animals import ear_tag_key
+from services.stock_transfer_moves import ADJUST_FRESH_IGNORED, ADJUST_SALE_MOVED
 
 _TRACKED_EVENTS = ("FRESH", "DRY", "SOLD", "DIED")
 _PEN_HISTORY_EVENTS = ("FRESH", "ABORT", "DRY", "SOLD", "DIED", "MOVE")
@@ -45,9 +58,111 @@ SHARED_HERD_FARMS = frozenset({"ALH", "BNK"})
 BNK_MILK_PENS = frozenset(range(89, 94))
 FRESH_PENS = frozenset({1, 6})
 MILKING_ENTRY_PENS = FRESH_PENS | BNK_MILK_PENS
-MOVED_PEN = 150
+MOVED_PENS = frozenset({27, 140, 150})
 MOVE_REMARK = re.compile(r"^F(\d{3})T(\d{3})$")
 ABORT_DAYS_REMARK = re.compile(r"^\d+\s+DAYS$")
+
+
+@dataclass(frozen=True)
+class TransferDates:
+    """Move dates from the purchase rebuild, shared with Stock Accruals."""
+
+    sale_dates: dict[int, dt.date]
+    ignored_freshes: frozenset[int]
+    entry_dates: dict[tuple[str, str], dt.date]
+    # Farm she left -> move date before its sold date. She had gone by then, so
+    # that farm's later lines are copies or tidy-up moves, not her.
+    left_before_sale: dict[tuple[str, str], dt.date] = field(default_factory=dict)
+
+    def left_farm_by(self, farm: str, key: str, day: dt.date) -> bool:
+        moved = self.left_before_sale.get((farm, key))
+        return moved is not None and day > moved
+
+
+NO_TRANSFER_DATES = TransferDates({}, frozenset(), {})
+
+
+def load_transfer_dates(db: Session) -> TransferDates:
+    purchases = db.execute(
+        select(
+            StockPurchaseAnimal.farm,
+            StockPurchaseAnimal.etag,
+            func.coalesce(StockPurchaseAnimal.accrual_date, StockPurchaseAnimal.edat),
+        )
+    ).all()
+    adjustments = db.execute(
+        select(
+            StockAccrualEventAdjustment.cow_event_id,
+            StockAccrualEventAdjustment.kind,
+            StockAccrualEventAdjustment.farm,
+            StockAccrualEventAdjustment.etag,
+            StockAccrualEventAdjustment.event_date,
+            StockAccrualEventAdjustment.accrual_date,
+        )
+    ).all()
+    return transfer_dates_from(purchases, adjustments)
+
+
+def transfer_dates_from(
+    purchases: Iterable[Sequence[object]], adjustments: Iterable[Sequence[object]]
+) -> TransferDates:
+    """``purchases`` are (farm, etag, move date); ``adjustments`` match the table."""
+    entry_dates = {
+        (str(farm), ear_tag_key(etag)): accrual_date
+        for farm, etag, accrual_date in purchases
+        if accrual_date is not None
+    }
+    sale_dates: dict[int, dt.date] = {}
+    ignored: set[int] = set()
+    left_before_sale: dict[tuple[str, str], dt.date] = {}
+    for event_id, kind, farm, etag, event_date, accrual_date in adjustments:
+        key = (str(farm), ear_tag_key(etag))
+        if kind == ADJUST_SALE_MOVED and accrual_date is not None:
+            sale_dates[int(event_id)] = accrual_date
+            if event_date is not None and accrual_date < event_date:
+                left_before_sale[key] = accrual_date
+        elif kind == ADJUST_FRESH_IGNORED:
+            # A fresh on or after her move date is the real one on this farm.
+            entry = entry_dates.get(key)
+            if entry is None or event_date is None or event_date < entry:
+                ignored.add(int(event_id))
+    return TransferDates(sale_dates, frozenset(ignored), entry_dates, left_before_sale)
+
+
+def _transfer_event(
+    transfers: TransferDates,
+    farm: str,
+    key: str,
+    event_id: object,
+    event: str,
+    event_date: dt.date,
+) -> dt.date | None:
+    """Event date after the move date, or None when the line is a copy."""
+    if event != "SOLD" and transfers.left_farm_by(farm, key, event_date):
+        return None
+    try:
+        identity = int(event_id)
+    except (TypeError, ValueError):
+        return event_date
+    if event == "FRESH" and identity in transfers.ignored_freshes:
+        return None
+    if event == "SOLD":
+        return transfers.sale_dates.get(identity, event_date)
+    return event_date
+
+
+def _from_entry(
+    intervals: list[tuple[dt.date, dt.date | None]], entry: dt.date | None
+) -> list[tuple[dt.date, dt.date | None]]:
+    """A cow fresh on the farm she left counts here from the day she joined."""
+    if entry is None:
+        return intervals
+    kept = []
+    for start, end in intervals:
+        start = max(start, entry)
+        if end is None or start < end:
+            kept.append((start, end))
+    return kept
 
 
 def pen_number(value: object) -> int | None:
@@ -69,11 +184,11 @@ def pen_number(value: object) -> int | None:
 def shared_inventory_farm(pen: object) -> str | None:
     """Today's farm for a cow in the shared ALH/BNK herd.
 
-    Pens 89 to 93 are BNK. Pen 150 has moved to another farm and is left out.
-    Every other pen, including a blank pen, is ALH.
+    Pens 89 to 93 are BNK. Pens 27, 140 and 150 have moved to another farm and are
+    left out. Every other pen, including a blank pen, is ALH.
     """
     number = pen_number(pen)
-    if number == MOVED_PEN:
+    if number in MOVED_PENS:
         return None
     if number in BNK_MILK_PENS:
         return "BNK"
@@ -543,7 +658,7 @@ def _segment_deltas(
     min_dim: int | None,
     cap: dt.date | None,
 ) -> dict[str, dict[dt.date, int]]:
-    """Day-by-day joins and leaves for ALH and BNK. Pen 150 is left out."""
+    """Day-by-day joins and leaves for ALH and BNK. Pens 27, 140 and 150 are left out."""
     deltas: dict[str, dict[dt.date, int]] = {"ALH": defaultdict(int), "BNK": defaultdict(int)}
     for index, segment in enumerate(segments):
         if not segment.in_milk or segment.fdat is None:
@@ -585,7 +700,7 @@ def _sweep(deltas: dict[dt.date, int], days: Sequence[dt.date]) -> dict[dt.date,
 def _arrival_on_other_farm(
     db: Session, moved_cows: dict[str, HerdInventory]
 ) -> dict[str, dt.date]:
-    """Map a pen-150 cow id to the latest entry date on a farm outside ALH/BNK."""
+    """Map a pen 27, 140 or 150 cow id to the latest entry date on a farm outside ALH/BNK."""
     tag_by_cow: dict[str, str] = {}
     tags: set[str] = set()
     for cow_id, row in moved_cows.items():
@@ -647,6 +762,7 @@ def _shared_history_counts(
     moved_cows: dict[str, HerdInventory],
     *,
     min_dim: int | None,
+    transfers: TransferDates = NO_TRANSFER_DATES,
 ) -> dict[tuple[str, dt.date], int]:
     """ALH and BNK cows in milk rebuilt from moves, for days before today."""
     if not dates:
@@ -663,6 +779,7 @@ def _shared_history_counts(
             CowEvent.lact,
             CowEvent.edat,
             CowEvent.id,
+            CowEvent.farm,
         ).where(
             CowEvent.farm.in_(tuple(SHARED_HERD_FARMS)),
             CowEvent.event_date.isnot(None),
@@ -693,11 +810,15 @@ def _shared_history_counts(
     entry_dates: dict[str, dt.date] = {}
     seen: dict[str, set[tuple[object, ...]]] = defaultdict(set)
     fresh_dates_by_cow: dict[str, set[dt.date]] = defaultdict(set)
-    for cow_id, etag, event, event_date, remark, fdat, lact, edat, event_id in rows:
+    for cow_id, etag, event, event_date, remark, fdat, lact, edat, event_id, farm in rows:
         key = _animal_key(cow_id, etag)
         if key == "ID":
             continue
         event_day = _as_date(event_date)
+        if event_day is None:
+            continue
+        name = (event or "").strip().upper()
+        event_day = _transfer_event(transfers, str(farm), key, event_id, name, event_day)
         if event_day is None:
             continue
         entered = _as_date(edat)
@@ -709,7 +830,6 @@ def _shared_history_counts(
             lact_n = int(lact or 0)
         except (TypeError, ValueError):
             lact_n = 0
-        name = (event or "").strip().upper()
         remark_text = (remark or "").strip().upper()
         fresh_day = _as_date(fdat)
         identity = (event_day, name, remark_text, lact_n, fresh_day)
@@ -738,6 +858,8 @@ def _shared_history_counts(
         fresh_day = _as_date(fdat)
         last_day = _as_date(last_date)
         if fresh_day is None or last_day is None or fresh_day in fresh_dates_by_cow[key]:
+            continue
+        if any(transfers.left_farm_by(farm, key, fresh_day) for farm in SHARED_HERD_FARMS):
             continue
         entered = _as_date(first_edat)
         if entered is not None:
@@ -772,10 +894,14 @@ def _shared_history_counts(
         "BNK": defaultdict(int),
     }
     for key, cow_events in by_cow.items():
-        entry = entry_dates.get(key)
+        entry = (
+            transfers.entry_dates.get(("ALH", key))
+            or transfers.entry_dates.get(("BNK", key))
+            or entry_dates.get(key)
+        )
         segments, _facts = build_milk_segments(key, cow_events, entry)
         cap = None
-        if not any(segment.pen == MOVED_PEN for segment in segments):
+        if not any(segment.pen in MOVED_PENS for segment in segments):
             cap = caps_by_key.get(key)
         part = _segment_deltas(segments, min_dim=min_dim, cap=cap)
         for farm, farm_deltas in part.items():
@@ -794,13 +920,15 @@ def _milking_arrival_intervals(
     farms: Sequence[str],
     by_farm_cow: dict[str, dict[str, list[tuple[dt.date, str]]]],
     date_max: dt.date,
+    transfers: TransferDates = NO_TRANSFER_DATES,
 ) -> dict[tuple[str, str], list[tuple[dt.date, dt.date | None]]]:
     """Stretches for cows whose entry date finds them already in milk.
 
     Eligible when her entry date on this farm is not her birth date, her
-    lactation is above 0, her latest fresh is on or before that entry, and
-    there is no dry event after that fresh and before the entry. A heifer
-    or a dry cow waits for her next fresh event on this farm.
+    lactation is above 0, her latest fresh on any farm is on or before that
+    entry, and there is no dry event after that fresh and before the entry.
+    With no fresh on any farm, she counts when her first event here is a DRY.
+    A heifer or a dry cow waits for her next fresh event on this farm.
     """
     if not farms:
         return {}
@@ -808,8 +936,8 @@ def _milking_arrival_intervals(
         select(
             CowEvent.farm,
             CowEvent.cow_id,
+            func.min(CowEvent.etag),
             func.min(CowEvent.edat),
-            func.min(CowEvent.bdat),
             func.max(CowEvent.lact),
         )
         .where(
@@ -822,10 +950,10 @@ def _milking_arrival_intervals(
         )
         .group_by(CowEvent.farm, CowEvent.cow_id)
     ).all()
-    candidates: list[tuple[str, str, dt.date]] = []
-    cow_ids: set[str] = set()
-    for farm, cow_id, edat, _bdat, lact in entries:
-        entered = _as_date(edat)
+    candidates: list[tuple[str, str, str, dt.date]] = []
+    for farm, cow_id, etag, edat, lact in entries:
+        key = _animal_key(cow_id, etag)
+        entered = transfers.entry_dates.get((str(farm), key)) or _as_date(edat)
         if entered is None or entered > date_max or not cow_id:
             continue
         try:
@@ -834,34 +962,55 @@ def _milking_arrival_intervals(
             lact_n = 0
         if lact_n < 1:
             continue
-        candidates.append((str(farm), str(cow_id), entered))
-        cow_ids.add(str(cow_id))
+        candidates.append((str(farm), str(cow_id), key, entered))
     if not candidates:
         return {}
 
+    keys = {key for _farm, _cow_id, key, _entered in candidates}
     history: dict[str, list[tuple[dt.date, str]]] = defaultdict(list)
     rows = db.execute(
-        select(CowEvent.cow_id, CowEvent.event, CowEvent.event_date).where(
-            CowEvent.cow_id.in_(cow_ids),
+        select(
+            CowEvent.id,
+            CowEvent.farm,
+            CowEvent.cow_id,
+            CowEvent.etag,
+            CowEvent.event,
+            CowEvent.event_date,
+        ).where(
             CowEvent.event.in_(("FRESH", "DRY")),
             CowEvent.event_date.isnot(None),
             CowEvent.event_date <= date_max,
         )
     ).all()
-    for cow_id, event, event_date in rows:
-        if cow_id and event_date is not None:
-            history[str(cow_id)].append((event_date, (event or "").strip().upper()))
+    for event_id, event_farm, cow_id, etag, event, event_date in rows:
+        key = _animal_key(cow_id, etag)
+        if key not in keys or event_date is None:
+            continue
+        name = (event or "").strip().upper()
+        if _transfer_event(transfers, str(event_farm), key, event_id, name, event_date) is None:
+            continue
+        history[key].append((event_date, name))
 
     intervals: dict[tuple[str, str], list[tuple[dt.date, dt.date | None]]] = {}
-    for farm, cow_id, entered in candidates:
-        events = history.get(cow_id, [])
-        fresh_days = [day for day, name in events if name == "FRESH" and day <= entered]
-        if not fresh_days:
-            continue
-        fresh = max(fresh_days)
-        if any(name == "DRY" and fresh < day < entered for day, name in events):
-            continue
+    for farm, cow_id, key, entered in candidates:
+        events = history.get(key, [])
         dest_events = by_farm_cow.get(farm, {}).get(cow_id, [])
+        fresh_days = [day for day, name in events if name == "FRESH" and day <= entered]
+        if fresh_days:
+            fresh = max(fresh_days)
+            if any(name == "DRY" and fresh < day < entered for day, name in events):
+                continue
+        else:
+            first = min(
+                (
+                    (day, name)
+                    for day, name in dest_events
+                    if day >= entered and (name == "FRESH" or name in _END_MILK_EVENTS)
+                ),
+                default=None,
+            )
+            if first is None or first[1] != "DRY":
+                continue
         if any(name == "FRESH" and day <= entered for day, name in dest_events):
             continue
         ends = [
@@ -900,6 +1049,7 @@ def cows_in_milk_for_dates(
     if shared_farms:
         load_farms |= SHARED_HERD_FARMS
     load_farm_keys = sorted(load_farms)
+    transfers = load_transfer_dates(db)
 
     events = []
     if other_farms:
@@ -910,6 +1060,7 @@ def cows_in_milk_for_dates(
                 CowEvent.event,
                 CowEvent.event_date,
                 CowEvent.id,
+                CowEvent.etag,
             )
             .where(
                 CowEvent.farm.in_(other_farms),
@@ -929,10 +1080,19 @@ def cows_in_milk_for_dates(
     by_farm_cow: dict[str, dict[str, list[tuple[dt.date, str]]]] = defaultdict(
         lambda: defaultdict(list)
     )
-    for farm, cow_id, event, event_date, _event_id in events:
+    key_by_farm_cow: dict[tuple[str, str], str] = {}
+    for farm, cow_id, event, event_date, event_id, etag in events:
         if not cow_id or event_date is None:
             continue
+        key = _animal_key(cow_id, etag)
+        event_date = _transfer_event(transfers, farm, key, event_id, event, event_date)
+        if event_date is None:
+            continue
         by_farm_cow[farm][str(cow_id)].append((event_date, event))
+        key_by_farm_cow.setdefault((farm, str(cow_id)), key)
+    for farm_cows in by_farm_cow.values():
+        for cow_events in farm_cows.values():
+            cow_events.sort(key=lambda item: item[0])
 
     inventory = db.scalars(
         select(HerdInventory).where(HerdInventory.farm.in_(load_farm_keys))
@@ -943,7 +1103,7 @@ def cows_in_milk_for_dates(
         if (
             row.farm in SHARED_HERD_FARMS
             and row.cow_id
-            and pen_number(row.pen) == MOVED_PEN
+            and pen_number(row.pen) in MOVED_PENS
         ):
             moved_cows.setdefault(str(row.cow_id), row)
         try:
@@ -953,6 +1113,7 @@ def cows_in_milk_for_dates(
         if lact_n <= 0 or not row.cow_id:
             continue
         inv_by_farm[row.farm][str(row.cow_id)] = row
+        key_by_farm_cow.setdefault((row.farm, str(row.cow_id)), _animal_key(row.cow_id, row.etag))
 
     shared_today = {
         farm: _shared_today_count(inventory, farm, min_dim=min_dim)
@@ -960,7 +1121,9 @@ def cows_in_milk_for_dates(
     }
     history_dates = [day for day in date_list if day < today]
     shared_history = (
-        _shared_history_counts(db, history_dates, moved_cows, min_dim=min_dim)
+        _shared_history_counts(
+            db, history_dates, moved_cows, min_dim=min_dim, transfers=transfers
+        )
         if shared_farms and history_dates
         else {}
     )
@@ -973,7 +1136,7 @@ def cows_in_milk_for_dates(
             else:
                 result[(farm, day)] = shared_history.get((farm, day), 0)
 
-    arrivals = _milking_arrival_intervals(db, other_farms, by_farm_cow, date_max)
+    arrivals = _milking_arrival_intervals(db, other_farms, by_farm_cow, date_max, transfers)
 
     for farm in other_farms:
         inv_map = inv_by_farm.get(farm, {})
@@ -988,9 +1151,9 @@ def cows_in_milk_for_dates(
         for (dest, cow_id), spans in arrivals.items():
             if dest != farm:
                 continue
-            # A cow still on the herd file is already counted from her fresh date.
+            # The herd file fresh date already counts her unless it is a later lactation.
             on_file = inv_map.get(cow_id)
-            if on_file is not None and on_file.fdat is not None:
+            if on_file is not None and on_file.fdat is not None and on_file.fdat <= spans[0][0]:
                 continue
             _add_intervals(deltas, spans, date_min=date_min, date_max=date_max)
         for cow_id in cow_ids:
@@ -1000,14 +1163,18 @@ def cows_in_milk_for_dates(
             if inv_row is not None:
                 fdat = inv_row.fdat
                 currently_milking = (inv_row.rpro or "").strip().upper() != "DRY"
+            entry = transfers.entry_dates.get((farm, key_by_farm_cow.get((farm, cow_id), "")))
             _add_intervals(
                 deltas,
-                _cow_intervals(
-                    by_farm_cow.get(farm, {}).get(cow_id, []),
-                    fdat=fdat,
-                    currently_milking=currently_milking,
-                    today=today,
-                    min_dim=min_dim,
+                _from_entry(
+                    _cow_intervals(
+                        by_farm_cow.get(farm, {}).get(cow_id, []),
+                        fdat=fdat,
+                        currently_milking=currently_milking,
+                        today=today,
+                        min_dim=min_dim,
+                    ),
+                    entry,
                 ),
                 date_min=date_min,
                 date_max=date_max,
