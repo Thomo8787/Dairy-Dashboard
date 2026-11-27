@@ -613,8 +613,8 @@ html, body {
 }
 
 .home-screen-btn.is-selected {
-  background: #1e3a5f;
-  border-color: #1e3a5f;
+  background: #15803d;
+  border-color: #15803d;
   color: #fff;
 }
 
@@ -686,6 +686,21 @@ html, body {
   line-height: 1.4;
 }
 
+.home-issue-action {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 2.75rem;
+}
+
+#home-issues-archived-toggle {
+  margin-top: 0.85rem;
+  min-height: 2.75rem;
+}
+
+#home-issues-archived {
+  margin-top: 0.75rem;
+}
+
 #home-issues .home-widget.status-red {
   background: #fecaca;
   border-color: #ef4444;
@@ -726,6 +741,10 @@ html, body {
 
   #home-issues .home-widget {
     flex: none;
+  }
+
+  .home-issue-action {
+    align-self: flex-start;
   }
 }
 

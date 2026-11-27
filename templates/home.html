@@ -40,12 +40,12 @@
     {% if can_production %}
     <button type="button" class="home-screen-btn is-selected" role="tab" data-home-screen="production" aria-selected="true" aria-pressed="true">Production</button>
     {% endif %}
-    {% if can_production or can_herd %}
-    <button type="button" class="home-screen-btn" role="tab" data-home-screen="issues" aria-selected="false" aria-pressed="false">Issues <span id="home-issues-count" class="home-issues-count" hidden></span></button>
-    {% endif %}
     {% if can_herd %}
     <button type="button" class="home-screen-btn{% if not can_production %} is-selected{% endif %}" role="tab" data-home-screen="fertility" aria-selected="{{ 'true' if not can_production else 'false' }}" aria-pressed="{{ 'true' if not can_production else 'false' }}">Fertility</button>
     <button type="button" class="home-screen-btn" role="tab" data-home-screen="health" aria-selected="false" aria-pressed="false">Health</button>
+    {% endif %}
+    {% if can_production or can_herd %}
+    <button type="button" class="home-screen-btn" role="tab" data-home-screen="issues" aria-selected="false" aria-pressed="false">Issues <span id="home-issues-count" class="home-issues-count" hidden></span></button>
     {% endif %}
   </div>
   {% endif %}
@@ -197,6 +197,8 @@
     <p class="home-issues-empty" id="home-issues-loading">Checking the latest figures…</p>
     <div id="home-issues-list"></div>
     <p class="home-issues-empty" id="home-issues-empty" hidden>No issues. Milk tiles are clear, no conception rate is red, and no sire or technician is under 40% across 50 or more services.</p>
+    <button type="button" class="secondary" id="home-issues-archived-toggle" hidden aria-expanded="false">Archived</button>
+    <div id="home-issues-archived" hidden></div>
   </section>
   {% endif %}
 
@@ -820,7 +822,39 @@
   const ready = { milk: !needs.milk, fertility: !needs.fertility };
   const failed = { milk: false, fertility: false };
   const speakBtn = document.getElementById("home-issues-speak");
+  const archivedToggle = document.getElementById("home-issues-archived-toggle");
+  const archivedList = document.getElementById("home-issues-archived");
   let speaking = false;
+  let archived = new Set();
+  let archiveReady = false;
+  let showArchived = false;
+  const droppedArchive = new Set();
+  const issueGroups = [
+    ["Production", "milk"],
+    ["Fertility", "fertility"],
+    ["Health", "health"],
+  ];
+
+  function issueKey(issue) {
+    return [issue.farm || "", issue.metric || "", issue.label || ""].join("|");
+  }
+
+  function issuesIn(names) {
+    return names.flatMap((name) => parts[name] || []);
+  }
+
+  function splitIssues() {
+    const current = {};
+    const parked = {};
+    issueGroups.forEach(([, name]) => {
+      current[name] = [];
+      parked[name] = [];
+      (parts[name] || []).forEach((issue) => {
+        (archived.has(issueKey(issue)) ? parked : current)[name].push(issue);
+      });
+    });
+    return { current, parked };
+  }
 
   function speechSupported() {
     return "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
@@ -873,18 +907,14 @@
     if (!ready.milk || !ready.fertility) {
       chunks.push("Issues are still loading.");
     } else {
-      const groups = [
-        ["Production", parts.milk],
-        ["Fertility", parts.fertility],
-        ["Health", parts.health],
-      ];
-      const rows = groups.flatMap(([, items]) => items);
+      const { current } = splitIssues();
+      const rows = issuesIn(["milk", "fertility", "health"]).filter((issue) => !archived.has(issueKey(issue)));
       if (!rows.length) {
         chunks.push(failed.milk || failed.fertility ? "Couldn't load issues." : "No issues.");
       } else {
         chunks.push(rows.length === 1 ? "1 issue." : `${rows.length} issues.`);
-        groups.forEach(([title, items]) => {
-          items.forEach((issue) => chunks.push(issueSentence(title, issue)));
+        issueGroups.forEach(([title, name]) => {
+          current[name].forEach((issue) => chunks.push(issueSentence(title, issue)));
         });
       }
     }
@@ -923,36 +953,10 @@
     return n.toLocaleString("en-GB", { minimumFractionDigits: places, maximumFractionDigits: places });
   }
 
-  function renderIssueList(rows, errorText) {
-    const list = document.getElementById("home-issues-list");
-    const empty = document.getElementById("home-issues-empty");
-    const loading = document.getElementById("home-issues-loading");
-    const count = document.getElementById("home-issues-count");
-    const issuesBtn = document.querySelector("[data-home-screen='issues']");
-    if (loading) loading.hidden = true;
-    if (!list) return;
+  function renderGroups(list, grouped, actionLabel, archivedOn) {
     list.replaceChildren();
-    if (count) {
-      count.hidden = !rows.length;
-      count.textContent = rows.length ? String(rows.length) : "";
-    }
-    if (issuesBtn) {
-      issuesBtn.setAttribute("aria-label", rows.length ? `Issues, ${rows.length}` : "Issues");
-    }
-    if (!rows.length) {
-      if (empty) {
-        empty.hidden = false;
-        if (errorText) empty.textContent = errorText;
-      }
-      return;
-    }
-    if (empty) empty.hidden = true;
-    const groups = [
-      ["Production", parts.milk],
-      ["Fertility", parts.fertility],
-      ["Health", parts.health],
-    ];
-    groups.forEach(([title, items]) => {
+    issueGroups.forEach(([title, name]) => {
+      const items = grouped[name] || [];
       if (!items.length) return;
       const section = document.createElement("section");
       section.className = "home-issues-group";
@@ -960,12 +964,51 @@
       heading.className = "home-farm-label";
       heading.textContent = title;
       section.append(heading);
-      items.forEach((issue) => section.append(renderIssueRow(issue)));
+      items.forEach((issue) => section.append(renderIssueRow(issue, actionLabel, archivedOn)));
       list.append(section);
     });
   }
 
-  function renderIssueRow(issue) {
+  function renderIssueList(errorText) {
+    const list = document.getElementById("home-issues-list");
+    const empty = document.getElementById("home-issues-empty");
+    const loading = document.getElementById("home-issues-loading");
+    const count = document.getElementById("home-issues-count");
+    const issuesBtn = document.querySelector("[data-home-screen='issues']");
+    if (loading) loading.hidden = true;
+    if (!list) return;
+    const { current, parked } = splitIssues();
+    const currentRows = issuesIn(["milk", "fertility", "health"]).filter((issue) => !archived.has(issueKey(issue)));
+    const parkedRows = issuesIn(["milk", "fertility", "health"]).filter((issue) => archived.has(issueKey(issue)));
+    if (count) {
+      count.hidden = !currentRows.length;
+      count.textContent = currentRows.length ? String(currentRows.length) : "";
+    }
+    if (issuesBtn) {
+      issuesBtn.setAttribute("aria-label", currentRows.length ? `Issues, ${currentRows.length}` : "Issues");
+    }
+    renderGroups(list, current, "Archive", true);
+    if (empty) {
+      const showEmpty = !currentRows.length;
+      empty.hidden = !showEmpty;
+      if (showEmpty) {
+        if (errorText) empty.textContent = errorText;
+        else if (parkedRows.length) empty.textContent = "Nothing on the current list. Archived issues are below.";
+        else empty.textContent = "No issues. Milk tiles are clear, no conception rate is red, and no sire or technician is under 40% across 50 or more services.";
+      }
+    }
+    if (archivedToggle) {
+      archivedToggle.hidden = !parkedRows.length;
+      archivedToggle.textContent = showArchived ? "Hide archived" : `Archived (${parkedRows.length})`;
+      archivedToggle.setAttribute("aria-expanded", showArchived ? "true" : "false");
+    }
+    if (archivedList) {
+      archivedList.hidden = !showArchived || !parkedRows.length;
+      renderGroups(archivedList, parked, "Restore", false);
+    }
+  }
+
+  function renderIssueRow(issue, actionLabel, archiveOn) {
     const row = document.createElement("article");
     row.className = "home-issue";
     const link = document.createElement("a");
@@ -989,19 +1032,76 @@
     const comment = document.createElement("p");
     comment.className = "home-issue-comment";
     comment.textContent = issue.comment || "";
-    row.append(link, comment);
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "secondary home-issue-action";
+    action.textContent = actionLabel;
+    action.addEventListener("click", () => setArchived(issue, archiveOn));
+    row.append(link, comment, action);
     return row;
   }
 
   function publishIssues() {
-    if (!ready.milk || !ready.fertility) return;
-    const rows = [...parts.milk, ...parts.fertility, ...parts.health];
+    if (!ready.milk || !ready.fertility || !archiveReady) return;
+    const rows = issuesIn(["milk", "fertility", "health"]);
     if (!rows.length && (failed.milk || failed.fertility)) {
-      renderIssueList([], "Couldn't load issues.");
+      renderIssueList("Couldn't load issues.");
       return;
     }
-    renderIssueList(rows);
+    const liveKeys = new Set(rows.map(issueKey));
+    const stale = [...archived].filter((key) => !liveKeys.has(key) && !droppedArchive.has(key));
+    if (stale.length) {
+      stale.forEach((key) => {
+        archived.delete(key);
+        droppedArchive.add(key);
+      });
+      saveArchive({ remove: stale });
+    }
+    renderIssueList();
   }
+
+  function saveArchive(body) {
+    return fetch("/home/api/issues-archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) return;
+        archived = new Set(Array.isArray(data.keys) ? data.keys : []);
+        publishIssues();
+      })
+      .catch(() => {});
+  }
+
+  function setArchived(issue, on) {
+    stopSpeaking();
+    const key = issueKey(issue);
+    if (on) archived.add(key);
+    else archived.delete(key);
+    renderIssueList();
+    saveArchive({ key, archived: on });
+  }
+
+  if (archivedToggle) {
+    archivedToggle.addEventListener("click", () => {
+      showArchived = !showArchived;
+      renderIssueList();
+    });
+  }
+
+  fetch("/home/api/issues-archive")
+    .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+    .then(({ ok, data }) => {
+      archived = new Set(ok && Array.isArray(data.keys) ? data.keys : []);
+      archiveReady = true;
+      publishIssues();
+    })
+    .catch(() => {
+      archiveReady = true;
+      publishIssues();
+    });
 
   window.setHomeIssues = (part, rows, didFail) => {
     if (!(part in parts)) return;

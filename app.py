@@ -406,6 +406,38 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/home/api/issues-archive", methods=["GET", "POST"])
+def events_api_issue_archive():
+    """Park or restore a Home issue. Shared by everyone who can open Issues."""
+    from services.issue_archive import load_issue_archive, update_issue_archive
+
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    if not (
+        user_has_permission(user, "perm_milk_quality")
+        or user_has_permission(user, "perm_events")
+    ):
+        return jsonify({"error": "Permission denied."}), 403
+    with get_session() as session:
+        if request.method == "GET":
+            return jsonify({"keys": load_issue_archive(session)})
+        body = request.get_json(silent=True) or {}
+        remove = body.get("remove")
+        if remove is not None and not isinstance(remove, list):
+            return jsonify({"error": "Choose the issues to restore."}), 400
+        archived = body.get("archived")
+        if archived is not None and not isinstance(archived, bool):
+            return jsonify({"error": "Choose archive or restore."}), 400
+        keys = update_issue_archive(
+            session,
+            key=body.get("key") if isinstance(body.get("key"), str) else None,
+            archived=archived,
+            remove=remove,
+        )
+        return jsonify({"keys": keys})
+
+
 @app.route("/")
 @permission_required("perm_home")
 def home():
