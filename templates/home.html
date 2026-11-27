@@ -1044,8 +1044,10 @@
   function publishIssues() {
     if (!ready.milk || !ready.fertility || !archiveReady) return;
     const rows = issuesIn(["milk", "fertility", "health"]);
-    if (!rows.length && (failed.milk || failed.fertility)) {
-      renderIssueList("Couldn't load issues.");
+    // A restart can return one list and fail the other. Do not treat the
+    // missing side as cleared, or every parked issue on that side is deleted.
+    if (failed.milk || failed.fertility) {
+      renderIssueList(rows.length ? undefined : "Couldn't load issues.");
       return;
     }
     const liveKeys = new Set(rows.map(issueKey));
