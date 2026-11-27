@@ -850,6 +850,10 @@ class NmlMilkResult(Base):
     report_date = Column(Date)
     sample_date = Column(Date, nullable=False, index=True)
     sample_id = Column(String(32), nullable=False)
+    # Sample shown when this load repeats a number already stored on another row.
+    shown_sample_id = Column(String(32))
+    # Snapshots of the rows joined by Match, so Unmatch can split them again.
+    match_parts = Column(Text)
     load_number = Column(Integer)
     litres_load = Column(Float)
     litres_weighbridge = Column(Float)
@@ -1284,6 +1288,8 @@ def _ensure_nml_milk_result_columns(engine) -> None:
             "ALTER TABLE nml_milk_results ADD COLUMN quality_estimated BOOLEAN "
             "NOT NULL DEFAULT FALSE"
         ),
+        "shown_sample_id": "ALTER TABLE nml_milk_results ADD COLUMN shown_sample_id VARCHAR(32)",
+        "match_parts": "ALTER TABLE nml_milk_results ADD COLUMN match_parts TEXT",
     }
     with engine.begin() as conn:
         for column, ddl in needed.items():

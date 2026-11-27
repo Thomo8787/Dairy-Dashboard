@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import json
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -107,7 +108,7 @@ def get_collection_day(*, farm: str, sample_date: dt.date) -> dict[str, Any]:
             "load_number": row.load_number,
             "volume_litres": row.litres_load,
             "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
-            "sample_id": "" if row.sample_missing else (row.sample_id or ""),
+            "sample_id": "" if row.sample_missing else _visible_sample(row),
             "source": row.source or "",
         }
         for row in rows
@@ -172,6 +173,7 @@ def save_collection_day(
     sample_date: dt.date,
     loads: list[dict[str, Any]],
     meters: dict[str, Any] | None = None,
+    allow_duplicate: bool = False,
 ) -> dict[str, Any]:
     farm_key = _farm_key(farm)
     producer_ref = _producer_ref(farm_key)
@@ -184,9 +186,9 @@ def save_collection_day(
             continue
         sample = str(raw.get("sample_id") or "").strip()
         if sample:
-            key = sample.lstrip("0") or "0"
-            if key in seen_samples:
-                raise ValueError(f"Duplicate sample number: {sample}")
+            key = normalize_sample_id(sample)
+            if key in seen_samples and not allow_duplicate:
+                raise ValueError(f"Sample {sample} has already been used on that day.")
             seen_samples.add(key)
         cleaned.append(
             {
@@ -238,12 +240,19 @@ def save_collection_day(
             sample_id = item["sample_id"] or f"L{item['load_number']}"
             placeholder = _awaiting_ticket(session, farm_key, sample_date, item["sample_id"])
             key = (producer_ref, sample_date, sample_id)
-            if placeholder is None and key in used_ids and (
+            shown_sample = ""
+            repeats = placeholder is None and key in used_ids and (
                 by_load.get(item["load_number"]) is None
                 or by_load[item["load_number"]].sample_id != sample_id
-            ):
-                sample_id = f"{sample_id}-L{item['load_number']}"
-                sample_missing = True
+            )
+            if repeats and not allow_duplicate:
+                raise ValueError(
+                    f"Sample {item['sample_id']} has already been used on that day."
+                )
+            if repeats:
+                shown_sample = item["sample_id"]
+                sample_id = f"{item['sample_id']}#{item['load_number']}"
+                sample_missing = False
             used_ids.add((producer_ref, sample_date, sample_id))
 
             row = placeholder or by_load.get(item["load_number"])
@@ -265,6 +274,7 @@ def save_collection_day(
                 else:
                     updated += 1
                 row.sample_id = sample_id
+                row.shown_sample_id = shown_sample or None
                 row.sample_missing = sample_missing
                 row.litres_load = item["litres_load"]
                 clear_unfit_weighbridges([row])
@@ -279,17 +289,20 @@ def save_collection_day(
             row.temp_c = item["temp_c"]
             if item["sample_id"]:
                 row.sample_id = sample_id
+                row.shown_sample_id = shown_sample or None
                 row.sample_missing = False
             row.imported_at = dt.datetime.now(dt.timezone.utc)
             updated += 1
 
         _save_meter_readings(session, farm_key, sample_date, meters)
         session.flush()
+        _copy_shared_sample_quality(session, farm_key, sample_date)
         from services.nml_import import _merge_orphan_nml, _row_index
 
         merged = _merge_orphan_nml(
             session, _row_index(list(session.scalars(select(NmlMilkResult)).all()))
         )
+        merged += join_lab_and_weighbridge_rows(session)
         saved_meters = _meters_payload(
             session.scalar(
                 select(MilkMeterReading).where(
@@ -373,6 +386,7 @@ def update_collection_load(
     temp_c: Any,
     sample_id: Any,
     load_number: Any = None,
+    allow_duplicate: bool = False,
 ) -> dict[str, Any]:
     volume = _parse_volume(litres_load)
     if volume is None:
@@ -406,16 +420,21 @@ def update_collection_load(
         )
         old_date = row.sample_date
 
-        clash = session.scalars(
-            select(NmlMilkResult).where(
-                NmlMilkResult.id != row.id,
-                NmlMilkResult.producer_ref == row.producer_ref,
-                NmlMilkResult.sample_date == sample_date,
-                NmlMilkResult.sample_id == stored_sample,
-            )
-        ).first()
-        if clash is not None and _has_volume(clash):
-            raise ValueError("Another load already uses that sample number on that date.")
+        clashes = [
+            other
+            for other in session.scalars(
+                select(NmlMilkResult).where(
+                    NmlMilkResult.id != row.id,
+                    NmlMilkResult.producer_ref == row.producer_ref,
+                    NmlMilkResult.sample_date == sample_date,
+                )
+            ).all()
+            if _same_visible_sample(other, stored_sample)
+        ]
+        volume_clash = next((other for other in clashes if _has_volume(other)), None)
+        if volume_clash is not None and not allow_duplicate:
+            raise ValueError(f"Sample {typed_sample} has already been used on that day.")
+        orphan_clash = next((other for other in clashes if not _has_volume(other)), None)
 
         same_day = list(
             session.scalars(
@@ -442,8 +461,16 @@ def update_collection_load(
         row.litres_load = volume
         clear_unfit_weighbridges([row])
         row.temp_c = temp
-        row.sample_id = stored_sample
-        row.sample_missing = sample_missing
+        if volume_clash is not None:
+            _keep_repeated_sample(row, typed_sample)
+            _copy_quality(volume_clash, row)
+        elif orphan_clash is not None:
+            _fold_orphan_into_load(row, orphan_clash)
+            session.delete(orphan_clash)
+        else:
+            row.sample_id = stored_sample
+            row.shown_sample_id = None
+            row.sample_missing = sample_missing
         row.imported_at = dt.datetime.now(dt.timezone.utc)
         session.flush()
 
@@ -453,6 +480,7 @@ def update_collection_load(
         merged = _merge_orphan_nml(
             session, _row_index(list(session.scalars(select(NmlMilkResult)).all()))
         )
+        merged += join_lab_and_weighbridge_rows(session)
         session.refresh(row)
 
         if _has_volume(row) and _has_quality(row) and not sample_missing:
@@ -464,7 +492,9 @@ def update_collection_load(
             session.commit()
         except IntegrityError as exc:
             session.rollback()
-            raise ValueError("Another load already uses that sample number on that date.") from exc
+            raise ValueError(
+                f"Sample {typed_sample} has already been used on that day."
+            ) from exc
 
         return {
             "id": row.id,
@@ -473,7 +503,7 @@ def update_collection_load(
             "load_number": row.load_number,
             "litres_load": row.litres_load,
             "temp_c": None if row.temp_c is None else round(float(row.temp_c), 2),
-            "sample_id": "" if row.sample_missing else (row.sample_id or ""),
+            "sample_id": "" if row.sample_missing else _visible_sample(row),
             "nml_matched": bool(row.nml_matched),
             "orphans_merged": merged,
         }
@@ -492,3 +522,309 @@ def delete_collection_load(row_id: int) -> dict[str, Any]:
         session.delete(row)
         session.commit()
         return summary
+
+
+def _visible_sample(row: NmlMilkResult) -> str:
+    if row.sample_missing:
+        return ""
+    shown = str(getattr(row, "shown_sample_id", None) or "").strip()
+    if shown:
+        return shown
+    return str(row.sample_id or "").strip()
+
+
+def _same_visible_sample(row: NmlMilkResult, sample: str) -> bool:
+    target = normalize_sample_id(sample)
+    if not target:
+        return False
+    return normalize_sample_id(_visible_sample(row)) == target
+
+
+def _copy_quality(source: NmlMilkResult, target: NmlMilkResult) -> None:
+    copied = False
+    for field in _QUALITY_FIELDS:
+        value = getattr(source, field)
+        if value is not None and getattr(target, field) is None:
+            setattr(target, field, value)
+            copied = True
+    if copied and _has_volume(target) and not target.sample_missing:
+        target.nml_matched = True
+        target.quality_estimated = False
+
+
+def _keep_repeated_sample(row: NmlMilkResult, sample: str) -> None:
+    """Store a second load under the same visible sample without breaking the unique key."""
+    row.shown_sample_id = sample
+    row.sample_missing = False
+    if normalize_sample_id(row.sample_id) == normalize_sample_id(sample):
+        row.sample_id = f"{sample}#{row.id or row.load_number or 0}"
+
+
+def _fold_orphan_into_load(load: NmlMilkResult, orphan: NmlMilkResult) -> None:
+    """A lab or weighbridge row with no litres joins the load that uses its sample."""
+    _copy_quality(orphan, load)
+    if load.litres_weighbridge is None and orphan.litres_weighbridge is not None:
+        load.litres_weighbridge = orphan.litres_weighbridge
+        load.weighbridge_confirmed = bool(orphan.weighbridge_confirmed)
+    load.sample_id = _visible_sample(orphan) or load.sample_id
+    load.shown_sample_id = None
+    load.sample_missing = False
+
+
+def _copy_shared_sample_quality(session: Any, farm: str, sample_date: dt.date) -> None:
+    """A repeated sample shows the same lab result as the first load that has it."""
+    rows = list(
+        session.scalars(
+            select(NmlMilkResult).where(
+                NmlMilkResult.farm == farm,
+                NmlMilkResult.sample_date == sample_date,
+            )
+        ).all()
+    )
+    donors: dict[str, NmlMilkResult] = {}
+    for row in rows:
+        sample = normalize_sample_id(_visible_sample(row))
+        if sample and _has_quality(row) and sample not in donors:
+            donors[sample] = row
+    for row in rows:
+        sample = normalize_sample_id(_visible_sample(row))
+        donor = donors.get(sample)
+        if donor is not None and donor is not row:
+            _copy_quality(donor, row)
+
+
+def join_lab_and_weighbridge_rows(session: Any) -> int:
+    """Put a weighbridge on the lab row that has its sample and no litres, or the reverse.
+
+    A different sample with no litres is left on its own row. A load that already
+    has another sample is left alone.
+    """
+    rows = list(session.scalars(select(NmlMilkResult)).all())
+    groups: dict[tuple[str, str], list[NmlMilkResult]] = {}
+    for row in rows:
+        if getattr(row, "match_parts", None):
+            continue
+        if _has_volume(row) or row.sample_missing:
+            continue
+        sample = normalize_sample_id(_visible_sample(row))
+        if not sample or row.sample_date is None or not row.farm:
+            continue
+        groups.setdefault((row.farm, sample), []).append(row)
+
+    joined = 0
+    for grouped in groups.values():
+        labs = [row for row in grouped if _has_quality(row) and row.litres_weighbridge is None]
+        bridges = [
+            row
+            for row in grouped
+            if row.litres_weighbridge is not None and not _has_quality(row)
+        ]
+        if len(labs) != 1 or len(bridges) != 1:
+            continue
+        lab, bridge = labs[0], bridges[0]
+        if lab.sample_date is None or bridge.sample_date is None:
+            continue
+        if abs((lab.sample_date - bridge.sample_date).days) > 1:
+            continue
+        lab.litres_weighbridge = bridge.litres_weighbridge
+        lab.weighbridge_confirmed = bool(bridge.weighbridge_confirmed)
+        if lab.temp_c is None and bridge.temp_c is not None:
+            lab.temp_c = bridge.temp_c
+        session.delete(bridge)
+        joined += 1
+    if joined:
+        session.flush()
+    _copy_repeated_sample_quality(session)
+    return joined
+
+
+def _copy_repeated_sample_quality(session: Any) -> None:
+    """Every load showing a sample gets the lab result already stored for that sample."""
+    rows = list(session.scalars(select(NmlMilkResult)).all())
+    donors: dict[tuple[str, dt.date, str], NmlMilkResult] = {}
+    for row in rows:
+        sample = normalize_sample_id(_visible_sample(row))
+        if not sample or row.sample_date is None or not _has_quality(row):
+            continue
+        key = (row.farm or "", row.sample_date, sample)
+        if key not in donors:
+            donors[key] = row
+    for row in rows:
+        sample = normalize_sample_id(_visible_sample(row))
+        if not sample or row.sample_date is None:
+            continue
+        donor = donors.get((row.farm or "", row.sample_date, sample))
+        if donor is not None and donor is not row:
+            _copy_quality(donor, row)
+
+
+_SNAPSHOT_FIELDS = (
+    "farm",
+    "producer_ref",
+    "milk_buyer",
+    "report_month",
+    "report_date",
+    "sample_date",
+    "sample_id",
+    "shown_sample_id",
+    "load_number",
+    "litres_load",
+    "litres_weighbridge",
+    "weighbridge_confirmed",
+    "temp_c",
+    "butterfat_pct",
+    "protein_pct",
+    "scc",
+    "bactoscan",
+    "fpd",
+    "antibiotic_pass",
+    "urea_pct",
+    "sample_missing",
+    "nml_matched",
+    "quality_estimated",
+    "source",
+    "source_message_id",
+    "source_file",
+)
+
+
+def _snapshot_row(row: NmlMilkResult) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for field in _SNAPSHOT_FIELDS:
+        value = getattr(row, field, None)
+        if isinstance(value, dt.datetime):
+            value = value.isoformat()
+        elif isinstance(value, dt.date):
+            value = value.isoformat()
+        payload[field] = value
+    return payload
+
+
+def _parts_of(row: NmlMilkResult) -> list[dict[str, Any]]:
+    raw = getattr(row, "match_parts", None)
+    if raw:
+        try:
+            saved = json.loads(raw)
+        except (TypeError, ValueError):
+            saved = None
+        if isinstance(saved, dict) and isinstance(saved.get("rows"), list):
+            return list(saved["rows"])
+    return [_snapshot_row(row)]
+
+
+def _restore_row(session: Any, payload: dict[str, Any]) -> NmlMilkResult:
+    values: dict[str, Any] = {}
+    for field in _SNAPSHOT_FIELDS:
+        value = payload.get(field)
+        if field in {"sample_date", "report_date"} and isinstance(value, str) and value:
+            value = dt.date.fromisoformat(value)
+        values[field] = value
+    row = NmlMilkResult(**values)
+    row.match_parts = None
+    session.add(row)
+    return row
+
+
+def match_collection_rows(row_ids: list[int]) -> dict[str, Any]:
+    """Join the selected rows into one. The sample kept is the lab, then the weighbridge."""
+    ids = [int(row_id) for row_id in row_ids]
+    if len(ids) < 2 or len(set(ids)) != len(ids):
+        raise ValueError("Select at least two rows to match.")
+    with get_session() as session:
+        rows = list(
+            session.scalars(select(NmlMilkResult).where(NmlMilkResult.id.in_(ids))).all()
+        )
+        if len(rows) != len(ids):
+            raise ValueError("A selected collection could not be found.")
+        if len({row.farm for row in rows}) != 1:
+            raise ValueError("Match rows from the same farm.")
+        loads = [row for row in rows if _has_volume(row)]
+        if len(loads) > 1:
+            raise ValueError(
+                "Select one load, plus the lab or weighbridge row to join to it."
+            )
+        labs = [row for row in rows if _has_quality(row) and not _has_volume(row)]
+        bridges = [
+            row
+            for row in rows
+            if row.litres_weighbridge is not None and not _has_volume(row) and row not in labs
+        ]
+        lab_sample = next((_visible_sample(row) for row in labs if _visible_sample(row)), "")
+        bridge_sample = next(
+            (_visible_sample(row) for row in bridges if _visible_sample(row)),
+            "",
+        )
+        kept = lab_sample or bridge_sample
+        if not kept:
+            kept = next((_visible_sample(row) for row in rows if _visible_sample(row)), "")
+        survivor = loads[0] if loads else (labs[0] if labs else rows[0])
+        parts: list[dict[str, Any]] = []
+        for row in rows:
+            parts.extend(_parts_of(row))
+        for row in rows:
+            if row is survivor:
+                continue
+            if _has_quality(row):
+                for field in _QUALITY_FIELDS:
+                    value = getattr(row, field)
+                    if value is not None:
+                        setattr(survivor, field, value)
+                survivor.quality_estimated = False
+            if survivor.litres_weighbridge is None and row.litres_weighbridge is not None:
+                survivor.litres_weighbridge = row.litres_weighbridge
+                survivor.weighbridge_confirmed = bool(row.weighbridge_confirmed)
+            if survivor.temp_c is None and row.temp_c is not None:
+                survivor.temp_c = row.temp_c
+            session.delete(row)
+        session.flush()
+        if kept:
+            clash = session.scalars(
+                select(NmlMilkResult).where(
+                    NmlMilkResult.id != survivor.id,
+                    NmlMilkResult.producer_ref == survivor.producer_ref,
+                    NmlMilkResult.sample_date == survivor.sample_date,
+                    NmlMilkResult.sample_id == kept,
+                )
+            ).first()
+            if clash is None:
+                survivor.sample_id = kept
+                survivor.shown_sample_id = None
+            else:
+                _keep_repeated_sample(survivor, kept)
+            survivor.sample_missing = False
+        if _has_volume(survivor) and _has_quality(survivor):
+            survivor.nml_matched = True
+        survivor.match_parts = json.dumps({"rows": parts})
+        session.flush()
+        return {"id": survivor.id, "sample_id": _visible_sample(survivor), "rows_matched": len(ids)}
+
+
+def unmatch_collection_rows(row_ids: list[int]) -> dict[str, Any]:
+    """Split a matched row back into the load, the lab row, and the weighbridge row."""
+    ids = [int(row_id) for row_id in row_ids]
+    if not ids:
+        raise ValueError("Select a matched row to separate.")
+    restored = 0
+    with get_session() as session:
+        rows = list(
+            session.scalars(select(NmlMilkResult).where(NmlMilkResult.id.in_(ids))).all()
+        )
+        if len(rows) != len(set(ids)):
+            raise ValueError("A selected collection could not be found.")
+        for row in rows:
+            parts = _parts_of(row) if getattr(row, "match_parts", None) else []
+            if len(parts) < 2:
+                raise ValueError("That row is not a matched collection.")
+            session.delete(row)
+            session.flush()
+            for part in parts:
+                _restore_row(session, part)
+                restored += 1
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            session.rollback()
+            raise ValueError(
+                "Could not unmatch because one of those sample numbers is already used."
+            ) from exc
+    return {"rows_restored": restored}

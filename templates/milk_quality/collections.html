@@ -140,9 +140,14 @@
       padding: 0.4rem 0.55rem; text-align: left;
       border-bottom: 1px solid var(--line); white-space: nowrap;
     }
-    #coll-table th:nth-child(n+3):nth-child(-n+17),
-    #coll-table td:nth-child(n+3):nth-child(-n+17) {
+    #coll-table th:nth-child(n+4):nth-child(-n+18),
+    #coll-table td:nth-child(n+4):nth-child(-n+18) {
       text-align: center;
+    }
+    #coll-table .pick-col { display: none; width: 2.25rem; text-align: center; cursor: default; }
+    #coll-table.is-picking .pick-col { display: table-cell; }
+    #match-rows-btn.is-active, #unmatch-rows-btn.is-active {
+      background: #1e3a5f; color: #fff;
     }
     .nml-mark {
       display: inline-flex; align-items: center; justify-content: center;
@@ -290,8 +295,11 @@
           and both show a green tick. A load that already matches is left as it is, and
           a day with more than one possible pairing is left crossed. Name each file with the farm code and an underscore,
           for example ALH_MULLER_collection_details_for_2026-10.csv. Accepted codes are
-          ALH, BNK, COF, SFR, and PRK. A row matches a ticket by sample number and
-          collection date (or the day either side). If the sample number is blank, it
+          ALH, BNK, COF, SFR, and PRK.           A row matches a ticket by sample number and
+          collection date (or the day either side). The same sample can be used on
+          another load after you confirm it. Match joins a load with its lab or
+          weighbridge row and keeps that sample number. Unmatch splits them again.
+          If the sample number is blank, it
           matches the date and the ticket litres instead. A blank sample with no ticket,
           or more than one possible ticket, is left unchanged. Download the files from the
           Müller portal by going to COLLECTIONS, then click the magnifying glass beside
@@ -313,12 +321,15 @@
         <button type="button" class="btn" id="upload-muller-btn">Upload Müller</button>
         <input type="file" id="upload-muller-input" accept=".csv,text/csv" multiple hidden>
         <button type="button" class="btn" id="import-nml-btn">Fetch NML emails</button>
+        <button type="button" class="btn" id="match-rows-btn" aria-pressed="false">Match</button>
+        <button type="button" class="btn ghost" id="unmatch-rows-btn" aria-pressed="false">Unmatch</button>
       </div>
 
       <div class="table-wrap">
         <table id="coll-table">
           <thead>
             <tr>
+              <th class="pick-col"></th>
               <th data-sort="farm">Farm</th>
               <th data-sort="sample_date">Date</th>
               <th data-sort="load_number">Load</th>
@@ -340,7 +351,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr><td colspan="18" class="empty-state">Loading…</td></tr>
+            <tr><td colspan="19" class="empty-state">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -971,6 +982,8 @@
   }
 
   let weighbridgeMismatchOnly = false;
+  let pickMode = null;
+  let pickIds = new Set();
 
   function volumeKey(value) {
     if (value == null || value === "") return null;
@@ -1101,9 +1114,18 @@
 
   function renderTable() {
     const tbody = document.getElementById("table-body");
+    document.getElementById("coll-table").classList.toggle("is-picking", pickMode !== null);
+    const matchBtn = document.getElementById("match-rows-btn");
+    const unmatchBtn = document.getElementById("unmatch-rows-btn");
+    if (matchBtn && unmatchBtn) {
+      matchBtn.classList.toggle("is-active", pickMode === "match");
+      unmatchBtn.classList.toggle("is-active", pickMode === "unmatch");
+      matchBtn.setAttribute("aria-pressed", pickMode === "match" ? "true" : "false");
+      unmatchBtn.setAttribute("aria-pressed", pickMode === "unmatch" ? "true" : "false");
+    }
     const visible = visibleRows();
     if (!visible.length) {
-      tbody.innerHTML = '<tr><td colspan="18" class="empty-state">No collections match the current filters.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="19" class="empty-state">No collections match the current filters.</td></tr>';
       return;
     }
     tbody.innerHTML = sortRows(visible).map((row) => {
@@ -1112,7 +1134,13 @@
       if (row.sample_missing) classes.push("missing-sample");
       if (row.antibiotic_pass === false) classes.push("fail");
       const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
+      const canPick = pickMode === "match" || (pickMode === "unmatch" && row.manual_match);
+      const picked = canPick && pickIds.has(Number(row.id));
+      const box = canPick
+        ? `<input type="checkbox" class="row-pick" data-pick-id="${row.id}"${picked ? " checked" : ""} aria-label="Select row">`
+        : "";
       return `<tr${cls}>` +
+        `<td class="pick-col">${box}</td>` +
         `<td>${escapeHtml(row.farm)}</td>` +
         `<td>${escapeHtml(formatDate(row.sample_date))}</td>` +
         `<td class="num">${escapeHtml(row.load_number != null ? String(row.load_number) : "")}</td>` +
@@ -1156,7 +1184,7 @@
     } catch (err) {
       document.getElementById("meta-line").textContent = "";
       document.getElementById("table-body").innerHTML =
-        '<tr><td colspan="18" class="empty-state">Could not load collections.</td></tr>';
+        '<tr><td colspan="19" class="empty-state">Could not load collections.</td></tr>';
       showMessage(err.message || String(err), true);
     }
   }
@@ -1571,13 +1599,8 @@
     const saveBtn = document.getElementById("add-collection-save");
     saveBtn.disabled = true;
     try {
-      const res = await fetch("/milk-quality/api/collections", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not save collection");
+      const data = await postAllowingDuplicate("/milk-quality/api/collections", body);
+      if (!data) return;
       closeCollectionModal();
       showMessage(
         "Saved " + (data.loads_saved || 0) + " load" + ((data.loads_saved || 0) === 1 ? "" : "s") +
@@ -1627,6 +1650,84 @@
     editModal.setAttribute("aria-hidden", "false");
     document.getElementById("edit-load").focus();
   }
+
+  async function postJson(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not save");
+    return data;
+  }
+
+  async function postAllowingDuplicate(url, body) {
+    try {
+      return await postJson(url, body);
+    } catch (err) {
+      const message = err.message || "";
+      if (!/already been used/i.test(message) || body.allow_duplicate) throw err;
+      const sample = (message.match(/Sample (.+) has already/) || [])[1] || "This number";
+      const ok = window.confirm(sample + " has already been used. Are you sure you want to use it again?");
+      if (!ok) return null;
+      return postJson(url, Object.assign({}, body, { allow_duplicate: true }));
+    }
+  }
+
+  document.getElementById("table-body").addEventListener("change", (e) => {
+    const box = e.target.closest(".row-pick");
+    if (!box) return;
+    const id = Number(box.dataset.pickId);
+    if (box.checked) pickIds.add(id);
+    else pickIds.delete(id);
+  });
+
+  async function finishPick(mode) {
+    const ids = [...pickIds];
+    if (mode === "match" && ids.length < 2) {
+      showMessage("Select the rows to join, then click Match again.", true);
+      return;
+    }
+    if (mode === "unmatch" && !ids.length) {
+      showMessage("Select a matched row, then click Unmatch again.", true);
+      return;
+    }
+    const button = document.getElementById(mode === "match" ? "match-rows-btn" : "unmatch-rows-btn");
+    button.disabled = true;
+    try {
+      await postJson("/milk-quality/api/collections/" + mode, { ids });
+      pickMode = null;
+      pickIds = new Set();
+      showMessage(mode === "match" ? "Matched the selected rows." : "Unmatched the selected row.", false);
+      await loadResults({ keepMessage: true });
+    } catch (err) {
+      showMessage(err.message || String(err), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  document.getElementById("match-rows-btn").addEventListener("click", () => {
+    if (pickMode !== "match") {
+      pickMode = "match";
+      pickIds = new Set();
+      showMessage("Select the rows to join, then click Match again. The lab or weighbridge sample is kept.", false);
+      renderTable();
+      return;
+    }
+    finishPick("match");
+  });
+  document.getElementById("unmatch-rows-btn").addEventListener("click", () => {
+    if (pickMode !== "unmatch") {
+      pickMode = "unmatch";
+      pickIds = new Set();
+      showMessage("Select a matched row, then click Unmatch again.", false);
+      renderTable();
+      return;
+    }
+    finishPick("unmatch");
+  });
 
   document.getElementById("table-body").addEventListener("click", (e) => {
     const btn = e.target.closest(".edit-row-btn");
@@ -1702,19 +1803,17 @@
     const saveBtn = document.getElementById("edit-collection-save");
     saveBtn.disabled = true;
     try {
-      const res = await fetch("/milk-quality/api/collections/" + encodeURIComponent(rowId), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await postAllowingDuplicate(
+        "/milk-quality/api/collections/" + encodeURIComponent(rowId),
+        {
           date,
           load_number: loadNumber,
           litres_load: litresLoad,
           temp_c: tempC,
           sample_id: sample,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not save collection");
+        }
+      );
+      if (!data) return;
       closeEditModal();
       showMessage("Updated collection for " + (data.farm || "") + ".", false);
       await loadResults({ keepMessage: true });

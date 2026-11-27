@@ -178,6 +178,14 @@ def _backfill_nml_matched_flags(session: Any) -> int:
 
 
 
+def _visible_sample(row: NmlMilkResult) -> str:
+    """Sample number shown on Collections. A repeated sample keeps the same number."""
+    shown = str(getattr(row, "shown_sample_id", None) or "").strip()
+    if shown:
+        return shown
+    return str(row.sample_id or "").strip()
+
+
 def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[str, Any]:
     sample_missing = bool(row.sample_missing)
     status = _nml_status(row)
@@ -188,8 +196,9 @@ def _row_to_dict(row: NmlMilkResult, *, today: dt.date | None = None) -> dict[st
         "milk_buyer": row.milk_buyer or "",
         "sample_date": row.sample_date.isoformat() if row.sample_date else "",
         "load_number": row.load_number,
-        "sample_id": "" if sample_missing else (row.sample_id or ""),
+        "sample_id": "" if sample_missing else _visible_sample(row),
         "sample_missing": sample_missing,
+        "manual_match": bool(getattr(row, "match_parts", None)),
         "litres_load": row.litres_load,
         "litres_weighbridge": row.litres_weighbridge,
         "weighbridge_confirmed": bool(getattr(row, "weighbridge_confirmed", False)),

@@ -680,5 +680,8 @@ def _upsert(
 
     session.flush()
     merged = _merge_orphan_nml(session, index)
+    from services.nml_manual import join_lab_and_weighbridge_rows
+
+    join_lab_and_weighbridge_rows(session)
     session.commit()
     return (inserted, updated, linked, merged)

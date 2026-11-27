@@ -211,6 +211,8 @@ from services.milk_per_cow import list_milk_per_cow
 from services.muller_collections_import import import_muller_uploads
 from services.muller_sync import get_muller_portal_status, start_muller_portal_import
 from services.nml_manual import (
+    match_collection_rows,
+    unmatch_collection_rows,
     delete_collection_load,
     get_collection_day,
     save_collection_day,
@@ -1697,8 +1699,39 @@ def milk_quality_api_collections_save():
                 sample_date=sample_date,
                 loads=loads,
                 meters=meters,
+                allow_duplicate=bool(payload.get("allow_duplicate")),
             )
         )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/milk-quality/api/collections/match", methods=["POST"])
+def milk_quality_api_collections_match():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get("ids") or []
+    if not isinstance(raw_ids, list):
+        return jsonify({"error": "ids must be a list."}), 400
+    try:
+        return jsonify(match_collection_rows(raw_ids))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/milk-quality/api/collections/unmatch", methods=["POST"])
+def milk_quality_api_collections_unmatch():
+    user, error = _milk_quality_json_user()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get("ids") or []
+    if not isinstance(raw_ids, list):
+        return jsonify({"error": "ids must be a list."}), 400
+    try:
+        return jsonify(unmatch_collection_rows(raw_ids))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -1728,6 +1761,7 @@ def milk_quality_api_collections_update(row_id: int):
                 temp_c=payload.get("temp_c"),
                 sample_id=payload.get("sample_id"),
                 load_number=payload.get("load_number"),
+                allow_duplicate=bool(payload.get("allow_duplicate")),
             )
         )
     except ValueError as exc:

@@ -563,16 +563,17 @@ def _match_simple_ticket(
             return []
         return [row for row in rows if _litres_key(row.litres_load) == litres]
 
-    if actual is not None and payment is not None and actual != payment:
-        pay_exact = exact_litres(tickets_on(payment))
-        act_exact = exact_litres(tickets_on(actual))
-        if len(pay_exact) == 1:
-            return pay_exact[0], "matched"
-        if len(pay_exact) > 1:
-            return None, "ambiguous"
-        if len(act_exact) == 1:
-            return act_exact[0], "matched"
-        if len(act_exact) > 1:
+    # Same sample on two loads: keep the ticket whose litres are the portal litres.
+    days: list[dt.date] = []
+    if payment is not None:
+        days.append(payment)
+    if actual is not None and actual not in days:
+        days.append(actual)
+    for day in days:
+        exact = exact_litres(tickets_on(day))
+        if len(exact) == 1:
+            return exact[0], "matched"
+        if len(exact) > 1:
             return None, "ambiguous"
 
     return _match_row(candidates, actual, payment)
@@ -878,9 +879,13 @@ def apply_muller_records(
             cleared = clear_unfit_weighbridges(rows)
             index: dict[str, list[NmlMilkResult]] = {}
             for row in rows:
-                if not _is_real_sample(row) or _is_orphan_bridge_row(row):
+                if _is_orphan_bridge_row(row):
                     continue
-                index.setdefault(normalize_sample_id(row.sample_id), []).append(row)
+                shown = str(getattr(row, "shown_sample_id", None) or "").strip()
+                sample = normalize_sample_id(shown or row.sample_id)
+                if row.sample_missing or not sample or not sample.isdigit():
+                    continue
+                index.setdefault(sample, []).append(row)
 
             claimed: dict[int, list[Claim]] = defaultdict(list)
             sampled = [record for record in records if record["sample_id"]]
@@ -1014,7 +1019,11 @@ def apply_muller_records(
                     )
                     date_gaps.append(gap)
 
-            if not apply:
+            if apply:
+                from services.nml_manual import join_lab_and_weighbridge_rows
+
+                join_lab_and_weighbridge_rows(session)
+            else:
                 session.rollback()
     except IntegrityError as exc:
         raise ValueError(
