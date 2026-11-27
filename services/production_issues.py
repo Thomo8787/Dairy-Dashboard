@@ -41,6 +41,7 @@ _LABELS = {
     "milk_temp": "Milk temp",
     "weighbridge": "Weighbridge",
     "collection": "Collection",
+    "no_collection": "No load",
 }
 
 # ALH may be up to 1,000 L apart. Every other farm has to match exactly.
@@ -888,14 +889,23 @@ def _weighbridge_issues(
     return issues
 
 
-def _parkes_drop_issue(rows: list[dict[str, Any]], *, yesterday: dt.date) -> dict[str, Any] | None:
-    """A Parkes day more than 10% under the previous collection day."""
+def _parkes_drop_issue(
+    rows: list[dict[str, Any]],
+    *,
+    start: dt.date,
+    cutoff: dt.date,
+) -> dict[str, Any] | None:
+    """A Parkes day in this month or the last, more than 10% under the day before.
+
+    The same window as the weighbridge tiles: from the first of last month up to
+    7 days ago. The day it is compared with can sit just before that window.
+    """
     totals: dict[dt.date, int] = {}
     for row in rows:
         if str(row.get("farm") or "").strip().upper() != _PARKES_FARM:
             continue
         day = _parse_day(row.get("sample_date"))
-        if day is None:
+        if day is None or day >= cutoff:
             continue
         litres = _rounded_litres(row.get("litres_load"))
         if litres is None:
@@ -904,9 +914,11 @@ def _parkes_drop_issue(rows: list[dict[str, Any]], *, yesterday: dt.date) -> dic
             continue
         totals[day] = totals.get(day, 0) + litres
 
-    days = [day for day in sorted(totals) if day <= yesterday]
+    days = sorted(totals)
     drops: list[tuple[dt.date, dt.date, int, int]] = []
     for previous, day in zip(days, days[1:]):
+        if day < start:
+            continue
         before = totals[previous]
         current = totals[day]
         if before <= 0:
@@ -956,17 +968,107 @@ def _parkes_drop_issue(rows: list[dict[str, Any]], *, yesterday: dt.date) -> dic
     }
 
 
+def _parkes_collected_days(rows: list[dict[str, Any]], *, last_day: dt.date) -> set[dt.date]:
+    collected: set[dt.date] = set()
+    for row in rows:
+        if str(row.get("farm") or "").strip().upper() != _PARKES_FARM:
+            continue
+        day = _parse_day(row.get("sample_date"))
+        if day is None or day > last_day:
+            continue
+        litres = _rounded_litres(row.get("litres_load"))
+        if litres is not None and litres > 0:
+            collected.add(day)
+    return collected
+
+
+def _missing_day_phrase(days: list[dt.date]) -> str:
+    """Name each gap, joining consecutive days into one span."""
+    spans: list[tuple[dt.date, dt.date]] = []
+    start = previous = days[0]
+    for day in days[1:]:
+        if day == previous + dt.timedelta(days=1):
+            previous = day
+            continue
+        spans.append((start, previous))
+        start = previous = day
+    spans.append((start, previous))
+    parts = [
+        _fmt_date(opening) if opening == closing else f"{_fmt_date(opening)} to {_fmt_date(closing)}"
+        for opening, closing in spans
+    ]
+    return _join_and(parts)
+
+
+def _parkes_missing_issue(
+    rows: list[dict[str, Any]],
+    *,
+    start: dt.date,
+    last_day: dt.date,
+) -> dict[str, Any] | None:
+    """A Parkes calendar day in this month or the last with no litres.
+
+    The newest day included is 7 days ago, so a collection still being entered
+    is not listed.
+    """
+    if last_day < start:
+        return None
+    collected = _parkes_collected_days(rows, last_day=last_day)
+    missing: list[dt.date] = []
+    day = start
+    while day <= last_day:
+        if day not in collected:
+            missing.append(day)
+        day += dt.timedelta(days=1)
+    if not missing:
+        return None
+
+    latest = missing[-1]
+    count = len(missing)
+    named = _missing_day_phrase(missing)
+    if count == 1:
+        return {
+            "farm": _PARKES_FARM,
+            "metric": "no_collection",
+            "label": _LABELS["no_collection"],
+            "value": 1,
+            "baseline": None,
+            "value_text": "1",
+            "baseline_text": _fmt_date(latest),
+            "value_title": "Days with no load, up to 7 days ago",
+            "baseline_title": "The day with no load",
+            "comment": f"No load on {named}.",
+            "href": "/milk-quality/collections?farm=PRK",
+        }
+    return {
+        "farm": _PARKES_FARM,
+        "metric": "no_collection",
+        "label": _LABELS["no_collection"],
+        "value": count,
+        "baseline": None,
+        "value_text": f"{count:,}",
+        "baseline_text": _fmt_date(latest),
+        "value_title": "Days with no load, up to 7 days ago",
+        "baseline_title": "The latest day with no load",
+        "comment": f"No load on {named}.",
+        "href": "/milk-quality/collections?farm=PRK",
+    }
+
+
 def collection_issues(rows: list[dict[str, Any]], *, today: dt.date) -> list[dict[str, Any]]:
-    """Weighbridge gaps from this month and the last, and a short Parkes day."""
+    """Weighbridge gaps, a short Parkes day, and a Parkes day with no load."""
     cutoff = today - dt.timedelta(days=7)
-    yesterday = today - dt.timedelta(days=1)
+    start = _previous_month_start(today)
     issues = _weighbridge_issues(
         rows,
-        start=_previous_month_start(today),
+        start=start,
         cutoff=cutoff,
         today=today,
     )
-    parkes = _parkes_drop_issue(rows, yesterday=yesterday)
+    parkes = _parkes_drop_issue(rows, start=start, cutoff=cutoff)
     if parkes is not None:
         issues.append(parkes)
+    missing = _parkes_missing_issue(rows, start=start, last_day=cutoff)
+    if missing is not None:
+        issues.append(missing)
     return issues
