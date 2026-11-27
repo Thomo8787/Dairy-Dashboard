@@ -40,6 +40,7 @@ _LABELS = {
     "scc": "SCC",
     "milk_temp": "Milk temp",
     "weighbridge": "Weighbridge",
+    "no_weighbridge": "No weighbridge",
     "collection": "Collection",
     "no_collection": "No load",
 }
@@ -47,7 +48,9 @@ _LABELS = {
 # ALH may be up to 1,000 L apart. Every other farm has to match exactly.
 _WEIGHBRIDGE_TOLERANCE_L = 1000
 _PARKES_FARM = "PRK"
-_PARKES_DROP = 0.10
+_COLLECTION_FARMS = ("ALH", "BNK", "SFR", "COF", "PRK")
+_WEIGHBRIDGE_FARMS = ("ALH", "BNK", "SFR", "COF")
+_DAY_SWING = 0.10
 
 
 def _num(value: Any) -> float | None:
@@ -889,83 +892,226 @@ def _weighbridge_issues(
     return issues
 
 
-def _parkes_drop_issue(
+def _load_phrase(day: dt.date, load: Any, litres: int) -> str:
+    load_bit = ""
+    if load is not None and load != "":
+        try:
+            load_bit = f" load {int(load)}"
+        except (TypeError, ValueError):
+            load_bit = f" load {load}"
+    return f"{_fmt_date(day)}{load_bit} ({_fmt_litres(litres)} L)"
+
+
+def _unmatched_weighbridge_issues(
     rows: list[dict[str, Any]],
     *,
     start: dt.date,
     cutoff: dt.date,
-) -> dict[str, Any] | None:
-    """A Parkes day in this month or the last, more than 10% under the day before.
-
-    The same window as the weighbridge tiles: from the first of last month up to
-    7 days ago. The day it is compared with can sit just before that window.
-    """
-    totals: dict[dt.date, int] = {}
+    today: dt.date,
+) -> list[dict[str, Any]]:
+    """A load with litres and no weighbridge, in the same window as a mismatch."""
+    span = _month_span(start, today)
+    found: dict[str, list[tuple[dt.date, Any, int]]] = {}
     for row in rows:
-        if str(row.get("farm") or "").strip().upper() != _PARKES_FARM:
+        farm = str(row.get("farm") or "").strip().upper()
+        if farm not in _WEIGHBRIDGE_FARMS:
             continue
         day = _parse_day(row.get("sample_date"))
-        if day is None or day >= cutoff:
+        if day is None or day < start or day >= cutoff:
             continue
         litres = _rounded_litres(row.get("litres_load"))
-        if litres is None:
-            litres = _rounded_litres(row.get("litres_weighbridge"))
-        if litres is None:
+        bridge = _rounded_litres(row.get("litres_weighbridge"))
+        if litres is None or bridge is not None:
             continue
-        totals[day] = totals.get(day, 0) + litres
+        found.setdefault(farm, []).append((day, row.get("load_number"), litres))
 
-    days = sorted(totals)
-    drops: list[tuple[dt.date, dt.date, int, int]] = []
-    for previous, day in zip(days, days[1:]):
-        if day < start:
+    issues: list[dict[str, Any]] = []
+    for farm in _WEIGHBRIDGE_FARMS:
+        loads = found.get(farm) or []
+        if not loads:
             continue
-        before = totals[previous]
-        current = totals[day]
-        if before <= 0:
-            continue
-        if (before - current) / before > _PARKES_DROP:
-            drops.append((day, previous, current, before))
-    if not drops:
-        return None
-
-    def phrase(day: dt.date, previous: dt.date, current: int, before: int) -> str:
-        percent = int(round(100 * (before - current) / before))
-        return (
-            f"{_fmt_date(day)} was {_fmt_litres(current)} L, {percent}% below "
-            f"{_fmt_date(previous)} ({_fmt_litres(before)} L)"
+        loads.sort(key=lambda item: (item[0], item[1] if isinstance(item[1], int) else 0))
+        largest = max(litres for _day, _load, litres in loads)
+        listed = _join_and(_load_phrase(day, load, litres) for day, load, litres in loads)
+        count = len(loads)
+        loads_word = "load" if count == 1 else "loads"
+        verb = "has" if count == 1 else "have"
+        issues.append(
+            {
+                "farm": farm,
+                "metric": "no_weighbridge",
+                "label": _LABELS["no_weighbridge"],
+                "value": count,
+                "baseline": largest,
+                "value_text": f"{count:,}",
+                "baseline_text": f"{largest:,} L",
+                "value_title": f"Loads in {span}, older than 7 days, with no weighbridge",
+                "baseline_title": "Largest load with no weighbridge",
+                "comment": f"{count} {loads_word} in {span} {verb} no weighbridge: {listed}.",
+                "href": f"/milk-quality/collections?farm={farm}",
+            }
         )
+    return issues
 
-    if len(drops) == 1:
-        day, previous, current, before = drops[0]
-        return {
-            "farm": _PARKES_FARM,
-            "metric": "collection",
-            "label": _LABELS["collection"],
-            "value": current,
-            "baseline": before,
-            "value_text": f"{current:,}",
-            "baseline_text": f"{before:,}",
-            "value_title": f"Litres on {_fmt_date(day)}",
-            "baseline_title": f"Litres on the previous collection day, {_fmt_date(previous)}",
-            "comment": f"{phrase(day, previous, current, before)}.",
-            "href": "/milk-quality/collections?farm=PRK",
-        }
 
-    worst = max(drops, key=lambda item: (item[3] - item[2]) / item[3])
-    worst_percent = int(round(100 * (worst[3] - worst[2]) / worst[3]))
-    return {
-        "farm": _PARKES_FARM,
-        "metric": "collection",
-        "label": _LABELS["collection"],
-        "value": len(drops),
-        "baseline": worst_percent,
-        "value_text": f"{len(drops):,}",
-        "baseline_text": f"{worst_percent}%",
-        "value_title": "Days more than 10% below the previous collection day",
-        "baseline_title": "Largest drop against the previous day",
-        "comment": f"{_join_and(phrase(*item) for item in drops)}.",
-        "href": "/milk-quality/collections?farm=PRK",
-    }
+def _row_litres(row: dict[str, Any]) -> int | None:
+    litres = _rounded_litres(row.get("litres_load"))
+    if litres is None:
+        return _rounded_litres(row.get("litres_weighbridge"))
+    return litres
+
+
+def _same_shift(actual: int, target: int) -> bool:
+    """True when two litre swings point the same way and are about the same size."""
+    if actual == 0 or target == 0 or (actual > 0) != (target > 0):
+        return False
+    allowance = max(_WEIGHBRIDGE_TOLERANCE_L, int(round(abs(target) * 0.15)))
+    return abs(actual - target) <= allowance
+
+
+def _swing_sentence(
+    day: dt.date,
+    previous: dt.date,
+    current: int,
+    before: int,
+    ordered: list[dt.date],
+    totals: dict[dt.date, int],
+) -> str:
+    gap = current - before
+    percent = int(round(100 * abs(gap) / before))
+    direction = "above" if gap > 0 else "below"
+    kind = "extra" if gap > 0 else "missing"
+    lead = (
+        f"{_fmt_date(day)} was {_fmt_litres(current)} L, {percent}% {direction} "
+        f"{_fmt_date(previous)} ({_fmt_litres(before)} L)"
+    )
+    notes: list[str] = []
+    previous_at = ordered.index(previous)
+    if previous_at > 0:
+        earlier = ordered[previous_at - 1]
+        earlier_litres = totals[earlier]
+        previous_shift = before - earlier_litres
+        moved = _same_shift(previous_shift, -gap) or _same_shift(
+            current - earlier_litres, -previous_shift
+        )
+        if moved and previous_shift != 0:
+            if previous_shift > 0:
+                notes.append(
+                    f"the missing litres look like they were on {_fmt_date(previous)}, "
+                    f"which was {_fmt_litres(previous_shift)} L above {_fmt_date(earlier)}"
+                )
+            else:
+                notes.append(
+                    f"the extra litres look like they came from {_fmt_date(previous)}, "
+                    f"which was {_fmt_litres(-previous_shift)} L below {_fmt_date(earlier)}"
+                )
+    day_at = ordered.index(day)
+    if day_at + 1 < len(ordered):
+        nxt = ordered[day_at + 1]
+        nxt_litres = totals[nxt]
+        if _same_shift(nxt_litres - before, -gap):
+            if gap < 0:
+                notes.append(
+                    f"the missing litres look like they were entered on {_fmt_date(nxt)} "
+                    f"({_fmt_litres(nxt_litres)} L)"
+                )
+            else:
+                notes.append(
+                    f"the extra litres look like they came from {_fmt_date(nxt)} "
+                    f"({_fmt_litres(nxt_litres)} L)"
+                )
+    if not notes:
+        return f"{lead}. The day before and the day after do not account for the {kind} litres."
+    return f"{lead}. {_join_and(note[0].upper() + note[1:] for note in notes)}."
+
+
+def _day_swing_issues(
+    rows: list[dict[str, Any]],
+    *,
+    start: dt.date,
+    cutoff: dt.date,
+) -> list[dict[str, Any]]:
+    """A day's litres more than 10% off the previous collection day.
+
+    One tile per farm. The comment checks the day before and the day after for
+    the same number of litres the other way. Parkes uses this tile too.
+    """
+    totals: dict[str, dict[dt.date, int]] = {}
+    for row in rows:
+        farm = str(row.get("farm") or "").strip().upper()
+        if farm not in _COLLECTION_FARMS:
+            continue
+        day = _parse_day(row.get("sample_date"))
+        litres = _row_litres(row)
+        if day is None or litres is None:
+            continue
+        bucket = totals.setdefault(farm, {})
+        bucket[day] = bucket.get(day, 0) + litres
+
+    issues: list[dict[str, Any]] = []
+    for farm in _COLLECTION_FARMS:
+        by_day = totals.get(farm) or {}
+        ordered = sorted(by_day)
+        swings: list[tuple[dt.date, dt.date, int, int]] = []
+        for index, day in enumerate(ordered):
+            if index == 0 or day < start or day >= cutoff:
+                continue
+            previous = ordered[index - 1]
+            before = by_day[previous]
+            current = by_day[day]
+            if before <= 0:
+                continue
+            if abs(current - before) / before <= _DAY_SWING:
+                continue
+            # A day that only returns to the day before last is the other side of
+            # that swing, not a second problem.
+            if index >= 2:
+                earlier_litres = by_day[ordered[index - 2]]
+                if earlier_litres > 0 and abs(current - earlier_litres) / earlier_litres <= _DAY_SWING:
+                    continue
+            swings.append((day, previous, current, before))
+        if not swings:
+            continue
+        sentences = [
+            _swing_sentence(day, previous, current, before, ordered, by_day)
+            for day, previous, current, before in swings
+        ]
+        if len(swings) == 1:
+            day, previous, current, before = swings[0]
+            issues.append(
+                {
+                    "farm": farm,
+                    "metric": "collection",
+                    "label": _LABELS["collection"],
+                    "value": current,
+                    "baseline": before,
+                    "value_text": f"{current:,}",
+                    "baseline_text": f"{before:,}",
+                    "value_title": f"Litres on {_fmt_date(day)}",
+                    "baseline_title": f"Litres on the previous collection day, {_fmt_date(previous)}",
+                    "comment": sentences[0],
+                    "href": f"/milk-quality/collections?farm={farm}",
+                }
+            )
+            continue
+        worst = max(swings, key=lambda item: abs(item[2] - item[3]) / item[3])
+        worst_percent = int(round(100 * abs(worst[2] - worst[3]) / worst[3]))
+        issues.append(
+            {
+                "farm": farm,
+                "metric": "collection",
+                "label": _LABELS["collection"],
+                "value": len(swings),
+                "baseline": worst_percent,
+                "value_text": f"{len(swings):,}",
+                "baseline_text": f"{worst_percent}%",
+                "value_title": "Days more than 10% off the previous collection day",
+                "baseline_title": "Largest change against the previous day",
+                "comment": " ".join(sentences),
+                "href": f"/milk-quality/collections?farm={farm}",
+            }
+        )
+    return issues
 
 
 def _parkes_collected_days(rows: list[dict[str, Any]], *, last_day: dt.date) -> set[dt.date]:
@@ -1056,7 +1202,7 @@ def _parkes_missing_issue(
 
 
 def collection_issues(rows: list[dict[str, Any]], *, today: dt.date) -> list[dict[str, Any]]:
-    """Weighbridge gaps, a short Parkes day, and a Parkes day with no load."""
+    """Weighbridge gaps, a day far off the day before, and a Parkes day with no load."""
     cutoff = today - dt.timedelta(days=7)
     start = _previous_month_start(today)
     issues = _weighbridge_issues(
@@ -1065,9 +1211,10 @@ def collection_issues(rows: list[dict[str, Any]], *, today: dt.date) -> list[dic
         cutoff=cutoff,
         today=today,
     )
-    parkes = _parkes_drop_issue(rows, start=start, cutoff=cutoff)
-    if parkes is not None:
-        issues.append(parkes)
+    issues.extend(
+        _unmatched_weighbridge_issues(rows, start=start, cutoff=cutoff, today=today)
+    )
+    issues.extend(_day_swing_issues(rows, start=start, cutoff=cutoff))
     missing = _parkes_missing_issue(rows, start=start, last_day=cutoff)
     if missing is not None:
         issues.append(missing)

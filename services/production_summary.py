@@ -404,7 +404,7 @@ def get_production_summary(*, as_of: dt.date | None = None) -> dict[str, Any]:
         "completed_through": completed_through.isoformat(),
         "href": "/milk-quality/collections",
         "farms": farms_out,
-        "collection_issues": "parkes-missing",
+        "collection_issues": "swing-and-unmatched",
         "issues": issues,
         "bactoscan_chart": _build_quality_chart(
             trend, window_end=completed_through, key="bactoscan"
