@@ -982,6 +982,8 @@
   const WEIGHBRIDGE_TOLERANCE_L = 1000;
 
   function weighbridgeMatch(row) {
+    // Parkes has no weighbridge, so a blank figure is not a mismatch.
+    if (String(row.farm || "").toUpperCase() === "PRK") return "none";
     const litres = volumeKey(row.litres_load);
     const bridge = volumeKey(row.litres_weighbridge);
     if (litres == null && bridge == null) return "none";
