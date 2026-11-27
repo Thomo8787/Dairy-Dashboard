@@ -818,6 +818,8 @@ def _weighbridge_issues(rows: list[dict[str, Any]], *, cutoff: dt.date) -> list[
         day = _parse_day(row.get("sample_date"))
         if day is None or day >= cutoff:
             continue
+        if row.get("manual_match"):
+            continue
         litres = _rounded_litres(row.get("litres_load"))
         bridge = _rounded_litres(row.get("litres_weighbridge"))
         if litres is None or bridge is None:

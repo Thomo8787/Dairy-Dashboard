@@ -794,6 +794,12 @@ def match_collection_rows(row_ids: list[int]) -> dict[str, Any]:
             survivor.sample_missing = False
         if _has_volume(survivor) and _has_quality(survivor):
             survivor.nml_matched = True
+        if (
+            survivor.litres_load is not None
+            and survivor.litres_weighbridge is not None
+            and any(row.litres_weighbridge is not None for row in rows)
+        ):
+            survivor.weighbridge_confirmed = True
         survivor.match_parts = json.dumps({"rows": parts})
         session.flush()
         return {"id": survivor.id, "sample_id": _visible_sample(survivor), "rows_matched": len(ids)}

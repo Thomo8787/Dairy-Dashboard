@@ -300,7 +300,8 @@
           collection date (or the day either side).           The same sample can be used on
           another load after you confirm it. Each of those loads gets a weighbridge
           tick when its litres fit. Match joins a load with its lab or
-          weighbridge row and keeps that sample number. Unmatch splits them again.
+          weighbridge row, keeps that sample number, and turns the weighbridge
+          tick green. Unmatch splits them again.
           If the sample number is blank, it
           matches the date and the ticket litres instead. When it does not, that
           volume stays on its own row. Download the files from the
@@ -1003,6 +1004,8 @@
     const bridge = volumeKey(row.litres_weighbridge);
     if (litres == null && bridge == null) return "none";
     if (litres == null || bridge == null) return "mismatch";
+    // A row joined with Match is accepted, even when the litres are not exact.
+    if (row.manual_match) return "match";
     // ALH: sample-confirmed and within 1000 L. Other farms: exact litres only.
     if (String(row.farm || "").toUpperCase() === "ALH") {
       const within = Math.abs(litres - bridge) <= WEIGHBRIDGE_TOLERANCE_L;
@@ -1019,9 +1022,11 @@
     if (status === "none") return text;
     const alh = String(row.farm || "").toUpperCase() === "ALH";
     const mark = status === "match"
-      ? (alh
+      ? (row.manual_match
+        ? '<span class="nml-mark ok" title="Matched by hand" aria-label="Weighbridge matched">✓</span>'
+        : (alh
         ? '<span class="nml-mark ok" title="Sample matched; weighbridge within 1000 L of litres" aria-label="Weighbridge confirmed">✓</span>'
-        : '<span class="nml-mark ok" title="Weighbridge matches litres" aria-label="Weighbridge matches litres">✓</span>')
+        : '<span class="nml-mark ok" title="Weighbridge matches litres" aria-label="Weighbridge matches litres">✓</span>'))
       : (alh
         ? '<span class="nml-mark bad" title="Provisional or outside 1000 L — waiting for Müller sample match" aria-label="Weighbridge not confirmed">✕</span>'
         : '<span class="nml-mark bad" title="Weighbridge does not match litres" aria-label="Weighbridge does not match litres">✕</span>');

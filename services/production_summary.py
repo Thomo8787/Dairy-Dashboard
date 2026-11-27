@@ -330,6 +330,7 @@ def _collection_rows() -> list[dict[str, Any]]:
                 NmlMilkResult.load_number,
                 NmlMilkResult.litres_load,
                 NmlMilkResult.litres_weighbridge,
+                NmlMilkResult.match_parts,
             ).where(NmlMilkResult.sample_date.isnot(None))
         ).all()
     return [
@@ -339,8 +340,9 @@ def _collection_rows() -> list[dict[str, Any]]:
             "load_number": load,
             "litres_load": litres,
             "litres_weighbridge": bridge,
+            "manual_match": bool(matched),
         }
-        for farm, day, load, litres, bridge in found
+        for farm, day, load, litres, bridge, matched in found
     ]
 
 
