@@ -644,6 +644,8 @@ html, body {
   display: flex;
   align-items: center;
   gap: 0.9rem 1.15rem;
+  width: 100%;
+  max-width: calc(13rem + 46rem + 8rem + 1.15rem + 1.15rem + 0.85rem + 0.85rem);
   margin: 0 0 0.75rem;
   padding: 0.65rem 0.85rem;
   background: #fee2e2;
@@ -657,6 +659,14 @@ html, body {
 
 .home-issues-group + .home-issues-group {
   margin-top: 0.85rem;
+}
+
+#home-issues .home-farm-label {
+  margin: 0 0 0.7rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #1e3a5f;
 }
 
 #home-issues .home-widget {
@@ -680,7 +690,7 @@ html, body {
 .home-issue-comment {
   margin: 0;
   flex: 1 1 16rem;
-  max-width: 46rem;
+  min-width: 0;
   color: #7f1d1d;
   font-size: 0.95rem;
   line-height: 1.4;
@@ -730,6 +740,8 @@ html, body {
   .home-issue {
     display: block;
     position: relative;
+    width: auto;
+    max-width: none;
   }
 
   .home-issue-comment {
