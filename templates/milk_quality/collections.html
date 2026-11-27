@@ -288,8 +288,9 @@
           Upload Müller writes the tanker litres from a Müller CSV onto the weighbridge
           column. A weighbridge that is a different size from the ticket, or more than about
           1,000 L away, is cleared so the next import can place it on the right load.
-          A load with a sample number and no ticket is added as a new line.
-          When that ticket is entered, its litres fill the same line. The farm litres
+          A weighbridge that does not land on a load is added as its own row, including
+          a blank sample, a repeated sample, a volume under 1,000 L, or one that could
+          match more than one load. Match joins that row to the load. The farm litres
           already on a ticket are left unchanged. When two loads on the same farm and day are crossed,
           so each weighbridge equals the other load’s litres, those litres are swapped
           and both show a green tick. A load that already matches is left as it is, and
@@ -300,8 +301,8 @@
           another load after you confirm it. Match joins a load with its lab or
           weighbridge row and keeps that sample number. Unmatch splits them again.
           If the sample number is blank, it
-          matches the date and the ticket litres instead. A blank sample with no ticket,
-          or more than one possible ticket, is left unchanged. Download the files from the
+          matches the date and the ticket litres instead. When it does not, that
+          volume stays on its own row. Download the files from the
           Müller portal by going to COLLECTIONS, then click the magnifying glass beside
           the month you want. From Actions, select Download and save it as a CSV. Save
           it with the farm code at the start, for example ALH_. The portal accounts are
@@ -1293,13 +1294,10 @@
       const res = await fetch("/milk-quality/api/collections/muller", { method: "POST", body });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Müller upload failed");
-      let message = "Müller: " + (data.rows_updated || 0) + " weighbridge value(s) written, " +
-        (data.rows_unmatched || 0) + " with no matching ticket.";
+      let message = "Müller: " + (data.rows_updated || 0) + " written onto a load, " +
+        (data.rows_inserted || 0) + " added on their own row to match.";
       if (data.rows_cleared) {
         message += " " + data.rows_cleared + " weighbridge value(s) cleared because they no longer fit the ticket.";
-      }
-      if (data.rows_ambiguous) {
-        message += " " + data.rows_ambiguous + " could not be matched to a single ticket.";
       }
       const fileErrors = (data.errors || []).filter((item) => item && item.error);
       if (fileErrors.length) {

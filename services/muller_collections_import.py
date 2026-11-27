@@ -7,7 +7,8 @@ and the same litres.
 
 ALH uses volume-tolerant matching (within 1000 L / 5%), sample override, and
 provisional blank-sample order matching. Other farms match by sample ID and
-exact ticket litres only.
+exact ticket litres only. A portal row that does not land on a load is still
+added as its own row, so the volume can be matched by hand.
 """
 
 from __future__ import annotations
@@ -363,6 +364,17 @@ def _same_sample(row: NmlMilkResult, sample_id: str) -> bool:
     )
 
 
+def _same_portal_volume(row: NmlMilkResult, record: dict[str, Any]) -> bool:
+    """True when this spare row is the same portal collection, not a different volume."""
+    if _litres_key(row.litres_weighbridge) != _litres_key(record.get("litres")):
+        return False
+    sample = normalize_sample_id(record.get("sample_id") or "")
+    if not sample:
+        return bool(row.sample_missing)
+    shown = str(getattr(row, "shown_sample_id", None) or "").strip()
+    return _same_sample(row, sample) or normalize_sample_id(shown) == sample
+
+
 def _sample_taken(
     rows: list[NmlMilkResult],
     *,
@@ -470,7 +482,7 @@ def _claim_blank_by_size(
             None,
         )
         if chosen is None or chosen.id is None:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         claimed[chosen.id].append((record, chosen, False, False))
 
@@ -486,7 +498,7 @@ def _match_blank_records(
     for record in blank:
         day = _primary_date(record)
         if day is None:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         by_day[day].append(record)
 
@@ -516,7 +528,7 @@ def _match_blank_exact(
     for record in blank:
         target = _litres_key(record["litres"])
         if target is None:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         close = _close_dates(record["actual_date"], record["payment_date"])
         hits = [
@@ -530,9 +542,9 @@ def _match_blank_exact(
         if len(hits) == 1:
             claimed[hits[0].id].append((record, hits[0], True, False))
         elif len(hits) > 1:
-            unmatched.append(_row_brief(record, hits))
+            _keep_brief(unmatched, record, hits)
         else:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
 
 
 def _match_simple_ticket(
@@ -598,7 +610,7 @@ def _claim_sampled_simple(
         candidates = index.get(record["sample_id"], [])
         chosen, status = _match_simple_ticket(candidates, record)
         if status == "ambiguous":
-            ambiguous.append(_row_brief(record, candidates))
+            _keep_brief(ambiguous, record, candidates)
             continue
         if status == "matched" and chosen is not None and chosen.id is not None:
             if _is_orphan_bridge_row(chosen):
@@ -625,7 +637,7 @@ def _claim_sampled_simple(
             fill_temp=fill_temp,
         )
         if created is None:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         rows.append(created)
         index.setdefault(record["sample_id"], []).append(created)
@@ -669,7 +681,7 @@ def _claim_sampled_records(
             sample_hits, record["actual_date"], record["payment_date"]
         )
         if status == "ambiguous":
-            ambiguous.append(_row_brief(record, sample_hits))
+            _keep_brief(ambiguous, record, sample_hits)
             continue
 
         if (
@@ -741,7 +753,7 @@ def _claim_sampled_records(
 
         litres = _litres_key(record["litres"])
         if litres is None or litres < _MIN_INSERT_LITRES:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         day = _primary_date(record)
         sample_key = (
@@ -750,7 +762,7 @@ def _claim_sampled_records(
             else None
         )
         if sample_key is not None and sample_key in samples_owned:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         # A real ticket already has this sample — don't invent a second line.
         if day is not None and any(
@@ -760,7 +772,7 @@ def _claim_sampled_records(
             and _same_sample(other, record["sample_id"])
             for other in rows
         ):
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
 
         if day is not None:
@@ -780,13 +792,131 @@ def _claim_sampled_records(
             fill_temp=fill_temp,
         )
         if created is None:
-            unmatched.append(_row_brief(record))
+            _keep_brief(unmatched, record)
             continue
         rows.append(created)
         index.setdefault(record["sample_id"], []).append(created)
         inserted += 1
         used_records.add(id(record))
 
+    return inserted
+
+
+def _keep_brief(
+    bucket: list[dict[str, Any]],
+    record: dict[str, Any],
+    rows: list[NmlMilkResult] | None = None,
+    *,
+    held_litres: Any = None,
+) -> None:
+    """Record a portal row that was not written onto a load, and keep the row itself."""
+    brief = _row_brief(record, rows)
+    brief["_record"] = record
+    if held_litres is not None:
+        brief["_held_litres"] = held_litres
+    bucket.append(brief)
+
+
+def _strip_private(briefs: list[dict[str, Any]]) -> None:
+    for brief in briefs:
+        brief.pop("_record", None)
+        brief.pop("_held_litres", None)
+
+
+def _shown_sample(row: NmlMilkResult) -> str:
+    if row.sample_missing:
+        return ""
+    shown = str(getattr(row, "shown_sample_id", None) or "").strip()
+    if shown:
+        return normalize_sample_id(shown)
+    return normalize_sample_id(row.sample_id)
+
+
+def _stored_sample_ids(
+    existing: list[NmlMilkResult], farm: str, day: dt.date
+) -> set[str]:
+    return {
+        str(row.sample_id or "").strip()
+        for row in existing
+        if row.farm == farm and row.sample_date == day
+    }
+
+
+def _unique_stored_sample(
+    existing: list[NmlMilkResult], farm: str, day: dt.date, sample: str
+) -> tuple[str, str | None]:
+    """Return (stored id, shown sample). A repeat keeps the visible number."""
+    taken = _stored_sample_ids(existing, farm, day)
+    if sample not in taken:
+        return sample, None
+    n = 2
+    while f"{sample}#{n}" in taken:
+        n += 1
+    return f"{sample}#{n}", sample
+
+
+def _unique_blank_sample(
+    existing: list[NmlMilkResult], farm: str, day: dt.date
+) -> str:
+    taken = _stored_sample_ids(existing, farm, day)
+    n = 1
+    while f"WB{n}" in taken:
+        n += 1
+    return f"WB{n}"
+
+
+def _keep_spare_weighbridges(
+    session: Any,
+    farm: str,
+    rows: list[NmlMilkResult],
+    leftovers: list[dict[str, Any]],
+    *,
+    source_file: str,
+    fill_temp: bool,
+) -> int:
+    """Add a row for every portal volume that was not written onto a load.
+
+    A volume already on the table for that day and sample is left as it is,
+    so uploading the same file again does not create a second copy.
+    """
+    budget: dict[tuple[dt.date, str, int], int] = defaultdict(int)
+    for row in rows:
+        if row.farm != farm or row.sample_date is None:
+            continue
+        litres = _litres_key(row.litres_weighbridge)
+        if litres is None:
+            continue
+        budget[(row.sample_date, _shown_sample(row), litres)] += 1
+
+    inserted = 0
+    for brief in leftovers:
+        record = brief.get("_record")
+        if not isinstance(record, dict):
+            continue
+        day = _primary_date(record)
+        litres = _litres_key(record.get("litres"))
+        if day is None or litres is None:
+            continue
+        sample = normalize_sample_id(record.get("sample_id") or "")
+        held = _litres_key(brief.get("_held_litres"))
+        if held is not None and held == litres:
+            continue
+        key = (day, sample, litres)
+        if budget[key] > 0:
+            budget[key] -= 1
+            continue
+        created = _insert_weighbridge_row(
+            session,
+            farm,
+            record,
+            list(rows),
+            source_file=source_file,
+            fill_temp=fill_temp,
+        )
+        if created is None:
+            continue
+        rows.append(created)
+        inserted += 1
     return inserted
 
 
@@ -818,12 +948,26 @@ def _insert_weighbridge_row(
     source_file: str,
     fill_temp: bool,
 ) -> NmlMilkResult | None:
-    """Add a collection that has Müller litres and a sample number, but no farm ticket yet."""
-    sample_id = record.get("sample_id") or ""
+    """Add a Müller volume that did not land on a farm ticket.
+
+    A repeated sample keeps the same visible number. A blank sample is stored
+    as its own row with no sample number showing.
+    """
     sample_date = _placeholder_date(record)
     producer_ref = FARM_PRODUCER_REF.get(farm)
-    if not sample_id or sample_date is None or not producer_ref:
+    litres = record.get("litres")
+    if sample_date is None or not producer_ref or litres is None:
         return None
+    raw_sample = normalize_sample_id(record.get("sample_id") or "")
+    shown_sample: str | None = None
+    sample_missing = False
+    if raw_sample:
+        sample_id, shown_sample = _unique_stored_sample(
+            existing, farm, sample_date, raw_sample
+        )
+    else:
+        sample_id = _unique_blank_sample(existing, farm, sample_date)
+        sample_missing = True
     taken = [
         row.load_number
         for row in existing
@@ -834,11 +978,12 @@ def _insert_weighbridge_row(
         producer_ref=producer_ref,
         sample_date=sample_date,
         sample_id=sample_id,
+        shown_sample_id=shown_sample,
         load_number=(max(taken) if taken else 0) + 1,
-        litres_weighbridge=record["litres"],
-        weighbridge_confirmed=True,
+        litres_weighbridge=litres,
+        weighbridge_confirmed=not sample_missing,
         report_month=f"{calendar.month_name[sample_date.month]} {sample_date.year}",
-        sample_missing=False,
+        sample_missing=sample_missing,
         nml_matched=False,
         source="muller",
         source_file=source_file,
@@ -932,10 +1077,11 @@ def apply_muller_records(
                         or _within_tolerance(row.litres_load, item[0]["litres"])
                     ]
                     if len(fitting) == 1:
+                        for record, _ticket, _ok, _ov in claims:
+                            if record is not fitting[0][0]:
+                                _keep_brief(unmatched, record, [row])
                         claims = fitting
                     else:
-                        for record, _row, _ok, _ov in claims:
-                            ambiguous.append(_row_brief(record, [row]))
                         if (
                             repair_conflicts
                             and row.litres_load is None
@@ -949,6 +1095,13 @@ def apply_muller_records(
                                 }
                                 if row.temp_c in temps:
                                     row.temp_c = None
+                        for record, _row, _ok, _ov in claims:
+                            _keep_brief(
+                                ambiguous,
+                                record,
+                                [row],
+                                held_litres=row.litres_weighbridge,
+                            )
                         continue
 
                 # Confirmed sample claim wins over a provisional one on the same ticket.
@@ -961,19 +1114,17 @@ def apply_muller_records(
                     override = any(item[3] for item in confirmed_claims)
                     record = confirmed_claims[-1][0]
 
-                # Fold Müller-only duplicates into this ticket before adopting the sample.
+                # Fold a spare copy of this same portal volume into the ticket.
+                # A different volume is left on its own row, even when it is close.
                 day = row.sample_date
-                if day is not None and record["sample_id"]:
+                if day is not None:
                     orphans = [
                         other
                         for other in list(rows)
                         if other.id != row.id
                         and other.sample_date == day
                         and _is_orphan_bridge_row(other)
-                        and (
-                            _same_sample(other, record["sample_id"])
-                            or _within_tolerance(row.litres_load, other.litres_weighbridge)
-                        )
+                        and _same_portal_volume(other, record)
                     ]
                     for orphan in orphans:
                         _merge_orphan_into(session, row, orphan)
@@ -997,7 +1148,7 @@ def apply_muller_records(
                     session.flush()
 
                 if not weighbridge_fits(row.litres_load, record["litres"]):
-                    unmatched.append(_row_brief(record, [row]))
+                    _keep_brief(unmatched, record, [row])
                     continue
                 row.litres_weighbridge = record["litres"]
                 row.weighbridge_confirmed = confirmed
@@ -1019,6 +1170,16 @@ def apply_muller_records(
                     )
                     date_gaps.append(gap)
 
+            inserted += _keep_spare_weighbridges(
+                session,
+                farm,
+                rows,
+                list(unmatched) + list(ambiguous),
+                source_file=source_file,
+                fill_temp=fill_temp,
+            )
+            _strip_private(unmatched)
+            _strip_private(ambiguous)
             if apply:
                 from services.nml_manual import join_lab_and_weighbridge_rows
 
@@ -1128,6 +1289,7 @@ def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
                 "rows_parsed": item["rows_parsed"],
                 "rows_updated": item["rows_updated"],
                 "rows_cleared": item.get("rows_cleared", 0),
+                "rows_inserted": item.get("rows_inserted", 0),
                 "rows_unmatched": item["rows_unmatched"],
                 "rows_ambiguous": item["rows_ambiguous"],
             }
@@ -1136,6 +1298,7 @@ def import_muller_uploads(files: list[tuple[str, bytes]]) -> dict[str, Any]:
         "errors": errors,
         "rows_updated": sum(item["rows_updated"] for item in results),
         "rows_cleared": sum(item.get("rows_cleared", 0) for item in results),
+        "rows_inserted": sum(item.get("rows_inserted", 0) for item in results),
         "rows_unmatched": sum(item["rows_unmatched"] for item in results),
         "rows_ambiguous": sum(item["rows_ambiguous"] for item in results),
     }
