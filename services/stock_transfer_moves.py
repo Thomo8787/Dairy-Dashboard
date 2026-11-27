@@ -5,7 +5,7 @@ The farm she leaves records SOLD and the farm she joins records an entry date
 or in neither. Stock Accruals uses one date for both farms:
 
 - She leaves ALH or BNK with a MOVE into pen 27 (Park Hall), pen 140 (The
-  Parkes) or pen 150 (any other farm) from 30 days before to 14 days after the sale and entry dates:
+  Parkes) or pen 150 (any other farm) from 30 days before to 30 days after the sale and entry dates:
   the date of that move.
 - She joins within 14 days after the sale: the sold date.
 - She joins before the sale and the farm she left still records events of its
@@ -37,7 +37,7 @@ from services.farms import FARMS_BY_CODE
 GAP_DAYS = 14
 FRESH_MATCH_DAYS = 7
 LEAVING_PEN_DAYS_BEFORE = 30
-LEAVING_PEN_DAYS_AFTER = 14
+LEAVING_PEN_DAYS_AFTER = 30
 ADJUST_SALE_MOVED = "sale_moved"
 ADJUST_FRESH_IGNORED = "fresh_ignored"
 _EXIT_EVENTS = ("SOLD", "DIED")
